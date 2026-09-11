@@ -122,4 +122,22 @@ export const state = {
   // creating systems the level doesn't need (car, depot, extraction).
   skipCar: false,
   skipDepot: false,
+
+  // Level 2 — "The Chase" mission state (girl NPC, purchases). All
+  // default-off/inactive so Levels 1/3, which never touch them, are
+  // unaffected: adrenalineActive is false so the movement multiplier
+  // stays 1.0, girlPos/compassOverride are null so the compass and
+  // radar keep their stock depot/extraction behavior.
+  girlPos: null,           // live THREE.Vector3 of the girl NPC (Level 2 only)
+  girlCaught: false,       // win condition
+  portReached: false,      // lose condition — she made the pier beacon
+  hasRadarUpgrade: false,  // bought from the radar machine — girl intel on
+  adrenalineCharges: 0,    // stored, unactivated purchases
+  adrenalineActive: false, // currently boosted
+  adrenalineTimer: 0,      // seconds of boost left
+
+  // Compass retarget — when a level module sets this, updateCompass()
+  // points here instead of depot/extraction.
+  // Shape: { pos: THREE.Vector3, label: string }
+  compassOverride: null,
 };

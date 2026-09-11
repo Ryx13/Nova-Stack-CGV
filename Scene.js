@@ -654,8 +654,13 @@ export function updateObjectiveHUD() {
   }
 }
 export function updateCompass(pos, forward) {
-  const target = state.ingredientCollected ? extractPos : DEPOT_POS;
-  const label = state.ingredientCollected ? 'EXTRACTION' : 'DEPOT';
+  // A level module can retarget the compass by setting state.compassOverride
+  // (Level 2: points at the port until the radar is bought, then the girl).
+  // Levels 1/3 never set it, so they keep the depot/extraction behavior.
+  const target = state.compassOverride ? state.compassOverride.pos
+    : state.ingredientCollected ? extractPos : DEPOT_POS;
+  const label = state.compassOverride ? state.compassOverride.label
+    : state.ingredientCollected ? 'EXTRACTION' : 'DEPOT';
   dom.compass.classList.remove('hidden');
   const dx = target.x - pos.x, dz = target.z - pos.z;
   const dist = Math.hypot(dx, dz);
@@ -735,6 +740,20 @@ export function drawRadar(selfPos, selfYaw) {
     const px = (rx * scale / RADAR_RANGE) * (w / 2), py = (rz * scale / RADAR_RANGE) * (h / 2);
     radarCtx.fillStyle = '#ffaa22';
     radarCtx.beginPath(); radarCtx.arc(px, py, 4, 0, Math.PI * 2); radarCtx.fill();
+  }
+  // Level 2 girl marker — only after the radar upgrade is bought (locked
+  // design: girl intel is the machine's product). Rim-clamped like the
+  // depot marker so her direction always shows even beyond radar range.
+  if (state.hasRadarUpgrade && state.girlPos) {
+    const rx = state.girlPos.x - selfPos.x, rz = state.girlPos.z - selfPos.z;
+    const d = Math.hypot(rx, rz);
+    const clampedD = Math.min(d, RADAR_RANGE * 0.9);
+    const scale = clampedD / (d || 1);
+    const px = (rx * scale / RADAR_RANGE) * (w / 2), py = (rz * scale / RADAR_RANGE) * (h / 2);
+    radarCtx.fillStyle = '#2affd5';
+    radarCtx.beginPath();
+    radarCtx.arc(px, py, 4.5, 0, Math.PI * 2);
+    radarCtx.fill();
   }
   radarCtx.restore();
   radarCtx.fillStyle = '#fff';

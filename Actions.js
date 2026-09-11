@@ -34,6 +34,17 @@ import {
   updatePickups, updatePowerups, updateCoins, updateExplosions, updateShield,
 } from './PowerUps.js';
 
+/* ---------------------------------------------------------------------
+   LEVEL EXTENSION POINTS — per-level systems (girl NPC, purchases,
+   mission ticks) register themselves here instead of Actions.js
+   growing level-specific code. Level 2 is the first user; Levels 1/3
+   register nothing and every hook below no-ops for them.
+--------------------------------------------------------------------- */
+const levelTicks = [];
+export function registerLevelTick(fn) { levelTicks.push(fn); }
+// Key handlers a level module drops in, e.g. { KeyE: fn, KeyG: fn }.
+export const levelKeyHooks = {};
+
 /* ======================================================================
    Actions.js — PLAYER ACTIONS: MOVEMENT, CAMERA, SHOOTING, BULLETS,
    VEHICLE CONTROLS, AND THE LEVEL BOOTSTRAP/GAME LOOP
@@ -480,7 +491,7 @@ export function updatePlayerMovement(dt) {
   state.crouching = !!(state.keys['ControlLeft'] || state.keys['ControlRight'] || state.keys['KeyC']);
   const sprinting = !state.crouching && (state.sprintToggle || state.keys['ShiftLeft'] || state.keys['ShiftRight']) && forwardInput > 0 && state.playerStamina > 2;
   state.isSprinting = sprinting;
-  const speed = sprinting ? 8.4 : (state.crouching ? 2.1 : 3.7);
+  const speed = (sprinting ? 8.4 : (state.crouching ? 2.1 : 3.7)) * (state.adrenalineActive ? 1.45 : 1);
   const fwd = forwardFromYaw(state.yaw);
   const right = rightFromYaw(state.yaw);
   const move = new THREE.Vector3()
@@ -723,6 +734,11 @@ function initInputHandlers() {
     if (e.code === 'KeyF') toggleVehicle();
     if (e.code === 'KeyV' && !state.inVehicle) state.firstPerson = !state.firstPerson;
     if (e.code === 'KeyQ') switchWeapon(state.currentWeapon === 'gun' ? 'knife' : 'gun');
+    // Level-registered keys (Level 2: E interact, G adrenaline). Nothing is
+    // registered in Levels 1/3 so these lines no-op there. !e.repeat keeps
+    // purchase/activation from firing on held-key auto-repeat.
+    if (!e.repeat && e.code === 'KeyE' && levelKeyHooks.KeyE) levelKeyHooks.KeyE();
+    if (!e.repeat && e.code === 'KeyG' && levelKeyHooks.KeyG) levelKeyHooks.KeyG();
     if (e.code === 'Tab') {
       e.preventDefault(); // Tab normally shifts browser focus — stop that
       togglePause();
@@ -885,6 +901,13 @@ function startAnimationLoop() {
       checkExtraction(activePos, doWin);
       drawRadar(activePos, state.inVehicle ? new THREE.Euler().setFromQuaternion(carVis.group.quaternion, 'YXZ').y : state.yaw);
     }
+
+    // Per-level ticks (Level 2: girl NPC, purchases, mission logic).
+    // Deliberately OUTSIDE the gameplay gate above — a level's lose
+    // cinematic must keep animating after state.isDead freezes the gated
+    // gameplay code. Each tick guards itself on paused/dead as needed.
+    for (const tick of levelTicks) tick(dt);
+
     renderer.render(scene, camera);
   }
   animate();
