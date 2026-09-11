@@ -71,8 +71,9 @@
 //      with G is the adrenaline system below
 //
 //  ADRENALINE
-//  [ ] G activation — consume a stored charge for +45% speed, 10 s
-//      (full duration, no stamina drain change) — see STATE/INTEGRATION
+//  [x] G activation — consume a stored charge for +45% speed, 10 s
+//      full duration (handleKeyG / updateAdrenaline below); countdown
+//      shown live in the inventory slot label
 //
 // MISSION / HUD
 //  [x] HUD — reference-style Level 2 layout (buildLevel2HUD below):
@@ -151,6 +152,9 @@ export function startLevel(mode) {
   adrenalineStock = ADRENALINE_START_STOCK;
   registerLevelTick(updateVendingInteraction);
   levelKeyHooks.KeyE = handleKeyE;
+  // Adrenaline boost lifecycle: the G key + the per-frame timer.
+  registerLevelTick(updateAdrenaline);
+  levelKeyHooks.KeyG = handleKeyG;
 }
 
 // Handles for the logic phase: { machines, teleportPoint } from the
@@ -950,6 +954,49 @@ function updateVendingInteraction() {
 }
 
 /* =====================================================================
+   ADRENALINE — stored charges, G activation, the 10 s boost
+
+   The speed multiplier itself lives in Actions.js updatePlayerMovement
+   (×1.45 while state.adrenalineActive) — one shared line, no
+   level-specific movement code. This section owns activation, the
+   countdown, and the expiry beat.
+===================================================================== */
+
+const ADRENALINE_DURATION = 10; // seconds — full duration per the design
+
+/** G key — activate a stored charge. */
+function handleKeyG() {
+  if (state.isDead || state.paused || state.girlCaught) return;
+  if (state.adrenalineActive) { pushKillFeed('Adrenaline already running'); return; }
+  if (state.adrenalineCharges <= 0) {
+    pushKillFeed('No adrenaline — the machine in the town centre sells it');
+    return;
+  }
+  state.adrenalineCharges--;
+  state.adrenalineActive = true;
+  state.adrenalineTimer = ADRENALINE_DURATION;
+  sfx.pickup();
+  pushKillFeed(`ADRENALINE — +45% speed for ${ADRENALINE_DURATION}s`);
+}
+
+/** Per-frame boost timer. Owns the inventory slot label while running
+    (live countdown), restoring the x<count> label on expiry — the HUD
+    poll skips the adrenaline slot while active so the two writers never
+    fight over it. */
+function updateAdrenaline(dt) {
+  if (!state.adrenalineActive) return;
+  state.adrenalineTimer -= dt;
+  if (state.adrenalineTimer <= 0) {
+    state.adrenalineActive = false;
+    state.adrenalineTimer = 0;
+    pushKillFeed('Adrenaline worn off');
+    if (lv2HUD) lv2HUD.setSlotText('adrenaline', `x${state.adrenalineCharges}`);
+    return;
+  }
+  if (lv2HUD) lv2HUD.setSlotText('adrenaline', `${Math.ceil(state.adrenalineTimer)}s`);
+}
+
+/* =====================================================================
    LEVEL 2 HUD — reference-style corner layout
 
    Everything here is created at runtime by Level 2 only: a stylesheet
@@ -1131,7 +1178,9 @@ function buildLevel2HUD(portTarget) {
     coinsEl.textContent = state.coins;
     // Item counts — fields land with purchase logic; read defensively.
     setSlot('radar', state.hasRadarUpgrade ? 1 : 0);
-    setSlot('adrenaline', state.adrenalineCharges || 0);
+    // While the boost runs, updateAdrenaline owns this slot's label
+    // (countdown) — polling here too would fight it every 400 ms.
+    if (!state.adrenalineActive) setSlot('adrenaline', state.adrenalineCharges || 0);
     // Port distance — live from the player rig.
     if (playerVis) {
       const p = playerVis.group.position;
@@ -1150,5 +1199,11 @@ function buildLevel2HUD(portTarget) {
     },
     /** Owned-count setter for the inventory slots (logic phase). */
     setItemCount: setSlot,
+    /** Raw label text for an inventory slot — used for the adrenaline
+        countdown while the boost is running. */
+    setSlotText(which, text) {
+      const el = slots[which];
+      if (el) el.querySelector('b').textContent = text;
+    },
   };
 }
