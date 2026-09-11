@@ -57,7 +57,8 @@ export function startLevel(mode) {
   // beats. Registered LAST so its girl-catch prompt write lands after
   // updateVendingInteraction's machine prompt write (girl wins ranges
   // that somehow overlap).
-  missionStartTime = performance.now();
+  // missionStartTime is armed on the first live frame in updateMission
+  // so loading-screen seconds never count.
   buildLevel2EndScreens();
   registerLevelTick(updateMission);
 }
@@ -566,8 +567,10 @@ function buildLevel2Scene() {
 
   const machines = {
     // West sidewalk, fronts facing the street (rotationY = +π/2).
-    // Lime beacon = radar (start), pink beacon = adrenaline (centre).
-    radar: placeVendingMachine(-13.4, -25, Math.PI / 2, radarCatalog, RADAR_GLOW),
+    // Radar machine sits 20 m ahead of the player start (z +10) so its
+    // lime beacon is visible from spawn; adrenaline stays mid-level
+    // (centre, z -90) with the pink beacon.
+    radar: placeVendingMachine(-13.4, 10, Math.PI / 2, radarCatalog, RADAR_GLOW),
     adrenaline: placeVendingMachine(-13.4, -90, Math.PI / 2, adrenalineCatalog, ADRENALINE_GLOW),
   };
 
@@ -597,14 +600,17 @@ const GIRL_SPEED = 3.7;          // = player walk speed — the locked design
 const GIRL_TARGET_HEIGHT = 1.65;
 const GIRL_RIG_YAW_OFFSET = 0;   // flip to Math.PI if she runs backwards
 
-// Her route: locked 60 m head start at spawn → through the blockage's
+// Her route: 50 m head start at spawn (z -20, straight down the street
+// from the player start at z 30 — visible from frame one, which is the
+// point) → past the first barrier chicane → through the blockage's
 // east-curb gap (z -57) → weaving the collapse-zone street wrecks →
 // threading the final-approach gauntlet → across the quay → down the
 // pier to the teleport beacon. y values step onto the quay (0.18) and
 // pier (0.47) slabs. Waypoints keep ~5 m clearance from every placed
 // wreck/container so she never visibly clips through one.
 const GIRL_WAYPOINTS = [
-  { x: 0,   y: 0,    z: -45 },   // spawn — locked head start
+  { x: 0,   y: 0,    z: -20 },   // spawn — 50 m head start, in sight
+  { x: 1.5, y: 0,    z: -33 },
   { x: 4,   y: 0,    z: -52 },
   { x: 7.5, y: 0,    z: -57 },   // blockage east-curb gap
   { x: 6,   y: 0,    z: -64 },
@@ -624,6 +630,7 @@ const GIRL_WAYPOINTS = [
 
 let girl = null; // { group, mixer, wpIndex }
 let girlSpotted = false;
+let girlAnnounced = false; // "head start" beat — fired on the first live frame
 
 function spawnGirl() {
   new GLTFLoader().load(GIRL_GLB, (gltf) => {
@@ -635,17 +642,22 @@ function spawnGirl() {
     const box2 = new THREE.Box3().setFromObject(obj);
     const center = new THREE.Vector3(); box2.getCenter(center);
     obj.position.set(-center.x, -box2.min.y, -center.z);
-    // Distinct cool tint + faint emissive: readable against the fog
-    // without glowing like a beacon.
+    // Distinct cool tint + raised emissive: readable at the 50 m spawn
+    // distance through night fog, without glowing like a beacon.
     obj.traverse((o) => {
       if (!o.isMesh) return;
       o.castShadow = true; o.receiveShadow = true;
       o.material = o.material.clone();
       o.material.color.multiply(new THREE.Color(0.75, 1.15, 1.05));
-      o.material.emissive = new THREE.Color(0x0a1f1a);
+      o.material.emissive = new THREE.Color(0x1f5a4d);
     });
     const group = new THREE.Group();
     group.add(obj);
+    // A faint teal glint travelling with her — catches the eye at spawn
+    // distance and reads as motion while she weaves through the fog.
+    const glint = new THREE.PointLight(TEAL_LIGHT, 0.9, 7, 2);
+    glint.position.set(0, 1.3, 0);
+    group.add(glint);
     const wp = GIRL_WAYPOINTS[0];
     group.position.set(wp.x, wp.y, wp.z);
     scene.add(group);
@@ -657,7 +669,9 @@ function spawnGirl() {
     }
     girl = { group, mixer, wpIndex: 1 };
     state.girlPos = group.position; // live reference — see section header
-    pushKillFeed('She has a head start — move!');
+    // "Head start" announcement moved to updateGirl's first LIVE frame —
+    // pushed here it would fire behind the loading overlay and fade
+    // before anyone can read it.
   }, undefined, () => {
     // Model failed to load — spawn an invisible marker girl instead so
     // the CHASE still fully functions (movement, radar dot, catch/lose
@@ -673,7 +687,16 @@ function spawnGirl() {
 }
 
 function updateGirl(dt) {
+  // Loading-screen gate: state.readyShown flips exactly when the HUD is
+  // revealed (maybeReady), so nothing about the chase — her movement,
+  // the announce beat, the escalation clock — runs behind the overlay.
+  // Without this she burns her head start while the progress bar is up.
+  if (!state.readyShown) return;
   if (!girl || state.paused || state.girlCaught) return;
+  if (!girlAnnounced) {
+    girlAnnounced = true;
+    pushKillFeed('She has a head start — move!');
+  }
   // After the lose trigger the cinematic (mission phase) owns her; while
   // the player is dead for any other reason she simply holds position.
   if (state.isDead && !state.portReached) return;
@@ -876,7 +899,7 @@ const GIRL_ROUTE_LENGTH = GIRL_WAYPOINTS.reduce((acc, wp, i) => {
   return acc + Math.hypot(wp.x - prev.x, wp.z - prev.z);
 }, 0);
 
-let missionStartTime = 0;  // performance.now() set in startLevel()
+let missionStartTime = 0;  // armed on the first live frame in updateMission
 let escalationTimer = ESCALATE_START;
 // One-shot killfeed progress beats (see the TODO catalog's beat list).
 let beatClosingIn = false, beatNearingPort = false, beatFinalStretch = false;
@@ -1033,6 +1056,11 @@ function updateLoseCinematic(dt) {
 /** Per-frame mission tick — see the section header for the priority
     order. */
 function updateMission(dt) {
+  // Same loading gate as updateGirl — and the chase clock arms HERE,
+  // on the first live frame, so loading-screen seconds never count
+  // toward the win-screen time stat.
+  if (!state.readyShown) return;
+  if (!missionStartTime) missionStartTime = performance.now();
   if (state.paused) return;
   if (loseCinematic) { updateLoseCinematic(dt); return; }
   if (state.girlCaught || state.isDead) return; // ended either way

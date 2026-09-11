@@ -39,8 +39,8 @@ density and clutter, not new barriers.
 
 | Zone | z range | Content |
 | --- | --- | --- |
-| Outskirts | +40 → −20 | as built by the base scene (safe start) |
-| Entrance | −20 → −70 | radar machine (z −25), street blockage (z ≈ −57, east-curb squeeze), west pocket shortcut entrance |
+| Outskirts | +40 → −20 | safe start; radar machine (z +10 — 20 m ahead of the player start, lime beacon) |
+| Entrance | −20 → −70 | street blockage (z ≈ −57, east-curb squeeze), west pocket shortcut entrance |
 | Centre | −70 → −120 | adrenaline machine (z −90), denser street clutter |
 | Collapse | −120 → −165 | eastern lot rubble nest (where the Level-1 depot yard was skipped) + coin cache risk/reward |
 | Final Approach | −165 → −196 | tightest wreck chokepoints, burning wrecks lighting the way |
@@ -116,14 +116,18 @@ Level2.js.
 ### Girl NPC
 
 - [x] Girl model — `Injured Run.glb` placeholder (single Mixamo run clip,
-      tinted + faintly emissive so she reads against the fog; any
+      tinted + emissive, plus a small teal glint light travelling with
+      her, so she reads at her 50 m spawn distance through night fog; any
       single-clip rigged GLB drops in via `GIRL_GLB`)
-- [x] Waypoint path — spawn (0, −45), the locked 60 m head start →
+- [x] Waypoint path — spawn (0, −20), a 50 m head start (visible from
+      the player start at z +30) →
       blockage east-curb gap → collapse-zone weave → final-approach
       gauntlet → quay → pier → teleport beacon — `GIRL_WAYPOINTS`
 - [x] Movement AI — fixed 3.7 m/s (player walk speed, per the locked
       design), waypoint follow, faces travel direction, never stops —
-      `updateGirl`
+      `updateGirl`, gated on `state.readyShown` so the loading overlay
+      never eats her head start (the chase clock arms on the first live
+      frame too)
 - [x] Catch mechanic — proximity check (< 2.2 m ≈ occupying her position)
       + E key → ANTIDOTE SECURED win screen — `catchGirl` / `handleKeyE`
 - [x] Teleport VFX — camera lerps to frame her at the pier beacon, teal
@@ -147,7 +151,8 @@ Level2.js.
       (tops out below the port's teal spire, which stays the main
       landmark), and a point light washing the cabinet front. Cabinet
       scale 1.6 (~3.2 m tall) so it reads at distance
-- [x] Radar machine — (z ≈ −25, west sidewalk). 25 coins, one-time:
+- [x] Radar machine — (z ≈ +10, west sidewalk — 20 m ahead of the
+      player start). 25 coins, one-time:
       purchasing reveals the girl on the radar (teal dot), the HUD
       girl-distance row, and retargets the compass to her
 - [x] Adrenaline machine — (z ≈ −90, west sidewalk). 45 coins, stock 3:
