@@ -60,6 +60,7 @@ const KNIFE_RANGE = 1.9;
 // from here and call it either with an explicit maxFuel (as it does) or
 // with no argument at all (matching the original zero-arg call site).
 export function updateFuelHUD(maxFuel = CAR_MAX_FUEL) {
+  if (state.skipCar || !maxFuel) return;
   updateFuelHUDBase(maxFuel);
 }
 
@@ -310,7 +311,7 @@ export function damagePlayer(dmg) {
    VEHICLE ENTER / EXIT
 --------------------------------------------------------------------- */
 export function toggleVehicle() {
-  if (state.isDead) return;
+  if (state.isDead || state.skipCar || !carVis) return;
   if (!state.inVehicle) {
     const dist = playerVis.group.position.distanceTo(carVis.group.position);
     if (dist < 3.4) {
@@ -341,7 +342,7 @@ export function toggleVehicle() {
 }
 
 export function updateInteractionPrompt() {
-  if (state.isDead) { dom.prompt.classList.add('hidden'); return; }
+  if (state.isDead || state.skipCar || !carVis) { dom.prompt.classList.add('hidden'); return; }
   if (!state.inVehicle) {
     const dist = playerVis.group.position.distanceTo(carVis.group.position);
     if (dist < 3.4) {
@@ -570,7 +571,7 @@ export function updatePlayerMovement(dt) {
       `Shift held: ${rawShift} | Toggle: ${state.sprintToggle} | Sprinting: ${sprinting} | Stamina: ${state.playerStamina.toFixed(0)}\n` +
       `Rigged model: ${playerVis.rigged} | Anim state: ${playerVis.currentActionName || 'n/a'}\n` +
       `Player height: ${state.playerCurrentHeight.toFixed(2)}m (zombies are ${ZOMBIE_TARGET_HEIGHT}m) [ / ] to adjust\n` +
-      `Grip preset: ${state.gunGripIndex} (U to cycle) | Weapon: ${state.currentWeapon} | Coins: ${state.coins} | Fuel: ${state.carFuel.toFixed(0)}`;
+      `Grip preset: ${state.gunGripIndex} (U to cycle) | Weapon: ${state.currentWeapon} | Coins: ${state.coins} | Fuel: ${state.carFuel != null ? state.carFuel.toFixed(0) : 'n/a'}`;
   }
   state.zombies.forEach((z) => {
     if (!z.alive) return;
@@ -759,11 +760,11 @@ export function bootLevel(levelConfig = {}) {
     // that's fine, the canvas click handler wired below is the fallback
     // the player uses to lock in.
     dom.canvas.requestPointerLock();
-    spawnDepotGuards();
+    if (!state.skipCar) spawnDepotGuards();
     updateObjectiveHUD();
     updateWeaponHUD();
     updateCoinHUD();
-    updateFuelHUD();
+    if (!state.skipCar) updateFuelHUD();
   });
 
   // World population — mirrors the exact order the original monolithic
@@ -773,12 +774,12 @@ export function bootLevel(levelConfig = {}) {
   const { depotYard } = loadBuildings();
   loadObstacles();
   loadTrashCans();
-  loadCars();
+  if (!state.skipCar) loadCars();
   loadMainCharacter();
   loadZombies();
   loadBarrels();
   initShield();
-  missionTracker = createMissionTracker(depotYard);
+  if (!state.skipDepot) missionTracker = createMissionTracker(depotYard);
 
   initInputHandlers();
 
@@ -787,7 +788,7 @@ export function bootLevel(levelConfig = {}) {
   updateObjectiveHUD();
   updateWeaponHUD();
   updateCoinHUD();
-  updateFuelHUD();
+  if (!state.skipCar) updateFuelHUD();
 
   startAnimationLoop();
 
@@ -812,7 +813,7 @@ function startAnimationLoop() {
         world.step(FIXED_STEP);
         stepAccumulator -= FIXED_STEP;
       }
-      checkVehicleRollover(dt);
+      if (!state.skipCar) checkVehicleRollover(dt);
       if (state.fireCooldown > 0) state.fireCooldown -= dt;
       if (state.firePressed && !state.inVehicle && state.currentWeapon === 'gun') tryShoot();
       if (state.reloading) {

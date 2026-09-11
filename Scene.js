@@ -602,6 +602,10 @@ dom.fuelWrap.innerHTML = `
     <div id="fuel-fill" style="height:100%;width:100%;background:linear-gradient(90deg,#ff8a1a,#ffd27a);"></div>
   </div>`;
 dom.fuelFill = document.getElementById('fuel-fill');
+// Level 2 (The Chase) has no vehicle — hide the fuel HUD entirely.
+// state.skipCar is set by Level2Config.js, which is imported before this
+// module when Level 2 loads (import order in Level2.js guarantees it).
+if (state.skipCar) dom.fuelWrap.style.display = 'none';
 dom.weaponLabel = makeHudEl('weapon-label', {
   bottom: '18px', left: '50%', transform: 'translateX(-50%)',
   fontSize: '15px', letterSpacing: '2px', fontWeight: 'bold',

@@ -116,4 +116,10 @@ export const state = {
   // Asset loading progress
   loadFlags: { player: false, zombie: false, car: false },
   readyShown: false,
+
+  // Skip flags — set by Level2Config.js (or similar) BEFORE heavy modules
+  // like characters.js evaluate. Checked at module top level to skip
+  // creating systems the level doesn't need (car, depot, extraction).
+  skipCar: false,
+  skipDepot: false,
 };

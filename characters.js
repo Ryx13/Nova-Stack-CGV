@@ -561,7 +561,7 @@ export function loadBuildings() {
     sil.position.set((rnd() < 0.5 ? -1 : 1) * (48 + rnd() * 40), sil.geometry.parameters.height / 2, -20 - rnd() * STREET_LENGTH);
     scene.add(sil);
   }
-  const depotYard = buildDepotYard();
+  const depotYard = state.skipDepot ? null : buildDepotYard();
   return { depotYard };
 }
 
@@ -1395,6 +1395,7 @@ export function cycleZombieRigYaw() {
   pushKillFeed('Zombie facing adjusted');
 }
 export function cycleCarRigYaw() {
+  if (state.skipCar || !carVis) return;
   state.CAR_RIG_YAW_OFFSET = cycleOffset(state.CAR_RIG_YAW_OFFSET);
   carVis.bodyRoot.rotation.y = state.CAR_RIG_YAW_OFFSET;
   pushKillFeed('Car facing adjusted');
@@ -1444,7 +1445,7 @@ camera.add(knifeViewModel);
 --------------------------------------------------------------------- */
 export const carSpawn = new THREE.Vector3(-1.8, 0.85, 22);
 export const CAR_MAX_FUEL = 100;
-state.carFuel = CAR_MAX_FUEL;
+if (!state.skipCar) state.carFuel = CAR_MAX_FUEL;
 
 function buildCarMesh() {
   const g = new THREE.Group();
@@ -1502,9 +1503,9 @@ function buildCarMesh() {
   return { group: g, bodyRoot, wheelMeshes, headlightSpot1, headlightSpot2, wheelBones: null };
 }
 
-export const carVis = buildCarMesh();
+export const carVis = state.skipCar ? null : buildCarMesh();
 const TRUCK_TARGET_LENGTH = 5.2;
-new GLTFLoader().load('assets/zombie_pickup_truck.glb', (gltf) => {
+if (!state.skipCar) new GLTFLoader().load('assets/zombie_pickup_truck.glb', (gltf) => {
   const obj = gltf.scene;
   obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   const box = new THREE.Box3().setFromObject(obj);
@@ -1522,44 +1523,58 @@ new GLTFLoader().load('assets/zombie_pickup_truck.glb', (gltf) => {
   markLoaded('car');
 }, undefined, () => { state.loadFlags.car = true; markLoaded('car'); });
 
-const chassisShape = new CANNON.Box(new CANNON.Vec3(1.05, 0.5, 2.6));
-export const chassisBody = new CANNON.Body({ mass: 1650, material: matChassis, linearDamping: 0.12, angularDamping: 0.35 });
-chassisBody.addShape(chassisShape, new CANNON.Vec3(0, 0.5, 0));
-chassisBody.position.set(carSpawn.x, 1.05, carSpawn.z);
-chassisBody.angularVelocity.set(0, 0, 0);
-export const vehicle = new CANNON.RaycastVehicle({
-  chassisBody,
-  indexForwardAxis: 2,
-  indexRightAxis: 0,
-  indexUpAxis: 1,
-});
-const wheelOptions = {
-  radius: 0.46,
-  directionLocal: new CANNON.Vec3(0, -1, 0),
-  suspensionStiffness: 46,
-  suspensionRestLength: 0.32,
-  frictionSlip: 3.6,
-  dampingRelaxation: 2.9,
-  dampingCompression: 5.2,
-  maxSuspensionForce: 240000,
-  rollInfluence: 0.1,
-  axleLocal: new CANNON.Vec3(1, 0, 0),
-  chassisConnectionPointLocal: new CANNON.Vec3(1, 0, 1),
-  maxSuspensionTravel: 0.24,
-  customSlidingRotationalSpeed: -28,
-  useCustomSlidingRotationalSpeed: true,
-};
-wheelOptions.chassisConnectionPointLocal.set(-1.05, 0.1, -1.95); vehicle.addWheel({ ...wheelOptions, chassisConnectionPointLocal: wheelOptions.chassisConnectionPointLocal.clone() });
-wheelOptions.chassisConnectionPointLocal.set(1.05, 0.1, -1.95); vehicle.addWheel({ ...wheelOptions, chassisConnectionPointLocal: wheelOptions.chassisConnectionPointLocal.clone() });
-wheelOptions.chassisConnectionPointLocal.set(-1.05, 0.1, 1.95); vehicle.addWheel({ ...wheelOptions, chassisConnectionPointLocal: wheelOptions.chassisConnectionPointLocal.clone() });
-wheelOptions.chassisConnectionPointLocal.set(1.05, 0.1, 1.95); vehicle.addWheel({ ...wheelOptions, chassisConnectionPointLocal: wheelOptions.chassisConnectionPointLocal.clone() });
-vehicle.addToWorld(world);
-export const FRONT_WHEELS = [0, 1];
-export const REAR_WHEELS = [2, 3];
-export const MAX_STEER = 0.5;
-export const MAX_ENGINE_FORCE = 5600;
-export const MAX_BRAKE_FORCE = 65;
-export const HANDBRAKE_FORCE = 95;
+const __carPhysics = state.skipCar ? null : (() => {
+  const chassisShape = new CANNON.Box(new CANNON.Vec3(1.05, 0.5, 2.6));
+  const _chassisBody = new CANNON.Body({ mass: 1650, material: matChassis, linearDamping: 0.12, angularDamping: 0.35 });
+  _chassisBody.addShape(chassisShape, new CANNON.Vec3(0, 0.5, 0));
+  _chassisBody.position.set(carSpawn.x, 1.05, carSpawn.z);
+  _chassisBody.angularVelocity.set(0, 0, 0);
+  const _vehicle = new CANNON.RaycastVehicle({
+    chassisBody: _chassisBody,
+    indexForwardAxis: 2,
+    indexRightAxis: 0,
+    indexUpAxis: 1,
+  });
+  const wheelOptions = {
+    radius: 0.46,
+    directionLocal: new CANNON.Vec3(0, -1, 0),
+    suspensionStiffness: 46,
+    suspensionRestLength: 0.32,
+    frictionSlip: 3.6,
+    dampingRelaxation: 2.9,
+    dampingCompression: 5.2,
+    maxSuspensionForce: 240000,
+    rollInfluence: 0.1,
+    axleLocal: new CANNON.Vec3(1, 0, 0),
+    chassisConnectionPointLocal: new CANNON.Vec3(1, 0, 1),
+    maxSuspensionTravel: 0.24,
+    customSlidingRotationalSpeed: -28,
+    useCustomSlidingRotationalSpeed: true,
+  };
+  wheelOptions.chassisConnectionPointLocal.set(-1.05, 0.1, -1.95); _vehicle.addWheel({ ...wheelOptions, chassisConnectionPointLocal: wheelOptions.chassisConnectionPointLocal.clone() });
+  wheelOptions.chassisConnectionPointLocal.set(1.05, 0.1, -1.95); _vehicle.addWheel({ ...wheelOptions, chassisConnectionPointLocal: wheelOptions.chassisConnectionPointLocal.clone() });
+  wheelOptions.chassisConnectionPointLocal.set(-1.05, 0.1, 1.95); _vehicle.addWheel({ ...wheelOptions, chassisConnectionPointLocal: wheelOptions.chassisConnectionPointLocal.clone() });
+  wheelOptions.chassisConnectionPointLocal.set(1.05, 0.1, 1.95); _vehicle.addWheel({ ...wheelOptions, chassisConnectionPointLocal: wheelOptions.chassisConnectionPointLocal.clone() });
+  _vehicle.addToWorld(world);
+  return {
+    chassisBody: _chassisBody,
+    vehicle: _vehicle,
+    FRONT_WHEELS: [0, 1],
+    REAR_WHEELS: [2, 3],
+    MAX_STEER: 0.5,
+    MAX_ENGINE_FORCE: 5600,
+    MAX_BRAKE_FORCE: 65,
+    HANDBRAKE_FORCE: 95,
+  };
+})();
+export const chassisBody = __carPhysics ? __carPhysics.chassisBody : null;
+export const vehicle = __carPhysics ? __carPhysics.vehicle : null;
+export const FRONT_WHEELS = __carPhysics ? __carPhysics.FRONT_WHEELS : [];
+export const REAR_WHEELS = __carPhysics ? __carPhysics.REAR_WHEELS : [];
+export const MAX_STEER = __carPhysics ? __carPhysics.MAX_STEER : 0;
+export const MAX_ENGINE_FORCE = __carPhysics ? __carPhysics.MAX_ENGINE_FORCE : 0;
+export const MAX_BRAKE_FORCE = __carPhysics ? __carPhysics.MAX_BRAKE_FORCE : 0;
+export const HANDBRAKE_FORCE = __carPhysics ? __carPhysics.HANDBRAKE_FORCE : 0;
 
 export function loadCars() {
   // Drivable vehicle is already constructed above (module init); this
