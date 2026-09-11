@@ -42,10 +42,14 @@
 //      girl approaches — logic phase
 //
 // GIRL NPC
-//  [ ] Girl model — load or procedurally build a running female character
-//  [ ] Waypoint path — define her route from spawn to port (after scene
-//      layout is finalized)
-//  [ ] Movement AI — fixed speed, simple obstacle avoidance, no stopping
+//  [x] Girl model — Injured Run.glb placeholder (single Mixamo run clip,
+//      tinted + faintly emissive so she reads against the fog; any
+//      single-clip rigged GLB drops in via GIRL_GLB below)
+//  [x] Waypoint path — spawn (0, -45) → blockage east-curb gap →
+//      collapse-zone weave → final-approach gauntlet → quay → pier →
+//      teleport beacon; GIRL_WAYPOINTS below
+//  [x] Movement AI — fixed 3.7 m/s (player walk speed, per the locked
+//      design), waypoint follow, faces travel direction, never stops
 //  [ ] Catch mechanic — proximity check (occupy her position) + E key
 //  [ ] Teleport VFX — camera pans to girl at port, she teleports away
 //      with a visual effect on loss
@@ -112,12 +116,13 @@
 
 import './Level2Config.js';  // MUST be first — sets skip flags before heavy modules
 import * as THREE from 'three';
-import { scene, addStaticBox } from './Scene.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { scene, addStaticBox, pushKillFeed } from './Scene.js';
 import { state } from './state.js';
 import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis } from './characters.js';
 import { spawnCoin } from './PowerUps.js';
 import { createToxicMaterial } from './shaders.js';
-import { bootLevel } from './Actions.js';
+import { bootLevel, registerLevelTick } from './Actions.js';
 import { VendingMachine } from './VendingMachine.js';
 import { saferoomSupplyCatalog } from './saferoomSupplyCatalog.js';
 
@@ -136,6 +141,9 @@ export function startLevel(mode) {
   lv2Scene = sceneHandles;
   // Reference-style HUD (objectives, distances, inventory panel).
   lv2HUD = buildLevel2HUD(sceneHandles.teleportPoint);
+  // The chase itself: the girl NPC and her per-frame tick.
+  spawnGirl();
+  registerLevelTick(updateGirl);
 }
 
 // Handles for the logic phase: { machines, teleportPoint } from the
@@ -672,6 +680,134 @@ function buildLevel2Scene() {
   placeCoinCluster(-5, -200, 3);   // Port edge
 
   return { machines, teleportPoint: port.teleportPoint };
+}
+
+/* =====================================================================
+   THE GIRL — the chase target
+
+   The NPC carrying the antidote. No physics body by design: nothing
+   blocks or damages her — the player's only interaction is catching
+   her (proximity + E, wired with the purchase system) and watching
+   her teleport at the pier (the lose cinematic). state.girlPos is a
+   LIVE reference to her group's position, set once on load — the
+   radar dot, compass retarget and HUD distance read it every frame
+   for free.
+===================================================================== */
+
+// Placeholder model: Injured Run.glb (single Mixamo run clip — a
+// fleeing figure, thematically right for the chase). Any single-clip
+// rigged GLB drops in here; the loader plays animations[0].
+const GIRL_GLB = 'assets/Injured Run.glb';
+const GIRL_SPEED = 3.7;          // = player walk speed — the locked design
+const GIRL_TARGET_HEIGHT = 1.65;
+const GIRL_RIG_YAW_OFFSET = 0;   // flip to Math.PI if she runs backwards
+
+// Her route: locked 60 m head start at spawn → through the blockage's
+// east-curb gap (z -57) → weaving the collapse-zone street wrecks →
+// threading the final-approach gauntlet → across the quay → down the
+// pier to the teleport beacon. y values step onto the quay (0.18) and
+// pier (0.47) slabs. Waypoints keep ~5 m clearance from every placed
+// wreck/container so she never visibly clips through one.
+const GIRL_WAYPOINTS = [
+  { x: 0,   y: 0,    z: -45 },   // spawn — locked head start
+  { x: 4,   y: 0,    z: -52 },
+  { x: 7.5, y: 0,    z: -57 },   // blockage east-curb gap
+  { x: 6,   y: 0,    z: -64 },
+  { x: 2,   y: 0,    z: -80 },
+  { x: -2,  y: 0,    z: -95 },   // past the adrenaline machine
+  { x: 0,   y: 0,    z: -110 },
+  { x: -3,  y: 0,    z: -125 },  // collapse-zone street weave
+  { x: 1,   y: 0,    z: -140 },
+  { x: -2,  y: 0,    z: -158 },
+  { x: -3,  y: 0,    z: -170 },  // final-approach gauntlet
+  { x: 2,   y: 0,    z: -180 },
+  { x: 0,   y: 0,    z: -194 },
+  { x: 0,   y: 0.18, z: -197 },  // onto the quay
+  { x: 0,   y: 0.47, z: -203 },  // onto the pier
+  { x: 0,   y: 0.47, z: -208.6 },// the beacon — she's gone (lose)
+];
+
+let girl = null; // { group, mixer, wpIndex }
+let girlSpotted = false;
+
+function spawnGirl() {
+  new GLTFLoader().load(GIRL_GLB, (gltf) => {
+    const obj = gltf.scene;
+    // Ground-snap + scale to target height — the loadDecorCar pattern.
+    const box = new THREE.Box3().setFromObject(obj);
+    const size = new THREE.Vector3(); box.getSize(size);
+    obj.scale.setScalar(GIRL_TARGET_HEIGHT / Math.max(size.y, 0.2));
+    const box2 = new THREE.Box3().setFromObject(obj);
+    const center = new THREE.Vector3(); box2.getCenter(center);
+    obj.position.set(-center.x, -box2.min.y, -center.z);
+    // Distinct cool tint + faint emissive: readable against the fog
+    // without glowing like a beacon.
+    obj.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = true; o.receiveShadow = true;
+      o.material = o.material.clone();
+      o.material.color.multiply(new THREE.Color(0.75, 1.15, 1.05));
+      o.material.emissive = new THREE.Color(0x0a1f1a);
+    });
+    const group = new THREE.Group();
+    group.add(obj);
+    const wp = GIRL_WAYPOINTS[0];
+    group.position.set(wp.x, wp.y, wp.z);
+    scene.add(group);
+    // Single-clip model — play the run clip.
+    let mixer = null;
+    if (gltf.animations && gltf.animations.length) {
+      mixer = new THREE.AnimationMixer(obj);
+      mixer.clipAction(gltf.animations[0]).play();
+    }
+    girl = { group, mixer, wpIndex: 1 };
+    state.girlPos = group.position; // live reference — see section header
+    pushKillFeed('She has a head start — move!');
+  }, undefined, () => {
+    // Model failed to load — spawn an invisible marker girl instead so
+    // the CHASE still fully functions (movement, radar dot, catch/lose
+    // checks all key off state.girlPos): there's just no visible runner.
+    // Fail soft like every other loader in the project.
+    const group = new THREE.Group();
+    const wp = GIRL_WAYPOINTS[0];
+    group.position.set(wp.x, wp.y, wp.z);
+    scene.add(group);
+    girl = { group, mixer: null, wpIndex: 1 };
+    state.girlPos = group.position;
+  });
+}
+
+function updateGirl(dt) {
+  if (!girl || state.paused || state.girlCaught) return;
+  // After the lose trigger the cinematic (mission phase) owns her; while
+  // the player is dead for any other reason she simply holds position.
+  if (state.isDead && !state.portReached) return;
+  const g = girl.group;
+  if (!state.portReached) {
+    const wp = GIRL_WAYPOINTS[girl.wpIndex];
+    const dx = wp.x - g.position.x, dz = wp.z - g.position.z;
+    const dist = Math.hypot(dx, dz);
+    const step = GIRL_SPEED * dt;
+    if (dist <= step) {
+      g.position.set(wp.x, wp.y, wp.z);
+      girl.wpIndex++;
+      if (girl.wpIndex >= GIRL_WAYPOINTS.length) state.portReached = true;
+    } else {
+      g.position.x += (dx / dist) * step;
+      g.position.z += (dz / dist) * step;
+      // Height eases between waypoint y values (quay/pier steps).
+      g.position.y += (wp.y - g.position.y) * Math.min(1, dt * 6);
+      g.rotation.y = Math.atan2(dx, dz) + GIRL_RIG_YAW_OFFSET;
+    }
+  }
+  if (girl.mixer) girl.mixer.update(dt);
+  // First-sight killfeed — one-shot, purely an atmosphere beat.
+  if (!girlSpotted && playerVis) {
+    if (playerVis.group.position.distanceTo(g.position) < 25) {
+      girlSpotted = true;
+      pushKillFeed('Girl spotted — heading for the port!');
+    }
+  }
 }
 
 /* =====================================================================
