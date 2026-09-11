@@ -58,21 +58,21 @@
 //  [x] VendingMachine.js — reusable display module, imported at the project
 //      root (cabinet + screen + shelf cards + catalog browsing via
 //      setSelection; display-only by design — no input/currency/physics)
-//  [ ] Host interaction wrapper — proximity check, E key, coin cost and
-//      purchase validation driving the machines; collision via Scene.js
-//      addStaticBox (auto-registers on the zombie avoidance list)
-//  [ ] Level 2 catalog preset — radar + adrenaline products (copy
-//      saferoomSupplyCatalog.js as the pattern; "support" category fits)
-//  [ ] Radar machine — PLACED (z ≈ -25, west sidewalk) by
-//      placeVendingMachine() below with the example stock as a
-//      placeholder; purchase logic + the Level 2 preset still pending.
-//      Purchasing shows the girl's position on radar and her distance
-//      to the port
-//  [ ] Adrenaline machine — PLACED (z ≈ -90, west sidewalk) by
-//      placeVendingMachine() below with the example stock as a
-//      placeholder; purchase logic + the Level 2 preset still pending.
-//      Purchasing stores the buff; player activates with G for +45%
-//      speed, 10s (full duration)
+//  [x] Host interaction wrapper — proximity check (2.6 m), E key, coin
+//      cost + purchase validation, live prompt via dom.prompt; collision
+//      via addStaticBox (auto-registers on the zombie avoidance list)
+//  [x] Level 2 catalog preset — radar + adrenaline products in the
+//      "support" category (radarCatalog / adrenalineCatalog below)
+//  [x] Radar machine — (z ≈ -25, west sidewalk). 25 coins, one-time:
+//      purchasing reveals the girl on the radar (teal dot), the HUD
+//      girl-distance row, and retargets the compass to her
+//  [x] Adrenaline machine — (z ≈ -90, west sidewalk). 45 coins, stock 3:
+//      purchasing stores a charge (inventory slot lights up); activation
+//      with G is the adrenaline system below
+//
+//  ADRENALINE
+//  [ ] G activation — consume a stored charge for +45% speed, 10 s
+//      (full duration, no stamina drain change) — see STATE/INTEGRATION
 //
 // MISSION / HUD
 //  [x] HUD — reference-style Level 2 layout (buildLevel2HUD below):
@@ -81,13 +81,12 @@
 //      (blue stamina), bottom-right inventory panel (radar + adrenaline
 //      slots with live counts, coin total), kills mirrored in the
 //      objectives list. Scoped via body.lv2-hud — Level 1/3 unchanged
-//  [ ] Radar upgrade — purchased from the start-area vending machine.
-//      Until bought, the radar only shows zombies as usual. Once bought,
-//      the radar also shows the girl's position (distinct color) and a
-//      live readout of her distance to the port (the HUD's hidden
-//      "Girl" distance row is revealed by lv2HUD.setGirlDistance).
-//      This is a key intel tool — without it the player has no way to
-//      gauge how much time they have left in the chase.
+//  [x] Radar upgrade — purchased from the start-area vending machine
+//      (25 coins). Until bought, the radar only shows zombies as usual
+//      and the compass points at the port. Once bought, the radar also
+//      shows the girl's position (teal dot, rim-clamped so her direction
+//      always shows) and the HUD's live girl-distance row is revealed —
+//      key intel for gauging the time left in the chase.
 //  [ ] Level2Mission.js — track girl's progress to port, check win/lose
 //      conditions each frame
 //  [ ] "YOU LOST THE ANTIDOTE" screen — shown when girl reaches port,
@@ -117,14 +116,13 @@
 import './Level2Config.js';  // MUST be first — sets skip flags before heavy modules
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { scene, addStaticBox, pushKillFeed } from './Scene.js';
+import { scene, addStaticBox, pushKillFeed, dom, sfx } from './Scene.js';
 import { state } from './state.js';
 import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis } from './characters.js';
 import { spawnCoin } from './PowerUps.js';
 import { createToxicMaterial } from './shaders.js';
-import { bootLevel, registerLevelTick } from './Actions.js';
-import { VendingMachine } from './VendingMachine.js';
-import { saferoomSupplyCatalog } from './saferoomSupplyCatalog.js';
+import { bootLevel, registerLevelTick, levelKeyHooks } from './Actions.js';
+import { VendingMachine, makeIcon } from './VendingMachine.js';
 
 const LEVEL_CONFIG = {
   id: 2,
@@ -144,12 +142,25 @@ export function startLevel(mode) {
   // The chase itself: the girl NPC and her per-frame tick.
   spawnGirl();
   registerLevelTick(updateGirl);
+  // Purchases: machine interaction tick + the E key.
+  lv2Machines = [
+    { kind: 'radar', machine: sceneHandles.machines.radar, price: RADAR_PRICE },
+    { kind: 'adrenaline', machine: sceneHandles.machines.adrenaline, price: ADRENALINE_PRICE },
+  ];
+  lv2TeleportPoint = sceneHandles.teleportPoint;
+  adrenalineStock = ADRENALINE_START_STOCK;
+  registerLevelTick(updateVendingInteraction);
+  levelKeyHooks.KeyE = handleKeyE;
 }
 
 // Handles for the logic phase: { machines, teleportPoint } from the
 // scene build, plus lv2HUD (live HUD setters — setGirlDistance etc.).
 export let lv2HUD = null;
 export let lv2Scene = null;
+// Purchase-system runtime refs, filled in startLevel().
+let lv2Machines = null;   // [{ kind, machine, price }]
+let lv2TeleportPoint = null;
+let adrenalineStock = 0;  // remaining in the adrenaline machine
 
 /* =====================================================================
    SCENE DRESSING — the Level 2 layer on the base world
@@ -425,13 +436,14 @@ function scatterDebris(x, z, n, spread) {
 
 /** Vending machine + its collider + pulsing ground marker. The marker
     (toxic material, unfogged) is how the player finds it in the fog.
-    Stock is the example preset until the Level 2 catalog lands. */
-function placeVendingMachine(x, z, ry) {
+    `catalog` is the machine's supplies preset — Level 2 passes its own
+    one-product presets (radar / adrenaline) below. */
+function placeVendingMachine(x, z, ry, catalog) {
   const machine = new VendingMachine({
     scene,
     position: new THREE.Vector3(x, 0, z),
     rotationY: ry,
-    catalog: saferoomSupplyCatalog, // placeholder stock — Level 2 preset comes with purchase logic
+    catalog,
   });
   addStaticBox(
     VendingMachine.WIDTH / 2, VendingMachine.HEIGHT / 2, VendingMachine.DEPTH / 2,
@@ -662,8 +674,8 @@ function buildLevel2Scene() {
 
   const machines = {
     // West sidewalk, fronts facing the street (rotationY = +π/2).
-    radar: placeVendingMachine(-13.4, -25, Math.PI / 2),
-    adrenaline: placeVendingMachine(-13.4, -90, Math.PI / 2),
+    radar: placeVendingMachine(-13.4, -25, Math.PI / 2, radarCatalog),
+    adrenaline: placeVendingMachine(-13.4, -90, Math.PI / 2, adrenalineCatalog),
   };
 
   // Persistent coin clusters along the route — the machine economy's
@@ -807,6 +819,133 @@ function updateGirl(dt) {
       girlSpotted = true;
       pushKillFeed('Girl spotted — heading for the port!');
     }
+  }
+}
+
+/* =====================================================================
+   PURCHASES — the two machines' products, E-key buying, girl intel
+
+   The machine module is display-only by contract: it renders whatever
+   catalog it was given and never touches money, input, or effects. This
+   section is the HOST side — everything the machines deliberately don't
+   do. Prices/stock live here; the one-product presets are built with
+   makeIcon exactly like saferoomSupplyCatalog.js builds its lineup.
+===================================================================== */
+
+const RADAR_PRICE = 25;
+const ADRENALINE_PRICE = 45;
+const ADRENALINE_START_STOCK = 3;
+
+// One-product "support" presets — what each machine shows on its shelf.
+const radarCatalog = {
+  support: [{
+    id: 'radar_upgrade', itemId: 'radar_upgrade', name: 'RADAR',
+    category: 'support', price: RADAR_PRICE, stock: 1,
+    icon: makeIcon(96, 48, (ctx) => {
+      ctx.strokeStyle = '#99aa88'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(40, 24, 15, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(40, 24, 9, 0, Math.PI * 2); ctx.stroke();
+      // sweep beam + center dot + contact blip
+      ctx.beginPath(); ctx.moveTo(40, 24); ctx.lineTo(58, 12); ctx.stroke();
+      ctx.fillStyle = '#99aa88';
+      ctx.beginPath(); ctx.arc(40, 24, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(53, 30, 2, 0, Math.PI * 2); ctx.fill();
+    }),
+  }],
+};
+
+const adrenalineCatalog = {
+  support: [{
+    id: 'adrenaline', itemId: 'adrenaline', name: 'ADRENALINE',
+    category: 'support', price: ADRENALINE_PRICE, stock: ADRENALINE_START_STOCK,
+    icon: makeIcon(96, 48, (ctx) => {
+      ctx.strokeStyle = '#99aa88'; ctx.lineWidth = 2;
+      // syringe, drawn diagonally: barrel, plunger, needle
+      ctx.strokeRect(34, 18, 18, 8);
+      ctx.beginPath(); ctx.moveTo(34, 22); ctx.lineTo(26, 22); ctx.stroke();
+      ctx.strokeRect(21, 19, 5, 6);
+      ctx.beginPath(); ctx.moveTo(52, 22); ctx.lineTo(64, 22); ctx.stroke();
+      // dose marks on the barrel
+      ctx.beginPath(); ctx.moveTo(39, 18); ctx.lineTo(39, 26); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(46, 18); ctx.lineTo(46, 26); ctx.stroke();
+    }),
+  }],
+};
+
+/** Purchase prompt text for a machine in range. */
+function machinePromptText(def) {
+  if (def.kind === 'radar') {
+    return state.hasRadarUpgrade ? 'Radar already installed' : `Buy RADAR (${def.price} coins)`;
+  }
+  if (adrenalineStock <= 0) return 'ADRENALINE — sold out';
+  return `Buy ADRENALINE (${def.price} coins)`;
+}
+
+/** Validate + apply a purchase. All feedback through the killfeed —
+    no shopping UI, matching the display-only machine design. */
+function buyFromMachine(def) {
+  if (def.kind === 'radar') {
+    if (state.hasRadarUpgrade) { pushKillFeed('Radar already installed'); return; }
+    if (state.coins < def.price) { pushKillFeed(`Not enough coins — need ${def.price}`); return; }
+    state.coins -= def.price;
+    state.hasRadarUpgrade = true;
+    sfx.pickup();
+    pushKillFeed('RADAR installed — girl tracked on radar & compass');
+    if (lv2HUD) lv2HUD.setItemCount('radar', 1);
+  } else {
+    if (adrenalineStock <= 0) { pushKillFeed('Adrenaline sold out'); return; }
+    if (state.coins < def.price) { pushKillFeed(`Not enough coins — need ${def.price}`); return; }
+    state.coins -= def.price;
+    adrenalineStock--;
+    state.adrenalineCharges++;
+    sfx.pickup();
+    pushKillFeed(`Adrenaline acquired — press G to activate (${adrenalineStock} left in stock)`);
+    if (lv2HUD) lv2HUD.setItemCount('adrenaline', state.adrenalineCharges);
+  }
+}
+
+/** E key — buy from the machine in range. (The girl-catch dispatch is
+    added with the mission phase; machines and the girl are never in
+    range at the same time anyway.) */
+function handleKeyE() {
+  if (state.isDead || state.paused || state.girlCaught) return;
+  if (!lv2Machines || !playerVis) return;
+  for (const def of lv2Machines) {
+    if (playerVis.group.position.distanceTo(def.machine.root.position) < 2.6) {
+      buyFromMachine(def);
+      return;
+    }
+  }
+}
+
+/** Per-frame purchase/interaction tick. Also owns two always-on Level 2
+    HUD drives while the player is alive: the compass retarget (port →
+    girl once the radar is bought — the locked design) and the live
+    girl-distance row fed through lv2HUD.setGirlDistance. */
+function updateVendingInteraction() {
+  if (!lv2Machines || state.isDead || state.paused || state.girlCaught) return;
+  // Compass retarget: PORT is the visible goal from the start; GIRL only
+  // after the radar purchase. girlPos is a live Vector3 reference, so the
+  // override stays current as she moves without resetting it per frame.
+  state.compassOverride = state.hasRadarUpgrade && state.girlPos
+    ? { pos: state.girlPos, label: 'GIRL' }
+    : { pos: lv2TeleportPoint, label: 'PORT' };
+  if (state.hasRadarUpgrade && state.girlPos && lv2HUD && playerVis) {
+    lv2HUD.setGirlDistance(playerVis.group.position.distanceTo(state.girlPos));
+  }
+  // Machine prompt — runs after Actions' updateInteractionPrompt(), which
+  // (skipCar) hides the stock prompt every frame; showing here wins.
+  let best = null, bestD = Infinity;
+  for (const def of lv2Machines) {
+    const d = playerVis.group.position.distanceTo(def.machine.root.position);
+    if (d < 2.6 && d < bestD) { bestD = d; best = def; }
+  }
+  if (best) {
+    dom.prompt.classList.remove('hidden');
+    dom.prompt.querySelector('b').textContent = 'E';
+    dom.promptText.textContent = machinePromptText(best);
+  } else {
+    dom.prompt.classList.add('hidden');
   }
 }
 
