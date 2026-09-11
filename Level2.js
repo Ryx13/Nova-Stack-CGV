@@ -40,12 +40,18 @@
 //      with a visual effect on loss
 //
 // VENDING MACHINES
-//  [ ] VendingMachine.js — reusable module (procedural 3D model, coin
-//      cost, cooldown, proximity prompt, E to interact)
-//  [ ] Radar machine — near start area. Purchasing shows girl's position
-//      on radar and her distance to the port
-//  [ ] Adrenaline machine — mid-level. Purchasing stores the buff;
-//      player activates with G for a temporary speed boost (full duration)
+//  [x] VendingMachine.js — reusable display module, imported at the project
+//      root (cabinet + screen + shelf cards + catalog browsing via
+//      setSelection; display-only by design — no input/currency/physics)
+//  [ ] Host interaction wrapper — proximity check, E key, coin cost and
+//      purchase validation driving the machines; collision via Scene.js
+//      addStaticBox (auto-registers on the zombie avoidance list)
+//  [ ] Level 2 catalog preset — radar + adrenaline products (copy
+//      saferoomSupplyCatalog.js as the pattern; "support" category fits)
+//  [ ] Radar machine — start of Town Entrance (z ≈ -25). Purchasing shows
+//      girl's position on radar and her distance to the port
+//  [ ] Adrenaline machine — Town Centre (z ≈ -90). Purchasing stores the
+//      buff; player activates with G for +45% speed, 10s (full duration)
 //
 // MISSION / HUD
 //  [ ] Radar upgrade — purchased from the start-area vending machine.
