@@ -1,128 +1,16 @@
-// Level2.js — THE CHASE
+// Level2.js — LEVEL 2 "THE CHASE"
 //
 // The player pursues a girl carrying a critical substance through an
-// abandoned town toward a distant port. She moves at the player's normal
-// walking speed, so the advantage comes from route choice and power-ups,
-// not from her being slower. Danger escalates as the port gets closer —
-// denser zombies, tighter routes, more obstacles, more pressure.
+// abandoned town toward a distant port. She moves at the player's walk
+// speed, so the edge is route choice and power-ups — catch her (occupy
+// her position + E) before she reaches the pier and teleports away.
 //
-// Two ways to lose:
-//   1. Zombies kill the player.
-//   2. The girl reaches the port and teleports away with the antidote.
-//
-// Win: catch the girl (occupy her position) and press E to grab the substance.
-//
-// Key controls (Level 2 specific):
-//   E — Interact with vending machines / Grab substance from the girl
-//   G — Activate adrenaline (purchased from mid-level vending machine)
-//
-// FILE LAYOUT
-// This file carries everything Level 2 owns: the design brief + TODO
-// catalog below, the level config, startLevel(), the full scene dressing
-// builder (port set piece, street blockage, collapse zone, vending
-// machines, coin economy), the reference HUD, and the complete game
-// logic — girl NPC + route, purchases, adrenaline, and the mission
-// system (win/lose, teleport cinematic, zombie escalation).
-//
-// =====================================================================
-//  TODO — Scene & Level Implementation
-// =====================================================================
-//
-// ENVIRONMENT
-//  [x] Town layout tweaks — main-street blockage at z ≈ -57 (wreck-pile
-//      squeeze, east-curb gap) makes the west pocket a real shortcut;
-//      built by buildStreetBlockage() below
-//  [x] Port area — quay, teal water, gantry cranes, container yard,
-//      warehouses, ship silhouettes, and the pier teleport beacon
-//      (unfogged teal glow readable from the level start through the
-//      fog); built by buildPort() below
-//  [x] Escalating obstacles — collapse-zone rubble nest in the eastern
-//      lot (z -120 → -165) + final-approach wreck chokepoints with
-//      burning wrecks; density-based, the six base barriers untouched
-//  [x] Denser zombie spawns near the port, increasing over time as the
-//      girl approaches — updateMission's own spawn timer (6 s → 1.2 s
-//      by her progress) on top of the base 2.5 s interval
-//
-// GIRL NPC
-//  [x] Girl model — Injured Run.glb placeholder (single Mixamo run clip,
-//      tinted + faintly emissive so she reads against the fog; any
-//      single-clip rigged GLB drops in via GIRL_GLB below)
-//  [x] Waypoint path — spawn (0, -45) → blockage east-curb gap →
-//      collapse-zone weave → final-approach gauntlet → quay → pier →
-//      teleport beacon; GIRL_WAYPOINTS below
-//  [x] Movement AI — fixed 3.7 m/s (player walk speed, per the locked
-//      design), waypoint follow, faces travel direction, never stops
-//  [x] Catch mechanic — proximity check (< 2.2 m ≈ occupying her
-//      position) + E key → ANTIDOTE SECURED win screen (updateMission)
-//  [x] Teleport VFX — camera lerps to frame her at the pier beacon,
-//      teal flash sphere + light burst, she dissolves into the beam,
-//      then the YOU LOST THE ANTIDOTE screen (startLoseCinematic)
-//
-// VENDING MACHINES
-//  [x] VendingMachine.js — reusable display module, imported at the project
-//      root (cabinet + screen + shelf cards + catalog browsing via
-//      setSelection; display-only by design — no input/currency/physics)
-//  [x] Host interaction wrapper — proximity check (2.6 m), E key, coin
-//      cost + purchase validation, live prompt via dom.prompt; collision
-//      via addStaticBox (auto-registers on the zombie avoidance list)
-//  [x] Level 2 catalog preset — radar + adrenaline products in the
-//      "support" category (radarCatalog / adrenalineCatalog below)
-//  [x] Radar machine — (z ≈ -25, west sidewalk). 25 coins, one-time:
-//      purchasing reveals the girl on the radar (teal dot), the HUD
-//      girl-distance row, and retargets the compass to her
-//  [x] Adrenaline machine — (z ≈ -90, west sidewalk). 45 coins, stock 3:
-//      purchasing stores a charge (inventory slot lights up); activation
-//      with G is the adrenaline system below
-//
-//  ADRENALINE
-//  [x] G activation — consume a stored charge for +45% speed, 10 s
-//      full duration (handleKeyG / updateAdrenaline below); countdown
-//      shown live in the inventory slot label
-//
-// MISSION / HUD
-//  [x] HUD — reference-style Level 2 layout (buildLevel2HUD below):
-//      top-left objectives list (◆ catch the girl / ☐ reach the port),
-//      port distance under the radar circle, icon health/stamina bars
-//      (blue stamina), bottom-right inventory panel (radar + adrenaline
-//      slots with live counts, coin total), kills mirrored in the
-//      objectives list. Scoped via body.lv2-hud — Level 1/3 unchanged
-//  [x] Radar upgrade — purchased from the start-area vending machine
-//      (25 coins). Until bought, the radar only shows zombies as usual
-//      and the compass points at the port. Once bought, the radar also
-//      shows the girl's position (teal dot, rim-clamped so her direction
-//      always shows) and the HUD's live girl-distance row is revealed —
-//      key intel for gauging the time left in the chase.
-//  [x] Mission system — inline in this file (updateMission) rather than
-//      a Level2Mission.js sibling, per the everything-in-Level2.js rule:
-//      tracks the girl's progress to the port, win/lose checks, extra
-//      zombie spawns, killfeed beats
-//  [x] "YOU LOST THE ANTIDOTE" screen — shown ~3.7 s into the teleport
-//      cinematic (2.2 s approach + 1.5 s flash), with chase stats
-//  [x] Compass retargeted to the girl instead of depot/extraction —
-//      PORT from the start, GIRL after the radar purchase
-//  [x] Killfeed messages for key events — head start, girl spotted,
-//      closing in, nearing port, final stretch, purchases, adrenaline
-//      ready/active/worn off
-//
-// STATE / INTEGRATION
-//  [x] state.js additions — girlPos, girlCaught, portReached,
-//      hasRadarUpgrade, adrenalineCharges/Active/Timer, compassOverride
-//      (all default-off — Levels 1/3 untouched)
-//  [x] Actions.js additions — registerLevelTick() registry called from
-//      animate() outside the gameplay gate, levelKeyHooks (E/G dispatch),
-//      adrenaline ×1.45 in updatePlayerMovement
-//  [x] Tick callbacks — updateGirl, updateVendingInteraction,
-//      updateAdrenaline, updateMission all registered from startLevel()
-
-
-// NOT LOADED (cut for faster loading — not needed for this level's design):
-//  - Car / vehicle system — Level 2 is entirely on foot
-//  - Depot yard + depot guards — no sample-recovery objective
-//  - Extraction point (ring/light) — win by catching the girl, not extracting
-//  - Fuel system / fuel HUD — no car means no fuel
-//  - Speedometer — no vehicle speed to display
-//
-// =====================================================================
+// Design brief, zone map, and the implementation catalog live in
+// level2.md. This file is everything the level owns, in order: level
+// config + startLevel(), scene dressing builders (port set piece,
+// street blockage, collapse zone, vending machines, coins), the girl
+// NPC + route, purchases, adrenaline, the mission system (win/lose,
+// teleport cinematic, zombie escalation), and the reference HUD.
 
 import './Level2Config.js';  // MUST be first — sets skip flags before heavy modules
 import * as THREE from 'three';
@@ -192,24 +80,9 @@ let lv2Lose = null, lv2LoseStats = null;
 
    One-shot scene builder invoked from startLevel() above, right after
    bootLevel() has built the shared base street (characters.js). Pure
-   geometry + lights + colliders — no game logic.
-
-   ZONE MAP (z runs from spawn +40 down to the port -208)
-     Outskirts       z  +40 →  -20   as built by the base scene (safe start)
-     Entrance        z  -20 →  -70   radar machine (z -25), street blockage
-                                       (z ≈ -57, east-curb squeeze), west
-                                       pocket shortcut entrance
-     Centre          z  -70 → -120   adrenaline machine (z -90), denser
-                                       street clutter
-     Collapse        z -120 → -165   eastern lot rubble nest (where the
-                                       Level-1 depot yard was skipped) +
-                                       coin cache risk/reward
-     Final Approach  z -165 → -196   tightest wreck chokepoints, burning
-                                       wrecks lighting the way
-     Port            z -196 → -208   quay, water, cranes, containers,
-                                       warehouses, ship silhouettes, and
-                                       the teal teleport beacon at the pier
-                                       end — the girl's escape point (lose)
+   geometry + lights + colliders — the game logic lives in the sections
+   below and consumes the returned handles ({ machines, teleportPoint }).
+   Zone map: level2.md.
 
    THE TEAL GLOW
    The port must read from the level start as "distinctive gloom + eerie
@@ -220,12 +93,6 @@ let lv2Lose = null, lv2LoseStats = null;
    additive, pulsing via the shared uTime tick) and
    MeshBasicMaterial({ fog: false }). Everything else in the port fades
    in naturally as the player closes distance.
-
-   WHAT IT DOES NOT DO (deliberately — later build stages)
-   No girl NPC, no pathing, no E/G input, no purchase validation, no
-   zombie-density escalation, no win/lose checks. buildLevel2Scene()
-   returns handles ({ machines, teleportPoint }) so the logic phase can
-   wire those systems to this geometry without reaching into it.
 ===================================================================== */
 
 /* ---------------------------------------------------------------------
