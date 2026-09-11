@@ -740,7 +740,11 @@ export function loadObstacles() {
   loadDecorCar('assets/old_rusty_car_2.glb', -(STREET_HALF_W + 3.5), -30, Math.PI / 2 + 0.15, 4.8);
   loadDecorCar('assets/old_rusty_car_2.glb', STREET_HALF_W + 4, -150, -Math.PI / 2 - 0.1, 4.8);
   loadDecorCar('assets/zombie_variant_b.glb', -(STREET_HALF_W + 3.2), -95, Math.PI / 2 - 0.2, 4.5);
-  loadDecorCar('assets/zombie_variant_b.glb', DEPOT_POS.x + 10, DEPOT_POS.z - 4, 0.3, 4.5);
+  // Depot-lot prop — only when the depot exists (Level 2 skips the lot,
+  // so the 13 MB model and its collision box would sit in empty space).
+  if (!state.skipDepot) {
+    loadDecorCar('assets/zombie_variant_b.glb', DEPOT_POS.x + 10, DEPOT_POS.z - 4, 0.3, 4.5);
+  }
   for (let i = 0; i < 6; i++) {
     const z = -20 - i * 24;
     makeBarrier((i % 2 === 0 ? -2.4 : 2.4), z, Math.PI / 2 + (rnd() - 0.5) * 0.28);

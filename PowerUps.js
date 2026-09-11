@@ -30,6 +30,21 @@ const EXPLOSION_RADIUS = 6.5;
 let barrelTemplate = null;
 let explosionTemplate = null;
 
+// The explosion VFX GLB is 18.8 MB — a quarter of the boot-time fetch —
+// for an effect most runs never trigger. Levels can defer it to the
+// first actual explosion via state.lazyExplosionVFX (Level 2 does);
+// the default is an eager load at boot. Either way this runs at most
+// once, and the light-only fallback in spawnExplosionEffect covers the
+// window before it resolves (and the failure case).
+let explosionFetchStarted = false;
+function fetchExplosionTemplate() {
+  if (explosionFetchStarted) return;
+  explosionFetchStarted = true;
+  new GLTFLoader().load('assets/timeframe_explosion.glb', (gltf) => {
+    explosionTemplate = gltf;
+  }, undefined, () => { pushKillFeed('Explosion VFX failed to load — barrels still work, just silent-visual'); });
+}
+
 export class Barrel {
   constructor(pos) {
     this.isBarrel = true;
@@ -92,7 +107,10 @@ export function spawnExplosionEffect(pos) {
   if (!explosionTemplate) {
     // VFX model not loaded yet (or failed) — the kill/damage logic above
     // already happened regardless, this just skips the visual. Still
-    // fade out the light so there's at least a flash.
+    // fade out the light so there's at least a flash. In lazy mode this
+    // is also the trigger that starts the fetch: the first explosion is
+    // light-only, every later one gets the full VFX.
+    if (state.lazyExplosionVFX) fetchExplosionTemplate();
     state.activeExplosions.push({ mixer: null, obj: null, light, duration: 0.4, elapsed: 0 });
     return;
   }
@@ -131,15 +149,16 @@ export function loadBarrels() {
       [-(STREET_HALF_W - 2.2), -62],
       [STREET_HALF_W - 2.4, -132],
       [-(STREET_HALF_W - 2.2), -178],
-      [DEPOT_POS.x - 9, DEPOT_POS.z + 6],
-      [DEPOT_POS.x + 7, DEPOT_POS.z - 7],
       [-(rowX + 15) - 6, WEST_POCKET_Z + 5],
     ];
+    // Depot-lot spots only exist when the depot does (Level 2 skips
+    // the lot — its yard geometry is never built).
+    if (!state.skipDepot) {
+      BARREL_SPOTS.push([DEPOT_POS.x - 9, DEPOT_POS.z + 6], [DEPOT_POS.x + 7, DEPOT_POS.z - 7]);
+    }
     BARREL_SPOTS.forEach(([x, z]) => new Barrel(new THREE.Vector3(x, 0, z)));
   }, undefined, () => { pushKillFeed('Barrel model failed to load'); });
-  new GLTFLoader().load('assets/timeframe_explosion.glb', (gltf) => {
-    explosionTemplate = gltf;
-  }, undefined, () => { pushKillFeed('Explosion VFX failed to load — barrels still work, just silent-visual'); });
+  if (!state.lazyExplosionVFX) fetchExplosionTemplate();
 }
 
 /* ---------------------------------------------------------------------

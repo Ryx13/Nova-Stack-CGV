@@ -122,6 +122,10 @@ export const state = {
   // creating systems the level doesn't need (car, depot, extraction).
   skipCar: false,
   skipDepot: false,
+  // Defer the 18.8 MB explosion VFX model to the first actual barrel
+  // explosion instead of fetching it at boot (PowerUps.js). Level 2 sets
+  // this via Level2Config.js; Levels 1/3 keep the eager boot-time load.
+  lazyExplosionVFX: false,
 
   // Level 2 — "The Chase" mission state (girl NPC, purchases). All
   // default-off/inactive so Levels 1/3, which never touch them, are

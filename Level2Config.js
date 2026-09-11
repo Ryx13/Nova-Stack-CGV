@@ -8,3 +8,7 @@ import { state } from './state.js';
 
 state.skipCar = true;
 state.skipDepot = true;
+// Defer the 18.8 MB explosion VFX GLB to the first barrel explosion —
+// fetched at boot it competes for bandwidth with the player/zombie
+// models that gate the loading screen (PowerUps.js handles both paths).
+state.lazyExplosionVFX = true;

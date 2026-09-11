@@ -63,6 +63,12 @@ Level 2 never builds:
 - Fuel system / fuel HUD — no car means no fuel
 - Speedometer — no vehicle speed to display
 
+One large asset is deferred rather than cut: the explosion VFX model
+(18.8 MB) fetches on the first barrel explosion instead of at boot
+(`state.lazyExplosionVFX` in PowerUps.js), so it never competes for
+bandwidth with the player/zombie models gating the loading screen. The
+first explosion is light-only; every later one gets the full VFX.
+
 Levels 1 and 3 never set the flags, so they load everything as before.
 
 ## File layout
