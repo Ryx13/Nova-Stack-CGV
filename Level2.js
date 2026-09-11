@@ -18,10 +18,11 @@
 //
 // FILE LAYOUT
 // This file carries everything Level 2 owns: the design brief + TODO
-// catalog below, the level config, startLevel(), and (bottom half) the
-// full scene dressing builder — the port set piece, street blockage,
-// collapse zone, vending machines, and coin economy. Game logic (girl
-// NPC, E/G input, purchases, win/lose) gets added here in later stages.
+// catalog below, the level config, startLevel(), the full scene dressing
+// builder (port set piece, street blockage, collapse zone, vending
+// machines, coin economy), the reference HUD, and the complete game
+// logic — girl NPC + route, purchases, adrenaline, and the mission
+// system (win/lose, teleport cinematic, zombie escalation).
 //
 // =====================================================================
 //  TODO — Scene & Level Implementation
@@ -38,8 +39,9 @@
 //  [x] Escalating obstacles — collapse-zone rubble nest in the eastern
 //      lot (z -120 → -165) + final-approach wreck chokepoints with
 //      burning wrecks; density-based, the six base barriers untouched
-//  [ ] Denser zombie spawns near the port, increasing over time as the
-//      girl approaches — logic phase
+//  [x] Denser zombie spawns near the port, increasing over time as the
+//      girl approaches — updateMission's own spawn timer (6 s → 1.2 s
+//      by her progress) on top of the base 2.5 s interval
 //
 // GIRL NPC
 //  [x] Girl model — Injured Run.glb placeholder (single Mixamo run clip,
@@ -50,9 +52,11 @@
 //      teleport beacon; GIRL_WAYPOINTS below
 //  [x] Movement AI — fixed 3.7 m/s (player walk speed, per the locked
 //      design), waypoint follow, faces travel direction, never stops
-//  [ ] Catch mechanic — proximity check (occupy her position) + E key
-//  [ ] Teleport VFX — camera pans to girl at port, she teleports away
-//      with a visual effect on loss
+//  [x] Catch mechanic — proximity check (< 2.2 m ≈ occupying her
+//      position) + E key → ANTIDOTE SECURED win screen (updateMission)
+//  [x] Teleport VFX — camera lerps to frame her at the pier beacon,
+//      teal flash sphere + light burst, she dissolves into the beam,
+//      then the YOU LOST THE ANTIDOTE screen (startLoseCinematic)
 //
 // VENDING MACHINES
 //  [x] VendingMachine.js — reusable display module, imported at the project
@@ -88,21 +92,27 @@
 //      shows the girl's position (teal dot, rim-clamped so her direction
 //      always shows) and the HUD's live girl-distance row is revealed —
 //      key intel for gauging the time left in the chase.
-//  [ ] Level2Mission.js — track girl's progress to port, check win/lose
-//      conditions each frame
-//  [ ] "YOU LOST THE ANTIDOTE" screen — shown when girl reaches port,
-//      with camera showing her teleport
-//  [ ] Compass retargeted to point at the girl instead of depot/extraction
-//  [ ] Killfeed messages for key events (girl spotted, adrenaline ready,
-//      port getting close, radar purchased, etc.)
+//  [x] Mission system — inline in this file (updateMission) rather than
+//      a Level2Mission.js sibling, per the everything-in-Level2.js rule:
+//      tracks the girl's progress to the port, win/lose checks, extra
+//      zombie spawns, killfeed beats
+//  [x] "YOU LOST THE ANTIDOTE" screen — shown ~3.7 s into the teleport
+//      cinematic (2.2 s approach + 1.5 s flash), with chase stats
+//  [x] Compass retargeted to the girl instead of depot/extraction —
+//      PORT from the start, GIRL after the radar purchase
+//  [x] Killfeed messages for key events — head start, girl spotted,
+//      closing in, nearing port, final stretch, purchases, adrenaline
+//      ready/active/worn off
 //
 // STATE / INTEGRATION
-//  [ ] state.js additions — vendingMachines[], adrenalineActive,
-//      adrenalineTimer, girlCaught, portReached, hasRadarUpgrade
-//  [ ] Actions.js additions — tick callback registry for Level 2 systems,
-//      E key (interact), G key (activate adrenaline)
-//  [ ] Tick callbacks — updateGirl(), updateVendingMachines(),
-//      checkLevel2Conditions() registered into the game loop
+//  [x] state.js additions — girlPos, girlCaught, portReached,
+//      hasRadarUpgrade, adrenalineCharges/Active/Timer, compassOverride
+//      (all default-off — Levels 1/3 untouched)
+//  [x] Actions.js additions — registerLevelTick() registry called from
+//      animate() outside the gameplay gate, levelKeyHooks (E/G dispatch),
+//      adrenaline ×1.45 in updatePlayerMovement
+//  [x] Tick callbacks — updateGirl, updateVendingInteraction,
+//      updateAdrenaline, updateMission all registered from startLevel()
 
 
 // NOT LOADED (cut for faster loading — not needed for this level's design):
@@ -117,9 +127,9 @@
 import './Level2Config.js';  // MUST be first — sets skip flags before heavy modules
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { scene, addStaticBox, pushKillFeed, dom, sfx } from './Scene.js';
+import { scene, camera, addStaticBox, pushKillFeed, dom, sfx, KILL_TARGET } from './Scene.js';
 import { state } from './state.js';
-import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis } from './characters.js';
+import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis, spawnZombie } from './characters.js';
 import { spawnCoin } from './PowerUps.js';
 import { createToxicMaterial } from './shaders.js';
 import { bootLevel, registerLevelTick, levelKeyHooks } from './Actions.js';
@@ -155,6 +165,13 @@ export function startLevel(mode) {
   // Adrenaline boost lifecycle: the G key + the per-frame timer.
   registerLevelTick(updateAdrenaline);
   levelKeyHooks.KeyG = handleKeyG;
+  // Mission: catch/win + lose cinematic, zombie escalation, killfeed
+  // beats. Registered LAST so its girl-catch prompt write lands after
+  // updateVendingInteraction's machine prompt write (girl wins ranges
+  // that somehow overlap).
+  missionStartTime = performance.now();
+  buildLevel2EndScreens();
+  registerLevelTick(updateMission);
 }
 
 // Handles for the logic phase: { machines, teleportPoint } from the
@@ -165,6 +182,9 @@ export let lv2Scene = null;
 let lv2Machines = null;   // [{ kind, machine, price }]
 let lv2TeleportPoint = null;
 let adrenalineStock = 0;  // remaining in the adrenaline machine
+// End-screen refs, created by buildLevel2EndScreens (mission section).
+let lv2Win = null, lv2WinStats = null;
+let lv2Lose = null, lv2LoseStats = null;
 
 /* =====================================================================
    SCENE DRESSING — the Level 2 layer on the base world
@@ -908,12 +928,16 @@ function buyFromMachine(def) {
   }
 }
 
-/** E key — buy from the machine in range. (The girl-catch dispatch is
-    added with the mission phase; machines and the girl are never in
-    range at the same time anyway.) */
+/** E key — girl catch first, then machine purchase. */
 function handleKeyE() {
   if (state.isDead || state.paused || state.girlCaught) return;
-  if (!lv2Machines || !playerVis) return;
+  if (!playerVis) return;
+  // Catch: occupy her position + press E — the locked win condition.
+  if (state.girlPos && playerVis.group.position.distanceTo(state.girlPos) < CATCH_RANGE) {
+    catchGirl();
+    return;
+  }
+  if (!lv2Machines) return;
   for (const def of lv2Machines) {
     if (playerVis.group.position.distanceTo(def.machine.root.position) < 2.6) {
       buyFromMachine(def);
@@ -994,6 +1018,234 @@ function updateAdrenaline(dt) {
     return;
   }
   if (lv2HUD) lv2HUD.setSlotText('adrenaline', `${Math.ceil(state.adrenalineTimer)}s`);
+}
+
+/* =====================================================================
+   MISSION — catch/win, the teleport lose cinematic, zombie escalation
+
+   Everything end-state, in priority order every frame:
+     1. The lose cinematic is running → it owns the camera, the girl and
+        the teleport flash until YOU LOST THE ANTIDOTE is on screen.
+     2. Already ended (girl caught / player died) → nothing to do; the
+        matching end screen is up.
+     3. The girl reached the pier beacon (updateGirl set portReached) →
+        start the lose cinematic.
+     4. Otherwise: the catch prompt when the player occupies her
+        position, and the escalation spawner ticking faster the closer
+        she is to the port (6 s → 1.2 s on top of the base 2.5 s beat).
+===================================================================== */
+
+const CATCH_RANGE = 2.2;   // "occupy her position" tolerance for the E grab
+const ESCALATE_START = 6;  // extra-spawn interval at girl progress 0 (s)
+const ESCALATE_MIN = 1.2;  // ...at progress 1 — she's at the pier
+// Her full route length, measured from the waypoint list — the progress
+// denominator for the escalation ramp.
+const GIRL_ROUTE_LENGTH = GIRL_WAYPOINTS.reduce((acc, wp, i) => {
+  if (!i) return acc;
+  const prev = GIRL_WAYPOINTS[i - 1];
+  return acc + Math.hypot(wp.x - prev.x, wp.z - prev.z);
+}, 0);
+
+let missionStartTime = 0;  // performance.now() set in startLevel()
+let escalationTimer = ESCALATE_START;
+// One-shot killfeed progress beats (see the TODO catalog's beat list).
+let beatClosingIn = false, beatNearingPort = false, beatFinalStretch = false;
+// Active lose cinematic: { phase: 'approach'|'teleport', t, camGoal,
+// lookAt, flash, flashLight }. Null outside the ~4 s sequence.
+let loseCinematic = null;
+
+/** The two Level 2 end screens, mirroring the stock .end-screen pattern
+    (index.html owns the shared CSS). ANTIDOTE SECURED reads green like
+    the stock win; YOU LOST THE ANTIDOTE reads teal — the port's color. */
+function buildLevel2EndScreens() {
+  if (lv2Win) return; // already built (one session = one level run)
+  const style = document.createElement('style');
+  style.textContent = `
+    #lv2-winscreen .end-title { color: #5fe07f; text-shadow: 0 0 30px rgba(60,220,110,.6); }
+    #lv2-losescreen .end-title { color: #2affd5; text-shadow: 0 0 30px rgba(42,255,213,.55); }
+  `;
+  document.head.appendChild(style);
+
+  const winEl = document.createElement('div');
+  winEl.id = 'lv2-winscreen';
+  winEl.className = 'end-screen hidden';
+  winEl.innerHTML = `
+    <h1 class="end-title">ANTIDOTE SECURED</h1>
+    <div class="end-sub" id="lv2-win-stats"></div>
+    <button onclick="location.reload()">Play Again</button>`;
+  document.body.appendChild(winEl);
+  lv2Win = winEl;
+  lv2WinStats = winEl.querySelector('#lv2-win-stats');
+
+  const loseEl = document.createElement('div');
+  loseEl.id = 'lv2-losescreen';
+  loseEl.className = 'end-screen hidden';
+  loseEl.innerHTML = `
+    <h1 class="end-title">YOU LOST THE ANTIDOTE</h1>
+    <div class="end-sub" id="lv2-lose-stats"></div>
+    <button onclick="location.reload()">Restart Demo</button>`;
+  document.body.appendChild(loseEl);
+  lv2Lose = loseEl;
+  lv2LoseStats = loseEl.querySelector('#lv2-lose-stats');
+}
+
+/** Chase duration for the end-screen stat lines. */
+function chaseSeconds() {
+  return ((performance.now() - missionStartTime) / 1000).toFixed(1);
+}
+
+/** WIN — the player occupied her position and pressed E (handleKeyE).
+    Instant screen, same beat as the stock doWin. */
+function catchGirl() {
+  state.girlCaught = true;
+  state.isDead = true;             // freezes the gameplay gate
+  state.adrenalineActive = false; // stop the countdown label writer
+  sfx.setEngine(0, false);
+  sfx.pickup();
+  document.exitPointerLock();
+  dom.prompt.classList.add('hidden');
+  if (girl) scene.remove(girl.group); // grabbed — she's gone
+  lv2WinStats.textContent =
+    `Infected eliminated: ${state.kills} · Coins: ${state.coins} · Antidote secured in ${chaseSeconds()} s`;
+  lv2Win.classList.remove('hidden');
+}
+
+/** LOSE trigger — she made the pier beacon. Hands the next ~4 s to the
+    cinematic: camera swings to a pier vantage framing her at the
+    beacon, the teleport flash takes her, then the lose screen. */
+function startLoseCinematic() {
+  state.isDead = true;             // freeze gameplay incl. the stock camera
+  state.adrenalineActive = false;
+  sfx.setEngine(0, false);
+  document.exitPointerLock();
+  dom.prompt.classList.add('hidden');
+  pushKillFeed('She reached the port —');
+  // Vantage past the quay's container stacks, framing her on the pier
+  // with the beacon beam and open water behind her.
+  const gp = state.girlPos;
+  loseCinematic = {
+    phase: 'approach',
+    t: 0,
+    camGoal: new THREE.Vector3(6.5, 3.4, -196.5),
+    lookAt: new THREE.Vector3(gp.x, 1.2, gp.z),
+    flash: null,
+    flashLight: null,
+  };
+}
+
+/** The cinematic itself — this tick owns the camera while the gameplay
+    gate is frozen. approach (~2.2 s): swing to the vantage, watching her
+    wait at the beacon. teleport (~1.5 s): expanding teal flash + light
+    spike, she fades and is drawn up into the beam, then the screen. */
+function updateLoseCinematic(dt) {
+  const c = loseCinematic;
+  c.t += dt;
+  camera.position.lerp(c.camGoal, Math.min(1, dt * 1.8));
+  camera.lookAt(c.lookAt);
+
+  if (c.phase === 'approach') {
+    if (c.t >= 2.2) {
+      c.phase = 'teleport';
+      c.t = 0;
+      // The beacon takes her: unfogged additive flash + light spike.
+      const p = state.girlPos.clone();
+      const flash = new THREE.Mesh(
+        new THREE.SphereGeometry(0.6, 24, 16),
+        new THREE.MeshBasicMaterial({
+          color: TEAL, transparent: true, opacity: 0.85,
+          blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+        })
+      );
+      flash.position.copy(p); flash.position.y += 1;
+      scene.add(flash);
+      const light = new THREE.PointLight(TEAL_LIGHT, 0, 26, 2);
+      light.position.copy(p); light.position.y += 1.4;
+      scene.add(light);
+      c.flash = flash;
+      c.flashLight = light;
+      sfx.burst('sawtooth', 720, 1.1, 0.3);
+      pushKillFeed('— and teleported away.');
+    }
+    return;
+  }
+
+  // Teleport phase — flash expands & fades, girl dissolves into it.
+  const k = Math.min(1, c.t / 1.5);
+  if (c.flash) {
+    c.flash.scale.setScalar(1 + k * 9);
+    c.flash.material.opacity = 0.85 * (1 - k);
+  }
+  if (c.flashLight) c.flashLight.intensity = 9 * Math.sin(k * Math.PI);
+  if (girl) {
+    girl.group.traverse((o) => {
+      if (!o.isMesh) return;
+      o.material.transparent = true;
+      o.material.opacity = 1 - k;
+    });
+    girl.group.position.y += dt * 1.6; // drawn up into the beam
+  }
+  if (k >= 1) {
+    if (girl) { scene.remove(girl.group); girl = null; }
+    if (c.flash) {
+      scene.remove(c.flash);
+      c.flash.geometry.dispose();
+      c.flash.material.dispose();
+    }
+    if (c.flashLight) scene.remove(c.flashLight);
+    state.girlPos = null;
+    loseCinematic = null;
+    lv2LoseStats.textContent =
+      `Infected eliminated: ${state.kills} · Coins: ${state.coins} · She reached the port in ${chaseSeconds()} s`;
+    lv2Lose.classList.remove('hidden');
+  }
+}
+
+/** Per-frame mission tick — see the section header for the priority
+    order. */
+function updateMission(dt) {
+  if (state.paused) return;
+  if (loseCinematic) { updateLoseCinematic(dt); return; }
+  if (state.girlCaught || state.isDead) return; // ended either way
+  if (!playerVis || !state.girlPos) return;
+
+  // Lose trigger — updateGirl (registered earlier) already flagged her
+  // arrival at the beacon this frame.
+  if (state.portReached) { startLoseCinematic(); return; }
+
+  // Catch prompt — a near-approach cue before grab range itself.
+  const distToGirl = playerVis.group.position.distanceTo(state.girlPos);
+  if (distToGirl < CATCH_RANGE * 1.6) {
+    dom.prompt.classList.remove('hidden');
+    dom.prompt.querySelector('b').textContent = 'E';
+    dom.promptText.textContent = distToGirl <= CATCH_RANGE ? 'Grab the antidote' : 'Get closer…';
+  }
+
+  // One-shot progress beats — the chase's tension clock.
+  if (!beatClosingIn && distToGirl < 12) {
+    beatClosingIn = true;
+    pushKillFeed('Closing in — keep the pressure on');
+  }
+  const girlDist = state.girlPos.distanceTo(lv2TeleportPoint);
+  if (!beatNearingPort && girlDist < 50) {
+    beatNearingPort = true;
+    pushKillFeed("She's nearing the port!");
+  } else if (!beatFinalStretch && girlDist < 25) {
+    beatFinalStretch = true;
+    pushKillFeed("Final stretch — she's almost gone!");
+  }
+
+  // Zombie escalation — the base spawner keeps its flat 2.5 s beat; this
+  // adds pressure ramping with her progress to the port. The stock
+  // spawner's total cap (KILL_TARGET + 10) is Level 1 pacing — kills
+  // aren't this level's goal — so the counter is kept from running dry;
+  // the alive cap (14) still bounds everything.
+  if (state.spawnedTotal >= KILL_TARGET + 8) state.spawnedTotal = 0;
+  escalationTimer -= dt;
+  if (escalationTimer <= 0) {
+    const progress = THREE.MathUtils.clamp(1 - girlDist / GIRL_ROUTE_LENGTH, 0, 1);
+    escalationTimer = ESCALATE_START - (ESCALATE_START - ESCALATE_MIN) * progress;
+    spawnZombie();
+  }
 }
 
 /* =====================================================================
