@@ -1,17 +1,7 @@
 /* ======================================================================
    VENDING MACHINE — reusable "SAFEROOM SUPPLY" survival vending machine
    (Nova-Stack-CGV project root: VendingMachine.js)
-
-   WHAT IT IS
-   A self-contained Three.js scene object: the wall-mounted industrial
-   vending cabinet — chassis, front frame, empty display bays/shelves,
-   glass window, right-side controls column (screen bezel, credit slot,
-   keypad) and retrieval compartment. It is built entirely from Three.js
-   geometry (no imported model) and is stage-independent: it knows
-   nothing about which level it is placed in, nor about money,
-   inventory, input, or audio. All game-specific behavior is injected
-   by the host game in later build stages.
-
+   
    HOW TO USE IT (from any level module — Level1.js / Level2.js / Level3.js)
      import { VendingMachine } from './VendingMachine.js';
      import { saferoomSupplyCatalog } from './saferoomSupplyCatalog.js';
@@ -197,7 +187,11 @@ function renderCard(ctx, product, x, y, w, h) {
 const WIDTH  = 1.06;
 const HEIGHT = 2.02;
 const DEPTH  = 0.62;
-const SCALE = 1.15;
+// 1.6 — landmark scale: a ~3.2 m cabinet reads through fog and rain
+// instead of vanishing into the street clutter. Host-side colliders
+// are built from the scaled WIDTH/HEIGHT/DEPTH statics, so they grow
+// with this automatically.
+const SCALE = 1.6;
 
 export class VendingMachine {
   static SCALE = SCALE;

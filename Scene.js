@@ -706,10 +706,16 @@ const RADAR_RANGE = 42;
 export function drawRadar(selfPos, selfYaw) {
   const w = dom.radar.width, h = dom.radar.height, cx = w / 2, cy = h / 2;
   radarCtx.clearRect(0, 0, w, h);
-  radarCtx.fillStyle = 'rgba(20,28,18,0.55)';
+  // Level 2 (compassOverride set) paints the radar in the port's teal with
+  // a second range ring; Levels 1/3 keep the stock green-on-black look.
+  const lv2 = !!state.compassOverride;
+  radarCtx.fillStyle = lv2 ? 'rgba(6,18,16,0.62)' : 'rgba(20,28,18,0.55)';
   radarCtx.beginPath(); radarCtx.arc(cx, cy, w / 2, 0, Math.PI * 2); radarCtx.fill();
-  radarCtx.strokeStyle = 'rgba(80,120,70,0.35)';
+  radarCtx.strokeStyle = lv2 ? 'rgba(42,255,213,0.3)' : 'rgba(80,120,70,0.35)';
   radarCtx.beginPath(); radarCtx.arc(cx, cy, w * 0.25, 0, Math.PI * 2); radarCtx.stroke();
+  if (lv2) {
+    radarCtx.beginPath(); radarCtx.arc(cx, cy, w * 0.375, 0, Math.PI * 2); radarCtx.stroke();
+  }
   radarCtx.save();
   radarCtx.translate(cx, cy);
   radarCtx.rotate(-selfYaw);
@@ -732,7 +738,9 @@ export function drawRadar(selfPos, selfYaw) {
       radarCtx.beginPath(); radarCtx.arc(px, py, 4, 0, Math.PI * 2); radarCtx.fill();
     }
   }
-  if (state.stage === 2 && !state.ingredientCollected) {
+  // compassOverride guard: Level 2 never draws the stock depot marker —
+  // its own target blip below replaces it (and the depot lot is skipped).
+  if (state.stage === 2 && !state.ingredientCollected && !state.compassOverride) {
     const rx = DEPOT_POS.x - selfPos.x, rz = DEPOT_POS.z - selfPos.z;
     const d = Math.hypot(rx, rz);
     const clampedD = Math.min(d, RADAR_RANGE * 0.9);
@@ -741,11 +749,15 @@ export function drawRadar(selfPos, selfYaw) {
     radarCtx.fillStyle = '#ffaa22';
     radarCtx.beginPath(); radarCtx.arc(px, py, 4, 0, Math.PI * 2); radarCtx.fill();
   }
-  // Level 2 girl marker — only after the radar upgrade is bought (locked
-  // design: girl intel is the machine's product). Rim-clamped like the
-  // depot marker so her direction always shows even beyond radar range.
-  if (state.hasRadarUpgrade && state.girlPos) {
-    const rx = state.girlPos.x - selfPos.x, rz = state.girlPos.z - selfPos.z;
+  // Level 2 target marker — state.compassOverride is this level's live
+  // objective (PORT until the radar upgrade is bought, then the GIRL —
+  // girl intel stays a machine product per the locked design). Rim-
+  // clamped like the depot marker so the target's direction always reads
+  // even beyond radar range, with a halo ring so it reads as the radar's
+  // primary blip. Levels 1/3 never set compassOverride.
+  if (state.compassOverride && state.compassOverride.pos) {
+    const t = state.compassOverride.pos;
+    const rx = t.x - selfPos.x, rz = t.z - selfPos.z;
     const d = Math.hypot(rx, rz);
     const clampedD = Math.min(d, RADAR_RANGE * 0.9);
     const scale = clampedD / (d || 1);
@@ -754,6 +766,11 @@ export function drawRadar(selfPos, selfYaw) {
     radarCtx.beginPath();
     radarCtx.arc(px, py, 4.5, 0, Math.PI * 2);
     radarCtx.fill();
+    radarCtx.strokeStyle = 'rgba(42,255,213,0.55)';
+    radarCtx.lineWidth = 1;
+    radarCtx.beginPath();
+    radarCtx.arc(px, py, 6.5, 0, Math.PI * 2);
+    radarCtx.stroke();
   }
   radarCtx.restore();
   radarCtx.fillStyle = '#fff';

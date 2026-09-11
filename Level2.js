@@ -74,26 +74,6 @@ let adrenalineStock = 0;  // remaining in the adrenaline machine
 let lv2Win = null, lv2WinStats = null;
 let lv2Lose = null, lv2LoseStats = null;
 
-/* =====================================================================
-   SCENE DRESSING — the Level 2 layer on the base world
-   (formerly its own Level2Scene.js — merged into this file)
-
-   One-shot scene builder invoked from startLevel() above, right after
-   bootLevel() has built the shared base street (characters.js). Pure
-   geometry + lights + colliders — the game logic lives in the sections
-   below and consumes the returned handles ({ machines, teleportPoint }).
-   Zone map: level2.md.
-
-   THE TEAL GLOW
-   The port must read from the level start as "distinctive gloom + eerie
-   teal glow" through ~200 m of FogExp2. Ordinary materials fog out to
-   nothing at that range, so the glow elements (pier light column,
-   crane-top beacons, teleport ring) use unfogged materials:
-   createToxicMaterial() from shaders.js (custom shader — no fog chunk,
-   additive, pulsing via the shared uTime tick) and
-   MeshBasicMaterial({ fog: false }). Everything else in the port fades
-   in naturally as the player closes distance.
-===================================================================== */
 
 /* ---------------------------------------------------------------------
    Deterministic RNG — own seed, own sequence. Never touches the
@@ -113,6 +93,11 @@ const rnd = mulberry32(0x5EED02);
 // Port palette — the eerie teal that marks the destination.
 const TEAL = 0x2affd5;
 const TEAL_LIGHT = 0x17d5b0;
+// Machine beacon palette — lime marks the start machine (radar), pink
+// the mid-level one (adrenaline). Each machine's position glows in its
+// own color through the fog from far away (see placeVendingMachine).
+const RADAR_GLOW = 0x7cff3a;      // the ground marker's innate lime
+const ADRENALINE_GLOW = 0xff4fd8; // pinkish — adrenaline's signature
 
 const CONTAINER_COLORS = [0x8a3423, 0x2f4a5a, 0x6b6b2f, 0x3a4048, 0x6e4a20];
 
@@ -325,11 +310,17 @@ function scatterDebris(x, z, n, spread) {
   }
 }
 
-/** Vending machine + its collider + pulsing ground marker. The marker
-    (toxic material, unfogged) is how the player finds it in the fog.
-    `catalog` is the machine's supplies preset — Level 2 passes its own
-    one-product presets (radar / adrenaline) below. */
-function placeVendingMachine(x, z, ry, catalog) {
+/** Vending machine + its collider + full beacon. The beacon is how the
+    player finds the machine in the fog, in the machine's own glow
+    color: a ground ring marking the stand-here spot, a vertical light
+    column rising from the cabinet top (crests wrecks and containers
+    from afar, but tops out well below the port's taller teal spire,
+    which stays THE landmark), and a point light washing the cabinet
+    front so it reads up close too. Ring and beam use the same unfogged,
+    pulsing toxic material as the port beacon. `catalog` is the
+    machine's supplies preset — Level 2 passes its own one-product
+    presets (radar / adrenaline) below. */
+function placeVendingMachine(x, z, ry, catalog, glow = RADAR_GLOW) {
   const machine = new VendingMachine({
     scene,
     position: new THREE.Vector3(x, 0, z),
@@ -340,11 +331,21 @@ function placeVendingMachine(x, z, ry, catalog) {
     VendingMachine.WIDTH / 2, VendingMachine.HEIGHT / 2, VendingMachine.DEPTH / 2,
     x, VendingMachine.HEIGHT / 2, z, ry
   );
-  const marker = new THREE.Mesh(new THREE.RingGeometry(0.95, 1.25, 36), createToxicMaterial(0x7cff3a));
+  // Ground ring — the stand-here spot. Offset clears the (now bigger)
+  // cabinet's footprint while staying inside the 2.6 m buy range.
+  const marker = new THREE.Mesh(new THREE.RingGeometry(1.3, 1.7, 36), createToxicMaterial(glow));
   marker.rotation.x = -Math.PI / 2;
   // Local +Z is the cabinet front — drop the marker in front of it.
-  marker.position.set(x + Math.sin(ry) * 1.5, 0.05, z + Math.cos(ry) * 1.5);
+  marker.position.set(x + Math.sin(ry) * 2.2, 0.05, z + Math.cos(ry) * 2.2);
   scene.add(marker);
+  // Vertical beam from the cabinet top — the position landmark.
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(0.35, 5.5, 0.35), createToxicMaterial(glow));
+  beam.position.set(x, VendingMachine.HEIGHT + 2.75, z);
+  scene.add(beam);
+  // Close-range wash so the cabinet itself reads in its glow color.
+  const wash = new THREE.PointLight(glow, 1.6, 10, 2);
+  wash.position.set(x + Math.sin(ry) * 0.8, 2.4, z + Math.cos(ry) * 0.8);
+  scene.add(wash);
   return machine;
 }
 
@@ -565,8 +566,9 @@ function buildLevel2Scene() {
 
   const machines = {
     // West sidewalk, fronts facing the street (rotationY = +π/2).
-    radar: placeVendingMachine(-13.4, -25, Math.PI / 2, radarCatalog),
-    adrenaline: placeVendingMachine(-13.4, -90, Math.PI / 2, adrenalineCatalog),
+    // Lime beacon = radar (start), pink beacon = adrenaline (centre).
+    radar: placeVendingMachine(-13.4, -25, Math.PI / 2, radarCatalog, RADAR_GLOW),
+    adrenaline: placeVendingMachine(-13.4, -90, Math.PI / 2, adrenalineCatalog, ADRENALINE_GLOW),
   };
 
   // Persistent coin clusters along the route — the machine economy's
@@ -585,17 +587,7 @@ function buildLevel2Scene() {
   return { machines, teleportPoint: port.teleportPoint };
 }
 
-/* =====================================================================
-   THE GIRL — the chase target
 
-   The NPC carrying the antidote. No physics body by design: nothing
-   blocks or damages her — the player's only interaction is catching
-   her (proximity + E, wired with the purchase system) and watching
-   her teleport at the pier (the lose cinematic). state.girlPos is a
-   LIVE reference to her group's position, set once on load — the
-   radar dot, compass retarget and HUD distance read it every frame
-   for free.
-===================================================================== */
 
 // Placeholder model: Injured Run.glb (single Mixamo run clip — a
 // fleeing figure, thematically right for the chase). Any single-clip
@@ -713,15 +705,7 @@ function updateGirl(dt) {
   }
 }
 
-/* =====================================================================
-   PURCHASES — the two machines' products, E-key buying, girl intel
 
-   The machine module is display-only by contract: it renders whatever
-   catalog it was given and never touches money, input, or effects. This
-   section is the HOST side — everything the machines deliberately don't
-   do. Prices/stock live here; the one-product presets are built with
-   makeIcon exactly like saferoomSupplyCatalog.js builds its lineup.
-===================================================================== */
 
 const RADAR_PRICE = 25;
 const ADRENALINE_PRICE = 45;
@@ -747,7 +731,7 @@ const radarCatalog = {
 
 const adrenalineCatalog = {
   support: [{
-    id: 'adrenaline', itemId: 'adrenaline', name: 'ADRENALINE',
+    id: 'adrenaline', itemId: 'adrenaline', name: 'ADRENALINE SHOT',
     category: 'support', price: ADRENALINE_PRICE, stock: ADRENALINE_START_STOCK,
     icon: makeIcon(96, 48, (ctx) => {
       ctx.strokeStyle = '#99aa88'; ctx.lineWidth = 2;
@@ -844,14 +828,6 @@ function updateVendingInteraction() {
   }
 }
 
-/* =====================================================================
-   ADRENALINE — stored charges, G activation, the 10 s boost
-
-   The speed multiplier itself lives in Actions.js updatePlayerMovement
-   (×1.45 while state.adrenalineActive) — one shared line, no
-   level-specific movement code. This section owns activation, the
-   countdown, and the expiry beat.
-===================================================================== */
 
 const ADRENALINE_DURATION = 10; // seconds — full duration per the design
 
@@ -887,20 +863,7 @@ function updateAdrenaline(dt) {
   if (lv2HUD) lv2HUD.setSlotText('adrenaline', `${Math.ceil(state.adrenalineTimer)}s`);
 }
 
-/* =====================================================================
-   MISSION — catch/win, the teleport lose cinematic, zombie escalation
 
-   Everything end-state, in priority order every frame:
-     1. The lose cinematic is running → it owns the camera, the girl and
-        the teleport flash until YOU LOST THE ANTIDOTE is on screen.
-     2. Already ended (girl caught / player died) → nothing to do; the
-        matching end screen is up.
-     3. The girl reached the pier beacon (updateGirl set portReached) →
-        start the lose cinematic.
-     4. Otherwise: the catch prompt when the player occupies her
-        position, and the escalation spawner ticking faster the closer
-        she is to the port (6 s → 1.2 s on top of the base 2.5 s beat).
-===================================================================== */
 
 const CATCH_RANGE = 2.2;   // "occupy her position" tolerance for the E grab
 const ESCALATE_START = 6;  // extra-spawn interval at girl progress 0 (s)
@@ -1115,39 +1078,6 @@ function updateMission(dt) {
   }
 }
 
-/* =====================================================================
-   LEVEL 2 HUD — reference-style corner layout
-
-   Everything here is created at runtime by Level 2 only: a stylesheet
-   injected into <head> plus panel elements appended to #hud, all
-   scoped under the body.lv2-hud class. Level 1 / Level 3 never add the
-   class, so they keep the stock HUD untouched. Elements live inside
-   #hud so the loading screen's .hidden toggle covers them too.
-
-   LAYOUT (matching the reference)
-     top-left      objectives list — ◆ active goal (amber diamond),
-                   ☐ secondary goal (empty checkbox), kills line
-     top-right     under the radar circle — live "Port: XXX m" readout
-                   (ship glyph); a hidden "Girl: XXX m" row that the
-                   logic phase reveals once the radar upgrade is bought
-                   (locked design: girl intel only after purchase)
-     bottom-left   health/stamina bars gain white icons and the stamina
-                   bar switches amber → blue
-     bottom-right  inventory panel — RADAR and ADRENALINE slots with
-                   live counts (dim at x0, neon glow when owned) and the
-                   coin total underneath
-   The stock top-center coin label and the depot objective line are
-   hidden for Level 2 (coins moved into the inventory panel; the depot
-   objective text is wrong for this level anyway).
-
-   UPDATES
-   No tick-registry exists yet (logic phase), so a light 400 ms poll
-   drives the live numbers — player position → port distance, coin
-   count, kills mirror, item counts (read defensively; the state fields
-   land with purchase logic). The returned handle exposes setters the
-   logic phase will call instead of polling: setGirlDistance(),
-   setItemCount().
-===================================================================== */
 
 // Compact inline icons — currentColor lets CSS own the tint.
 const LV2_ICON_HEART = '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 21S4.5 16.1 2.2 11.8C.4 8.6 2 5 5.5 5c2 0 3.4 1.1 4.3 2.6C10.7 6.1 12.1 5 14.1 5c3.5 0 5.1 3.6 3.3 6.8C19.5 16.1 12 21 12 21z"/></svg>';
@@ -1167,30 +1097,45 @@ function buildLevel2HUD(portTarget) {
     body.lv2-hud #objective, body.lv2-hud #killcount { display: none; }
     body.lv2-hud #coin-label { display: none !important; }
     body.lv2-hud #killfeed { top: 248px; }
-    body.lv2-hud #bottom-right { bottom: 128px; }
+    /* Reference-matching cuts: no center compass (the radar's target
+       blip + the distance rows carry direction), no pause button (Tab
+       still pauses), no weapon/ammo block (the reference's bottom-right
+       is the inventory panel), and no weapon label (#weapon-label is
+       built dynamically in Scene.js and floats bottom-center). */
+    body.lv2-hud #objective-compass, body.lv2-hud #pause-btn,
+    body.lv2-hud #bottom-right, body.lv2-hud #weapon-label { display: none; }
     body.lv2-hud #stamina-fill { background: linear-gradient(90deg, #0d3a8a, #2f7fe0); }
     body.lv2-hud .bar-label { display: none; }
     body.lv2-hud .bar-wrap { display: flex; align-items: center; gap: 8px; }
     body.lv2-hud .bar-icon { display: flex; color: #fff; width: 18px; height: 18px;
       filter: drop-shadow(0 0 3px rgba(255,255,255,.35)); flex: none; }
     body.lv2-hud .bar-bg { flex: 1; }
-    /* Red north marker on the radar ring (reference compass cue). */
-    body.lv2-hud #radar-wrap::before { content: ""; position: absolute; top: 3px; left: 50%;
-      transform: translateX(-50%); width: 6px; height: 6px; border-radius: 50%;
-      background: #ff4040; box-shadow: 0 0 6px #ff4040; z-index: 2; }
+    /* Reference: the bars sit in their own angled translucent panel. */
+    body.lv2-hud #bottom-left { width: 240px; padding: 12px 14px;
+      background: rgba(8,10,14,.58); border: 1px solid rgba(255,255,255,.14);
+      clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px)); }
+    /* Radar restyle toward the reference compass: teal ring glow, red N. */
+    body.lv2-hud #radar-wrap { border-color: rgba(42,255,213,.4);
+      box-shadow: 0 0 14px rgba(42,255,213,.22), inset 0 0 18px rgba(42,255,213,.1); }
+    body.lv2-hud #radar-wrap::before { content: "N"; position: absolute; top: 0; left: 50%;
+      transform: translateX(-50%); font: 700 11px/12px 'Oswald', sans-serif;
+      color: #ff5252; text-shadow: 0 0 6px rgba(255,80,80,.9); z-index: 2; }
 
-    /* ---- objectives (top-left) ---- */
+    /* ---- objectives (top-left) — reference: dimmed panel, secondary
+       objective grayed, no kills line ---- */
     #lv2-objectives { position: absolute; top: 18px; left: 22px; max-width: 330px;
       font-size: 14.5px; font-weight: 600; letter-spacing: 0.5px; color: #fff;
-      text-shadow: 0 1px 3px rgba(0,0,0,.85); }
+      text-shadow: 0 1px 3px rgba(0,0,0,.85);
+      background: rgba(8,10,14,.58); border: 1px solid rgba(255,255,255,.14);
+      border-radius: 4px; padding: 12px 16px; }
     #lv2-objectives .lv2-obj { display: flex; align-items: flex-start; gap: 9px;
       margin-bottom: 5px; line-height: 1.25; }
+    #lv2-objectives .lv2-obj:last-child { margin-bottom: 0; }
+    #lv2-objectives .lv2-obj.secondary { color: #b7b0a2; }
     .lv2-obj-icon { flex: none; width: 13px; height: 13px; margin-top: 3px; }
     .lv2-obj-icon.active { color: #e0a83c; text-shadow: 0 0 8px rgba(224,168,60,.8);
       font-size: 13px; line-height: 13px; }
     .lv2-obj-icon.box { border: 1.5px solid rgba(255,255,255,.5); margin-top: 4px; }
-    #lv2-objectives .lv2-kills { margin-top: 7px; font-size: 11.5px; letter-spacing: 1.5px;
-      color: #b7b0a2; }
 
     /* ---- distances (top-right, under the radar) ---- */
     #lv2-distances { position: absolute; top: 176px; right: 22px; width: 150px;
@@ -1201,9 +1146,10 @@ function buildLevel2HUD(portTarget) {
     #lv2-port-dist svg { color: #2affd5; filter: drop-shadow(0 0 4px rgba(42,255,213,.6)); }
 
     /* ---- inventory panel (bottom-right) ---- */
-    #lv2-inventory { position: absolute; right: 22px; bottom: 22px; width: 188px;
+    #lv2-inventory { position: absolute; right: 22px; bottom: 22px; width: 216px;
       background: rgba(8,10,14,.6); border: 1px solid rgba(255,255,255,.14);
-      border-radius: 10px; padding: 12px 14px; backdrop-filter: blur(2px); }
+      padding: 12px 14px; backdrop-filter: blur(2px);
+      clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px)); }
     #lv2-inventory .lv2-inv-slots { display: flex; justify-content: space-between; gap: 10px; }
     .lv2-inv-slot { display: flex; flex-direction: column; align-items: center; gap: 4px;
       opacity: 0.4; transition: opacity .3s; }
@@ -1231,8 +1177,7 @@ function buildLevel2HUD(portTarget) {
   objectives.id = 'lv2-objectives';
   objectives.innerHTML = `
     <div class="lv2-obj"><span class="lv2-obj-icon active">◆</span>Catch the girl before she reaches the port.</div>
-    <div class="lv2-obj"><span class="lv2-obj-icon box"></span>Reach the port before her.</div>
-    <div class="lv2-kills">KILLS: <span id="lv2-kills">0</span></div>`;
+    <div class="lv2-obj secondary"><span class="lv2-obj-icon box"></span>Reach the port before her.</div>`;
   hud.appendChild(objectives);
 
   // Distances — port readout always live; girl row hidden until the
@@ -1273,7 +1218,6 @@ function buildLevel2HUD(portTarget) {
   const girlRow = document.getElementById('lv2-girl-dist');
   const girlM = document.getElementById('lv2-girl-m');
   const coinsEl = document.getElementById('lv2-coins');
-  const killsEl = document.getElementById('lv2-kills');
   const slots = {
     radar: document.getElementById('lv2-slot-radar'),
     adrenaline: document.getElementById('lv2-slot-adrenaline'),
@@ -1291,9 +1235,6 @@ function buildLevel2HUD(portTarget) {
   }
 
   function refresh() {
-    // Kills mirror — read the stock counter so combat stays the source.
-    const kills = document.getElementById('kills');
-    if (kills) killsEl.textContent = kills.textContent;
     coinsEl.textContent = state.coins;
     // Item counts — fields land with purchase logic; read defensively.
     setSlot('radar', state.hasRadarUpgrade ? 1 : 0);

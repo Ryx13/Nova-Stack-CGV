@@ -123,12 +123,16 @@ export const fogFragmentShader = `
     // at all. Threshold width (0.22) is the soft edge each bank fades
     // out over, so patches don't have a hard cutout look.
     float mask = fbm(vWorldXZ * 0.012 + drift * 0.4);
-    float patch = smoothstep(1.0 - uCoverage, 1.0 - uCoverage + 0.22, mask);
+    // Named "bank", NOT "patch": "patch" is a reserved word in GLSL ES
+    // 3.00 (Three.js compiles all shaders as ES 3.00 under WebGL2), and
+    // declaring it made this whole fragment shader fail to compile —
+    // the fog silently never rendered until this was renamed.
+    float bank = smoothstep(1.0 - uCoverage, 1.0 - uCoverage + 0.22, mask);
 
     // Finer detail noise for texture inside a bank.
     float detail = fbm(vWorldXZ * 0.08 + drift);
 
-    float density = patch * mix(0.55, 1.0, detail);
+    float density = bank * mix(0.55, 1.0, detail);
     gl_FragColor = vec4(uColor, density * uOpacity);
   }
 `;

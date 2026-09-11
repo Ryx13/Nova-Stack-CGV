@@ -141,6 +141,12 @@ Level2.js.
       `addStaticBox` (auto-registers on the zombie avoidance list)
 - [x] Level 2 catalog presets — radar + adrenaline products in the
       "support" category — `radarCatalog` / `adrenalineCatalog`
+- [x] Machine beacons — each machine's position glows through the fog in
+      its own color (lime = radar, pink = adrenaline): a ground ring at
+      the stand-here spot, a pulsing light column from the cabinet top
+      (tops out below the port's teal spire, which stays the main
+      landmark), and a point light washing the cabinet front. Cabinet
+      scale 1.6 (~3.2 m tall) so it reads at distance
 - [x] Radar machine — (z ≈ −25, west sidewalk). 25 coins, one-time:
       purchasing reveals the girl on the radar (teal dot), the HUD
       girl-distance row, and retargets the compass to her
