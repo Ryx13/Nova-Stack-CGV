@@ -127,6 +127,17 @@ export const state = {
   // this via Level2Config.js; Levels 1/3 keep the eager boot-time load.
   lazyExplosionVFX: false,
 
+  // Level 2 light boot: before the loading screen clears, fetch ONLY the
+  // two models it actually waits on (player + walker zombie template).
+  // The runner-variant zombie template, the pistol model, and corpse
+  // dressing are deferred until gameplay is already running
+  // (characters.js loadDeferredAssets, triggered by Level2.js once
+  // state.readyShown flips), and the three decor GLB props (two rusty
+  // cars + one posed zombie) are replaced with procedural equivalents.
+  // Set by Level2Config.js before characters.js evaluates. Levels 1/3
+  // keep the eager behavior unchanged.
+  lightBoot: false,
+
   // Level 2 — "The Chase" mission state (girl NPC, purchases). All
   // default-off/inactive so Levels 1/3, which never touch them, are
   // unaffected: adrenalineActive is false so the movement multiplier

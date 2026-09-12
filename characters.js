@@ -737,13 +737,24 @@ export function loadObstacles() {
     const x = side * (STREET_HALF_W - 1.7 - rnd() * 2);
     makeWreck(x, z, (rnd() - 0.5) * 1.1 + (side < 0 ? Math.PI / 2 : -Math.PI / 2), rnd() < 0.32);
   }
-  loadDecorCar('assets/old_rusty_car_2.glb', -(STREET_HALF_W + 3.5), -30, Math.PI / 2 + 0.15, 4.8);
-  loadDecorCar('assets/old_rusty_car_2.glb', STREET_HALF_W + 4, -150, -Math.PI / 2 - 0.1, 4.8);
-  loadDecorCar('assets/zombie_variant_b.glb', -(STREET_HALF_W + 3.2), -95, Math.PI / 2 - 0.2, 4.5);
-  // Depot-lot prop — only when the depot exists (Level 2 skips the lot,
-  // so the 13 MB model and its collision box would sit in empty space).
-  if (!state.skipDepot) {
-    loadDecorCar('assets/zombie_variant_b.glb', DEPOT_POS.x + 10, DEPOT_POS.z - 4, 0.3, 4.5);
+  if (state.lightBoot) {
+    // Light boot (Level 2): the two rusty-car decor GLB fetches (7.7 MB)
+    // become procedural wrecks at the same spots — same collider +
+    // occluder treatment as the street's other wrecks (makeWreck handles
+    // both). The posed-zombie prop (12.7 MB) is dropped here; Level2.js
+    // dresses that spot with a procedural fallen-zombie, and the deferred
+    // corpse scatter covers the rest of the street.
+    makeWreck(-(STREET_HALF_W + 3.5), -30, Math.PI / 2 + 0.15, false);
+    makeWreck(STREET_HALF_W + 4, -150, -Math.PI / 2 - 0.1, false);
+  } else {
+    loadDecorCar('assets/old_rusty_car_2.glb', -(STREET_HALF_W + 3.5), -30, Math.PI / 2 + 0.15, 4.8);
+    loadDecorCar('assets/old_rusty_car_2.glb', STREET_HALF_W + 4, -150, -Math.PI / 2 - 0.1, 4.8);
+    loadDecorCar('assets/zombie_variant_b.glb', -(STREET_HALF_W + 3.2), -95, Math.PI / 2 - 0.2, 4.5);
+    // Depot-lot prop — only when the depot exists (Level 2 skips the lot,
+    // so the 13 MB model and its collision box would sit in empty space).
+    if (!state.skipDepot) {
+      loadDecorCar('assets/zombie_variant_b.glb', DEPOT_POS.x + 10, DEPOT_POS.z - 4, 0.3, 4.5);
+    }
   }
   for (let i = 0; i < 6; i++) {
     const z = -20 - i * 24;
@@ -769,7 +780,12 @@ export function loadObstacles() {
   for (let i = 0; i < 6; i++) {
     spawnFireEffect(new THREE.Vector3((rnd() - 0.5) * 90, 6 + rnd() * 8, -STREET_LENGTH * (0.25 + rnd() * 0.7)), 2.2);
   }
-  loadCorpses();
+  // Light boot (Level 2): corpse dressing is deferred with the other
+  // non-gating fetches — by then the walker template (same GLB file,
+  // same URL after the loader normalizes the path below) is in the
+  // browser cache, so the corpse fetch costs zero extra bytes instead
+  // of racing the loading gate. See loadDeferredAssets().
+  if (!state.lightBoot) loadCorpses();
 }
 
 /* ---------------------------------------------------------------------
@@ -1098,12 +1114,19 @@ function applyPistolModel() {
   applyGunOrientation();
   pushKillFeed('Pistol model loaded');
 }
-new GLTFLoader().load('assets/pistol.glb', (gltf) => {
-  pistolTemplate = gltf.scene;
-  applyPistolModel();
-}, undefined, () => {
-  pushKillFeed('Pistol model failed to load — using procedural gun');
-});
+export function loadPistolModel() {
+  new GLTFLoader().load('assets/pistol.glb', (gltf) => {
+    pistolTemplate = gltf.scene;
+    applyPistolModel();
+  }, undefined, () => {
+    pushKillFeed('Pistol model failed to load — using procedural gun');
+  });
+}
+// Light boot (Level 2): the 10 MB pistol GLB is deferred to
+// loadDeferredAssets() — the procedural gun covers first- and
+// third-person until the real model hot-swaps in mid-game (the swap is
+// the same code path the eager fetch used whenever it resolved late).
+if (!state.lightBoot) loadPistolModel();
 
 export const viewmodelGun = new THREE.Group();
 const viewmodelGunMesh = buildRifleMesh();
@@ -1819,7 +1842,27 @@ export function loadZombies() {
   // model-rigged.glb is the fast "runner" variant — `runs: true` makes the
   // Zombie constructor below prefer a run-named clip (at full animation
   // speed, not the shambling 0.4x timeScale) and move noticeably faster.
+  // Light boot (Level 2): the walker template alone gates the loading
+  // screen; the runner joins via loadDeferredAssets() once gameplay is
+  // running — templates are drawn at construction time, so zombies
+  // spawned after it arrives simply start including it.
+  if (!state.lightBoot) loadZombieTemplate('assets/model-rigged.glb', { runs: true });
+}
+
+/* ---------------------------------------------------------------------
+   LIGHT BOOT — deferred fetches (Level 2)
+   Called by Level2.js's level tick the moment state.readyShown flips:
+   the two gating models are in, the loading screen is clearing, and the
+   bandwidth that was racing them is free. Each fetch is a pure addition
+   on top of a fully playable scene — the runner template joins the
+   spawn pool, the pistol hot-swaps onto the procedural gun, and the
+   corpse scatter reuses the walker's already-cached GLB.
+--------------------------------------------------------------------- */
+export function loadDeferredAssets() {
+  if (!state.lightBoot) return;
   loadZombieTemplate('assets/model-rigged.glb', { runs: true });
+  loadPistolModel();
+  loadCorpses();
 }
 
 export class Zombie {

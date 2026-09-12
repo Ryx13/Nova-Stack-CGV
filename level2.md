@@ -27,18 +27,27 @@ no-ops for Levels 1/3.
 - Car / vehicle system, fuel HUD, speedometer — the level is on foot
 - Depot yard + guards, extraction point — no sample-recovery objective
 - Explosion VFX (18.8 MB) — deferred to the first barrel explosion
-- Result: ~47 MB cold boot vs ~79 MB before; Levels 1/3 unchanged
+- Result: ~62 MB cold boot vs ~81 MB before (measured from the actual
+  file sizes — the earlier "~47 MB" figure undercounted the eager
+  fetches); Levels 1/3 unchanged
 
-## To add — faster loading
+## Light boot (implemented)
 
-- Drop the decor car template (7.9 MB — two roadside props; replace with
-  procedural `makeWreck()` equivalents)
-- Drop the posed-zombie street prop (13 MB — one decoration; replace with a
-  procedural corpse)
-- Defer the pistol model (10 MB — fetched at boot but never gates the
-  loading screen; fetch after `readyShown` like the explosion VFX)
-- Together these take a cold boot from ~47 MB to ~16 MB (keep player
-  10.9 MB, walker 4.3 MB, runner 14 MB — those are gameplay)
+- Decor GLB props replaced procedurally: two roadside rusty cars →
+  `makeWreck()` at the same spots (8.1 MB), one posed-zombie street
+  prop → Level2.js `makeFallenZombie()` (13.3 MB)
+- Runner zombie variant (14.4 MB), pistol model (10.3 MB) and corpse
+  dressing deferred to a level tick that fires the moment
+  `state.readyShown` flips — gameplay is already running by then;
+  corpses ride the walker template's cache entry (same GLB file), so
+  they cost zero extra bytes
+- Gate is `state.lightBoot` (set in Level2Config.js): characters.js
+  checks it at module-eval and boot time; Levels 1/3 keep the eager
+  path untouched
+- Boot-critical fetch set drops to ~18 MB (player 11.2 + walker 4.4 +
+  barrel 0.4 + girl 0.1 + engine/JS) — nothing races the gating pair
+  anymore; the deferred ~25 MB streams in behind gameplay. Total bytes
+  transferred are unchanged — the win is ordering, not deletion.
 
 ## To add — performance
 

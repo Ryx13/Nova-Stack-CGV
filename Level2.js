@@ -15,9 +15,9 @@
 import './Level2Config.js';  // MUST be first — sets skip flags before heavy modules
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { scene, camera, addStaticBox, pushKillFeed, dom, sfx, KILL_TARGET } from './Scene.js';
+import { scene, camera, addStaticBox, pushKillFeed, dom, sfx, KILL_TARGET, STREET_HALF_W } from './Scene.js';
 import { state } from './state.js';
-import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis, spawnZombie } from './characters.js';
+import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis, spawnZombie, loadDeferredAssets } from './characters.js';
 import { spawnCoin } from './PowerUps.js';
 import { createToxicMaterial } from './shaders.js';
 import { bootLevel, registerLevelTick, levelKeyHooks } from './Actions.js';
@@ -31,6 +31,20 @@ const LEVEL_CONFIG = {
 
 export function startLevel(mode) {
   bootLevel({ ...LEVEL_CONFIG, mode });
+  // LIGHT BOOT — the heavy non-gating fetches (runner zombie variant,
+  // pistol model, corpse dressing) start only once state.readyShown
+  // flips, i.e. after the loading screen's two gating models are in;
+  // before that they'd only be competing with the player/walker GLBs
+  // for bandwidth. Level ticks run every frame from bootLevel() on —
+  // including behind the loading overlay — so this watches from frame
+  // one. (The 12-second failsafe in Scene.js also sets readyShown, so a
+  // failed gate still releases the deferred fetches.)
+  let lightBootFetchesStarted = false;
+  registerLevelTick(() => {
+    if (lightBootFetchesStarted || !state.readyShown) return;
+    lightBootFetchesStarted = true;
+    loadDeferredAssets();
+  });
   // Level 2 dressing layer on top of the loaded base world (port,
   // blockage, collapse nest, machines, coins). Handles returned for the
   // logic phase — machines (purchase wiring) + teleportPoint (lose).
@@ -311,6 +325,39 @@ function scatterDebris(x, z, n, spread) {
   }
 }
 
+/** Fallen-zombie street prop — light-boot replacement for the posed
+    zombie_variant_b.glb decoration characters.js used to fetch (12.7 MB
+    for one roadside dress piece). Pure geometry, no fetch; no collider —
+    a ground-level body is walk-over set dressing, same convention as the
+    (deferred) corpse scatter. Deterministic — consumes no rnd(), so the
+    level's own seeded dressing sequence is untouched. */
+function makeFallenZombie(x, z, ry) {
+  const g = new THREE.Group();
+  const skin = new THREE.MeshStandardMaterial({ color: 0x6c7a62, roughness: 0.9 });
+  const cloth = new THREE.MeshStandardMaterial({ map: dirtTex, color: 0x4a4440, roughness: 0.95 });
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.26, 0.78), cloth);
+  torso.position.set(0, 0.14, 0);
+  g.add(torso);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10), skin);
+  head.position.set(0, 0.15, 0.55);
+  g.add(head);
+  // One arm thrown out, one pinned under the torso — reads "taken down
+  // mid-run" at street-prop distance.
+  const armOut = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.13, 0.16), skin);
+  armOut.position.set(0.48, 0.11, 0.28);
+  armOut.rotation.y = 0.5;
+  g.add(armOut);
+  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.15, 0.8), cloth);
+  legs.position.set(-0.04, 0.12, -0.75);
+  legs.rotation.y = -0.3;
+  g.add(legs);
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  g.position.set(x, 0, z);
+  g.rotation.y = ry;
+  scene.add(g);
+  return g;
+}
+
 /** Vending machine + its collider + full beacon. The beacon is how the
     player finds the machine in the fog, in the machine's own glow
     color: a ground ring marking the stand-here spot, a vertical light
@@ -564,6 +611,10 @@ function buildLevel2Scene() {
   buildStreetBlockage();
   buildCollapseZone();
   buildZoneDressing();
+  // Same spot characters.js' light-boot branch left empty when it
+  // dropped the posed-zombie GLB prop (west curb, opposite the adrenaline
+  // machine's beacon).
+  makeFallenZombie(-(STREET_HALF_W + 3.2), -95, Math.PI / 2 - 0.2);
 
   const machines = {
     // West sidewalk, fronts facing the street (rotationY = +π/2).
