@@ -6,11 +6,42 @@ port. She runs at player walk speed (3.7 m/s); win by catching her (E within
 **Level2.js** (+ `Level2Config.js` skip flags); shared-module hooks are
 no-ops for Levels 1/3.
 
+## Current state (2026-09-12)
+
+Playable end-to-end: full chase (spawn → pier), catch/lose outcomes,
+economy, HUD and the spawn escalation all work. The loading-time work
+is done — light boot ships, boot-critical fetches are ~18 MB, Levels 1/3
+untouched.
+
+Girl visibility was the big fix of this pass. `Injured Run.glb` turned
+out to be anim-only — a Mixamo skeleton + run clip with zero meshes — so
+she rendered as literally nothing (the moving pink floor tint was just
+her glint light). She's now a bright procedural mannequin body attached
+to her real bones, driven by the real run clip, with a per-bone
+counter-scale for the file's 0.01 Armature scale; the 10 m head start
+and 25 m pink sight glow ride on top of it.
+
+Still to verify on the next play-through: her run orientation
+(`GIRL_RIG_YAW_OFFSET` — flip to `Math.PI` if she runs backwards),
+mannequin proportions read at street distance, and the pink glow
+cutting exactly at 25 m.
+
 ## What's implemented
 
-- **Chase** — girl NPC (visible 50 m head start, waypoint route to the
-  pier), catch win, teleport-lose cinematic; the chase starts on the first
-  live frame, never behind the loading screen
+- **Chase** — girl NPC (visible 10 m head start — she bolts from directly
+  in front of the player the moment the loading screen clears, waypoint
+  route to the pier), catch win, teleport-lose cinematic; the chase starts
+  on the first live frame, never behind the loading screen
+- **Sight glow** — within 25 m of the player she pulses hot pink
+  (emissive + her glint light): unmistakable against the dark zombies;
+  beyond it she reverts to the subtle teal runner — sight is limited,
+  and the radar machine sells tracking beyond it
+- **Girl body (procedural)** — `Injured Run.glb` is anim-only (skeleton +
+  clip, no meshes), so a bright mannequin figure — pale top, slate legs,
+  skin head/hands — is attached to her real Mixamo bones and driven by
+  the run clip; per-bone counter-scale handles the file's 0.01 Armature
+  scale, and limbs articulate free because each capsule parents to the
+  upper bone of its pair
 - **Economy** — two beaconed vending machines (radar @ z +10, lime;
   adrenaline @ z −90, pink), E-key purchases, coins from kills + persistent
   clusters; radar upgrade reveals her on radar/compass + live distance row,
@@ -49,8 +80,26 @@ no-ops for Levels 1/3.
   anymore; the deferred ~25 MB streams in behind gameplay. Total bytes
   transferred are unchanged — the win is ordering, not deletion.
 
-## To add — performance
+## Suggestions — what to improve next
 
+**Visuals & feel**
+- Replace the mannequin with a meshed Mixamo re-export (same rig, with
+  skin) — the procedural body was the fallback that became the feature
+- Lose-cinematic polish: pink flash + fog burst at the teleport instead
+  of the instant vanish
+- Directional footstep audio while she's out of sight — sells "close"
+  without radar, and gives the radar purchase a clear before/after
+
+**Gameplay**
+- Rubber-band pacing: she's a flat 3.7 m/s — let her hesitate at corners
+  and surge when the player closes inside ~8 m, so the chase stays tense
+  at any skill level
+- Tie the spawn ramp (6 s → 1.2 s) to route checkpoints with killfeed
+  warnings, so escalation feels authored rather than automatic
+- Coin fly-to-HUD pickup animation — makes kills-fund-purchases readable
+  at a glance
+
+**Performance**
 - Cap device pixel ratio (~1.5) — the rain shader is fill-rate heavy
 - Fewer shadow-casting streetlights / smaller shadow maps at night
 - Merge or instance static geometry (containers, bollards, rocks)
