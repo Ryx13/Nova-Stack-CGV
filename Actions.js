@@ -26,7 +26,7 @@ import {
   syncHandGun, setPlayerAction, groundClampRig, lerpAngle, checkVehicleRollover,
   ZOMBIE_TARGET_HEIGHT,
   loadMainCharacter, loadZombies, loadCars, loadBuildings, loadTrashCans, loadObstacles,
-  loadStreetSurface, spawnDepotGuards, spawnZombie,
+  loadStreetSurface, spawnDepotGuards, spawnZombie, updateZombies,
   adjustPlayerScale,
 } from './characters.js';
 import {
@@ -873,7 +873,7 @@ function startAnimationLoop() {
         sfx.setEngine(0, false);
       }
       const activePos = state.inVehicle ? carVis.group.position : playerVis.group.position;
-      state.zombies.forEach((z) => z.update(dt, activePos));
+      updateZombies(dt, activePos);
       updateExplosions(dt);
       updateShield(dt);
       state.spawnTimer -= dt;

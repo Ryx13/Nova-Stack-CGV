@@ -1673,9 +1673,22 @@ function buildZombieMesh() {
 
 export function avoidObstacles(pos, move, extra = []) {
   const push = new THREE.Vector3();
-  const list = state.obstacles.concat(extra);
-  for (let i = 0; i < list.length; i++) {
-    const o = list[i];
+  // Was: state.obstacles.concat(extra) — allocated a brand-new merged array
+  // on every call (once per zombie per frame). Looping the two lists back
+  // to back does the same job with zero extra allocation.
+  for (let i = 0; i < state.obstacles.length; i++) {
+    const o = state.obstacles[i];
+    const dx = pos.x - o.x, dz = pos.z - o.z;
+    const d = Math.hypot(dx, dz) || 0.0001;
+    const minD = o.r + 0.55;
+    if (d < minD) {
+      const str = (minD - d) / minD;
+      push.x += (dx / d) * str;
+      push.z += (dz / d) * str;
+    }
+  }
+  for (let i = 0; i < extra.length; i++) {
+    const o = extra[i];
     const dx = pos.x - o.x, dz = pos.z - o.z;
     const d = Math.hypot(dx, dz) || 0.0001;
     const minD = o.r + 0.55;
@@ -2009,7 +2022,12 @@ export class Zombie {
     // that same in-progress iteration.
     setTimeout(() => this.remove(), 0);
   }
-  update(dt, playerPos) {
+  // neighbors: optional precomputed [{x,z,r}] snapshot of all alive zombies
+  // for this frame, built once by updateZombies() instead of once per
+  // zombie (see there for why). Falls back to the old per-call rebuild if
+  // called directly without it, so nothing else that might call update()
+  // breaks.
+  update(dt, playerPos, neighbors) {
     if (!this.alive) return; // already exploded — waiting to be spliced out
     if (this.state === 'downed') {
       this.downedTimer -= dt;
@@ -2035,7 +2053,12 @@ export class Zombie {
     } else if (this.state !== 'idle') {
       this.state = 'idle';
     }
-    const others = state.zombies.filter((z) => z !== this && z.alive).map((z) => ({
+    // Was: rebuilt by filtering+mapping the *entire* zombies array here,
+    // inside every single zombie's update() — O(n^2) work and allocations
+    // per frame with n zombies alive. Self being present in the shared
+    // snapshot is harmless: its position matches this zombie's own exactly,
+    // so avoidObstacles computes a distance of ~0 and pushes nothing.
+    const others = neighbors || state.zombies.filter((z) => z !== this && z.alive).map((z) => ({
       x: z.mesh.position.x, z: z.mesh.position.z, r: 0.7,
     }));
     if (this.state === 'chase') {
@@ -2140,6 +2163,30 @@ export class Zombie {
     scene.remove(this.mesh);
     const idx = state.zombies.indexOf(this);
     if (idx >= 0) state.zombies.splice(idx, 1);
+  }
+}
+
+// Reused every frame instead of allocated fresh — its contents get
+// overwritten each call, only its backing array capacity is kept.
+const _zombieNeighborSnapshot = [];
+
+// Drives every zombie's update() for one frame. Replaces the previous
+// `state.zombies.forEach(z => z.update(dt, playerPos))`, which left each
+// zombie to rebuild its own neighbor list from the full array — O(n^2)
+// per frame with n zombies alive (up to 14 in Level 2: ~196 filter/map
+// passes and object allocations every frame, worst exactly when the
+// player is being chased by a full pack). Building the snapshot once
+// here and handing the same array to every zombie makes it O(n).
+export function updateZombies(dt, playerPos) {
+  _zombieNeighborSnapshot.length = 0;
+  for (let i = 0; i < state.zombies.length; i++) {
+    const z = state.zombies[i];
+    if (z.alive) {
+      _zombieNeighborSnapshot.push({ x: z.mesh.position.x, z: z.mesh.position.z, r: 0.7 });
+    }
+  }
+  for (let i = 0; i < state.zombies.length; i++) {
+    state.zombies[i].update(dt, playerPos, _zombieNeighborSnapshot);
   }
 }
 
