@@ -187,6 +187,16 @@
     background:radial-gradient(ellipse at center, transparent 42%, rgba(0,0,0,.62) 100%);}
   #blood-vignette{position:fixed;inset:0;z-index:19;pointer-events:none;opacity:0;transition:opacity .25s;
     background:radial-gradient(ellipse at center, transparent 48%, rgba(110,0,0,.7) 100%);}
+  /* Low-health tension cue. Separate element/layer from #blood-vignette
+     (which tracks damage-taken opacity via JS) so this pulse never fights
+     that inline style — it only runs while .active is toggled by
+     updateLowHealthFX, with --pulse-speed set from JS to speed up as
+     health drops. */
+  #critical-pulse{position:fixed;inset:0;z-index:20;pointer-events:none;opacity:0;
+    background:radial-gradient(ellipse at center, transparent 35%, rgba(180,0,0,.85) 100%);
+    --pulse-speed:1.1s;}
+  #critical-pulse.active{animation:critical-pulse var(--pulse-speed) ease-in-out infinite;}
+  @keyframes critical-pulse{0%,100%{opacity:0;}50%{opacity:.75;}}
   #low-ammo{color:#ff6b6b;}
   #radar-wrap::after{content:"";position:absolute;inset:0;border-radius:50%;
     box-shadow:inset 0 0 24px rgba(0,0,0,.65);pointer-events:none;}
@@ -329,6 +339,7 @@
 
 <div id="vignette"></div>
 <div id="blood-vignette"></div>
+<div id="critical-pulse"></div>
 <div id="screen-flash"></div>
 
 <div id="deathscreen" class="end-screen hidden">

@@ -59,6 +59,7 @@ export const dom = {
   deathStats: document.getElementById('death-stats'),
   winStats: document.getElementById('win-stats'),
   bloodVig: document.getElementById('blood-vignette'),
+  criticalPulse: document.getElementById('critical-pulse'),
   pauseBtn: document.getElementById('pause-btn'),
   pauseOverlay: document.getElementById('pause-overlay'),
   resumeBtn: document.getElementById('resume-btn'),
@@ -131,6 +132,13 @@ export const sfx = {
   groan() { this.burst('sawtooth', 70 + Math.random() * 40, 0.45, 0.05); },
   foot() { this.noise(0.05, 0.05, 220); },
   explosion() { this.noise(0.55, 0.4, 300); this.burst('sawtooth', 55, 0.6, 0.32); },
+  // Two quick low thumps ("lub-dub") for the low-health tension cue — see
+  // updateLowHealthFX in Actions.js. No new audio asset, same as every
+  // other sfx.* here: synthesized from the shared oscillator/noise primitives.
+  heartbeat() {
+    this.burst('sine', 60, 0.11, 0.22);
+    setTimeout(() => this.burst('sine', 50, 0.13, 0.16), 140);
+  },
   setEngine(speed, on) {
     if (!this.engineGain) return;
     const t = this.ctx.currentTime;

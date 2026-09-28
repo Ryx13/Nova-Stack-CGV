@@ -318,6 +318,33 @@ export function damagePlayer(dmg) {
   }
 }
 
+// Low-health tension cue: pulses #critical-pulse and a synthesized
+// heartbeat thump once health drops below 30%, speeding up the closer
+// the player gets to death. Pure UI/audio feedback — reads playerHealth,
+// touches nothing else, so it's safe to add without risk to the zombie
+// AI, car physics, or anything level-specific.
+const HEARTBEAT_THRESHOLD = 0.3; // fraction of max health
+export function updateLowHealthFX(dt) {
+  if (!dom.criticalPulse) return;
+  const pct = state.playerMaxHealth > 0 ? state.playerHealth / state.playerMaxHealth : 1;
+  const critical = !state.isDead && pct > 0 && pct <= HEARTBEAT_THRESHOLD;
+  if (!critical) {
+    dom.criticalPulse.classList.remove('active');
+    state.heartbeatTimer = 0;
+    return;
+  }
+  dom.criticalPulse.classList.add('active');
+  // 1.1s between beats at the 30% threshold, tightening to ~0.45s as
+  // health approaches 0 — the closer to death, the more urgent it feels.
+  const interval = THREE.MathUtils.lerp(0.45, 1.1, pct / HEARTBEAT_THRESHOLD);
+  dom.criticalPulse.style.setProperty('--pulse-speed', `${interval}s`);
+  state.heartbeatTimer -= dt;
+  if (state.heartbeatTimer <= 0) {
+    state.heartbeatTimer = interval;
+    sfx.heartbeat();
+  }
+}
+
 /* ---------------------------------------------------------------------
    VEHICLE ENTER / EXIT
 --------------------------------------------------------------------- */
@@ -874,6 +901,7 @@ function startAnimationLoop() {
       }
       const activePos = state.inVehicle ? carVis.group.position : playerVis.group.position;
       updateZombies(dt, activePos);
+      updateLowHealthFX(dt);
       updateExplosions(dt);
       updateShield(dt);
       state.spawnTimer -= dt;

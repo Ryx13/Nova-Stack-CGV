@@ -41,6 +41,7 @@ export const state = {
   // Player state
   playerHealth: 100,
   playerMaxHealth: 100,
+  heartbeatTimer: 0, // counts down to next low-health heartbeat pulse; see updateLowHealthFX
   playerStamina: 100,
   staminaExhausted: false, // set when stamina hits 0; cleared once it recovers past STAMINA_RECOVER
   isDead: false,
