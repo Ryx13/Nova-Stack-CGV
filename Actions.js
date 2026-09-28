@@ -489,7 +489,15 @@ export function updatePlayerMovement(dt) {
   // Crouch: no collider change, just a slower, quieter stance — camera
   // drops to match in updateCameraOnFoot. Can't sprint while crouched.
   state.crouching = !!(state.keys['ControlLeft'] || state.keys['ControlRight'] || state.keys['KeyC']);
-  const sprinting = !state.crouching && (state.sprintToggle || state.keys['ShiftLeft'] || state.keys['ShiftRight']) && forwardInput > 0 && state.playerStamina > 2;
+  // Hysteresis: once stamina bottoms out the player is "exhausted" and
+  // can't sprint again until it recovers past STAMINA_RECOVER. Without
+  // this, a single threshold made sprint flicker on/off every few frames
+  // at ~0 stamina (8.4 <-> 3.7 m/s), which felt like lag and let zombies
+  // close the gap.
+  const STAMINA_RECOVER = 25;
+  if (state.playerStamina <= 0.5) state.staminaExhausted = true;
+  else if (state.playerStamina >= STAMINA_RECOVER) state.staminaExhausted = false;
+  const sprinting = !state.crouching && !state.staminaExhausted && (state.sprintToggle || state.keys['ShiftLeft'] || state.keys['ShiftRight']) && forwardInput > 0 && state.playerStamina > 2;
   state.isSprinting = sprinting;
   const speed = (sprinting ? 8.4 : (state.crouching ? 2.1 : 3.7)) * (state.adrenalineActive ? 1.45 : 1);
   const fwd = forwardFromYaw(state.yaw);
@@ -546,6 +554,7 @@ export function updatePlayerMovement(dt) {
   if (sprinting) state.playerStamina = Math.max(0, state.playerStamina - dt * 11);
   else state.playerStamina = Math.min(100, state.playerStamina + dt * 22);
   dom.staminaFill.style.width = state.playerStamina + '%';
+  dom.staminaFill.style.opacity = state.staminaExhausted ? '0.45' : '1'; // dim while exhausted
   playerVis.group.position.set(playerBody.position.x, playerBody.position.y - playerHeight / 2, playerBody.position.z);
   const moving = move.lengthSq() > 0.01;
   if (playerVis.rigged && playerVis.mixer && playerVis.actions) {
@@ -579,7 +588,7 @@ export function updatePlayerMovement(dt) {
   if (dom.debugReadout) {
     const rawShift = (state.keys['ShiftLeft'] ? 'L' : '') + (state.keys['ShiftRight'] ? 'R' : '') || 'none';
     dom.debugReadout.textContent =
-      `Shift held: ${rawShift} | Toggle: ${state.sprintToggle} | Sprinting: ${sprinting} | Stamina: ${state.playerStamina.toFixed(0)}\n` +
+      `Shift held: ${rawShift} | Toggle: ${state.sprintToggle} | Sprinting: ${sprinting} | Exhausted: ${state.staminaExhausted} | Stamina: ${state.playerStamina.toFixed(0)}\n` +
       `Rigged model: ${playerVis.rigged} | Anim state: ${playerVis.currentActionName || 'n/a'}\n` +
       `Player height: ${state.playerCurrentHeight.toFixed(2)}m (zombies are ${ZOMBIE_TARGET_HEIGHT}m) [ / ] to adjust\n` +
       `Grip preset: ${state.gunGripIndex} (U to cycle) | Weapon: ${state.currentWeapon} | Coins: ${state.coins} | Fuel: ${state.carFuel != null ? state.carFuel.toFixed(0) : 'n/a'}`;

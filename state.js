@@ -42,6 +42,7 @@ export const state = {
   playerHealth: 100,
   playerMaxHealth: 100,
   playerStamina: 100,
+  staminaExhausted: false, // set when stamina hits 0; cleared once it recovers past STAMINA_RECOVER
   isDead: false,
   paused: false,
   walkCycle: 0,
