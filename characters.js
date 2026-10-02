@@ -959,7 +959,7 @@ function buildDepotYard() {
 --------------------------------------------------------------------- */
 let corpseTemplate = null;
 function loadCorpses() {
-  new GLTFLoader().load('assets\\zombie_running_on_metel_maniac.glb', (gltf) => {
+  new GLTFLoader().load('assets/zombie_running_on_metel_maniac.glb', (gltf) => {
     const obj = gltf.scene;
     const box = new THREE.Box3().setFromObject(obj);
     const size = new THREE.Vector3(); box.getSize(size);

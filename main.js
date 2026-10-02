@@ -15,6 +15,9 @@
 // (Scene.js's maybeReady(), unchanged in spirit, handles the hide/reveal
 // and hands off to Actions.js's onAssetsReady() callback for the rest).
 
+import { initAccountUI, sessionReady, showAuth, takeResumeRequest } from './account.js';
+import { getSession } from './cloud.js';
+
 const introScreen = document.getElementById('start-screen');
 if (introScreen) introScreen.style.backgroundImage = "url('assets/splash1.jpg')";
 
@@ -28,9 +31,20 @@ function initIntroScreen() {
   const enterBtn = document.getElementById('enter-btn');
   const levelSelect = document.getElementById('level-select');
   if (!enterBtn || !introScreen || !levelSelect) return;
-  enterBtn.addEventListener('click', () => {
+  const goToLevelSelect = () => {
     introScreen.classList.add('hidden');
     levelSelect.classList.remove('hidden');
+  };
+  enterBtn.addEventListener('click', async () => {
+    await sessionReady;
+    // Every run is tied to a player: an account, or an explicit guest.
+    if (getSession().user) goToLevelSelect();
+    else showAuth(goToLevelSelect);
+  });
+  const backBtn = document.getElementById('level-back');
+  if (backBtn) backBtn.addEventListener('click', () => {
+    levelSelect.classList.add('hidden');
+    introScreen.classList.remove('hidden');
   });
 }
 
@@ -60,7 +74,6 @@ function initLevelSelect() {
 // once a mode is picked here does the level module actually load.
 function initModeSelect() {
   const modeSelect = document.getElementById('mode-select');
-  const loading = document.getElementById('loading');
   const buttons = document.querySelectorAll('#mode-select [data-mode]');
   if (!modeSelect) return;
 
@@ -81,30 +94,52 @@ function initModeSelect() {
       }
 
       modeSelect.classList.add('hidden');
-      if (loading) loading.classList.remove('hidden');
-
-      try {
-        const levelModule = await loadLevel();
-        levelModule.startLevel(mode);
-      } catch (err) {
-        console.error(`Level ${levelId} failed to load:`, err);
-        if (loading) {
-          const status = document.getElementById('load-status');
-          if (status) status.textContent = 'FAILED TO LOAD — see console';
-        }
-      }
+      await launchLevel(levelId, mode);
     });
   });
 }
 
+async function launchLevel(levelId, mode) {
+  const loading = document.getElementById('loading');
+  const loadLevel = LEVEL_LOADERS[levelId];
+  if (!loadLevel) return;
+  if (loading) loading.classList.remove('hidden');
+  try {
+    const levelModule = await loadLevel();
+    levelModule.startLevel(mode);
+  } catch (err) {
+    console.error(`Level ${levelId} failed to load:`, err);
+    if (loading) {
+      const status = document.getElementById('load-status');
+      if (status) status.textContent = 'FAILED TO LOAD — see console';
+    }
+  }
+}
+
+// "Retry" on an end screen reloads the page with a resume request, so
+// the same level + mode relaunches straight away (see account.js).
+async function handleResume() {
+  const req = takeResumeRequest();
+  if (!req || !req.level || !LEVEL_LOADERS[req.level]) return;
+  await sessionReady;
+  if (!getSession().user) return; // signed out in between — normal flow
+  introScreen.classList.add('hidden');
+  await launchLevel(String(req.level), req.mode || 'night');
+}
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
-    initIntroScreen();
-    initLevelSelect();
-    initModeSelect();
+    boot();
   });
 } else {
+  boot();
+}
+
+function boot() {
+  if (new URLSearchParams(location.search).has('debug')) document.body.classList.add('debug');
+  initAccountUI();
   initIntroScreen();
   initLevelSelect();
   initModeSelect();
+  handleResume();
 }

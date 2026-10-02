@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { state } from './state.js';
+import { finishRun } from './account.js';
 import {
   createFogMaterial, fogUniforms, createRainMaterial, rainUniforms,
   createPuddleMaterial, puddleUniforms, fireUniforms, toxicUniforms,
@@ -697,6 +698,7 @@ export function doDeath() {
   state.killStreak = 0;
   dom.deathStats.textContent = `Infected eliminated: ${state.kills} · Coins: ${state.coins}`;
   dom.death.classList.remove('hidden');
+  finishRun('loss', dom.death);
 }
 export function doWin() {
   state.isDead = true;
@@ -704,6 +706,7 @@ export function doWin() {
   document.exitPointerLock();
   dom.winStats.textContent = `Infected eliminated: ${state.kills} · Coins: ${state.coins} · Extraction successful.`;
   dom.win.classList.remove('hidden');
+  finishRun('win', dom.win);
 }
 
 /* ---------------------------------------------------------------------
