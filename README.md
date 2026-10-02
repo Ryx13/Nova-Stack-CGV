@@ -1,4 +1,20 @@
-# Deadway City — Level 1
+# Deadway City
+
+## New in this pass (accounts, credits, load size)
+- **Credits screen** (`credits.js`) — opens from the title screen, level
+  select, pause menu and every end screen. Entries tagged
+  *TEAM TO CONFIRM* still need a source/licence filled in before submission.
+- **Accounts + cloud save** (`cloud.js`, `account.js`, `firebase-config.js`,
+  `firestore.rules`) — sign up / sign in / Google / guest, per-level stats and
+  best times, online leaderboard. Runs offline as guest until Firebase is
+  configured: see **CLOUD_SETUP.md**.
+- **Retry** relaunches the same level + mode directly; **Main menu** button on
+  every end screen.
+- Debug readout and dev keys (`[` `]`) hidden behind **F3** or `?debug`.
+- Model textures resized/WebP-compressed (assets/ 300 MB → 24 MB, Level 1
+  download ~88 MB → ~23 MB); 11 unused asset files removed from the build.
+
+## Level 1
 
 A playable first level built around the outbreak story: fight through the
 infested main street, break off east into the depot yard to recover the
