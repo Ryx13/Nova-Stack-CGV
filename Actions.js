@@ -736,8 +736,12 @@ function initInputHandlers() {
     // drift the player down to a fraction of their intended size (this is
     // almost certainly what happened to produce a reported height of
     // 0.78m instead of ~1.8m). One press now means exactly one 5% step.
-    if (e.code === 'BracketLeft' && !e.repeat) adjustPlayerScale(0.95);
-    if (e.code === 'BracketRight' && !e.repeat) adjustPlayerScale(1.05);
+    // Dev-only tools live behind debug mode (F3, or ?debug in the URL) so
+    // markers never see a debug overlay or resize the player by accident.
+    if (e.code === 'F3' && !e.repeat) { e.preventDefault(); document.body.classList.toggle('debug'); }
+    const debug = document.body.classList.contains('debug');
+    if (debug && e.code === 'BracketLeft' && !e.repeat) adjustPlayerScale(0.95);
+    if (debug && e.code === 'BracketRight' && !e.repeat) adjustPlayerScale(1.05);
   });
   window.addEventListener('keyup', (e) => { state.keys[e.code] = false; });
   dom.canvas.addEventListener('mousemove', (e) => {
@@ -754,6 +758,9 @@ function initInputHandlers() {
     const gameActive = !dom.hud.classList.contains('hidden') && dom.death.classList.contains('hidden') && dom.win.classList.contains('hidden');
     if (gameActive && !state.pointerLocked) {
       sfx.init();
+      // A retry relaunches without a fresh click, so the audio context may
+      // have been created suspended — this click is the gesture to wake it.
+      if (sfx.ctx && sfx.ctx.state === 'suspended') sfx.ctx.resume();
       dom.canvas.requestPointerLock();
     }
   });
@@ -797,6 +804,9 @@ export function bootLevel(levelConfig = {}) {
   // the level itself — apply it before anything else so lighting, fog,
   // mist tint, rain visibility and puddles are all correct from frame one.
   applyTimeOfDay(levelConfig.mode);
+  state.levelId = levelConfig.id || 1;
+  state.runTime = 0;
+  state.runReported = false;
 
   // The intro screen and level-select screen (main.js) already ran before
   // this function was even called, so there's no further click to gate
@@ -860,6 +870,7 @@ function startAnimationLoop() {
     sky.position.copy(camera.position);
     updateWeatherFX(dt);
     if (!state.isDead && !state.paused && dom.hud && !dom.hud.classList.contains('hidden')) {
+      state.runTime += dt;
       stepAccumulator += dt;
       while (stepAccumulator >= FIXED_STEP) {
         world.step(FIXED_STEP);
