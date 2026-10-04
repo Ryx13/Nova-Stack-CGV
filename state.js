@@ -31,6 +31,13 @@ export const state = {
   // lighting/sky/fog, and to decide whether rain + puddles are active.
   timeOfDay: 'night',
 
+  // Run tracking (account.js / cloud.js): which level is running, how
+  // long it has been actively played (paused/dead time excluded), and
+  // whether this run's result has already been reported.
+  levelId: null,
+  runTime: 0,
+  runReported: false,
+
   // Score / progress
   kills: 0,
   coins: 0,
