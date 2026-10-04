@@ -22,6 +22,7 @@ import { spawnCoin } from './PowerUps.js';
 import { createToxicMaterial } from './shaders.js';
 import { bootLevel, registerLevelTick, levelKeyHooks } from './Actions.js';
 import { VendingMachine, makeIcon } from './VendingMachine.js';
+import { finishRun } from './account.js';
 
 const LEVEL_CONFIG = {
   id: 2,
@@ -1220,6 +1221,7 @@ function catchGirl() {
   lv2WinStats.textContent =
     `Infected eliminated: ${state.kills} · Coins: ${state.coins} · Antidote secured in ${chaseSeconds()} s`;
   lv2Win.classList.remove('hidden');
+  finishRun('win', lv2Win);
 }
 
 /** LOSE trigger — she made the pier beacon. Hands the next ~4 s to the
@@ -1309,6 +1311,7 @@ function updateLoseCinematic(dt) {
     lv2LoseStats.textContent =
       `Infected eliminated: ${state.kills} · Coins: ${state.coins} · She reached the port in ${chaseSeconds()} s`;
     lv2Lose.classList.remove('hidden');
+    finishRun('loss', lv2Lose);
   }
 }
 

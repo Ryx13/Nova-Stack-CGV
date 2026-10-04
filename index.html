@@ -217,6 +217,115 @@
 
   #loading{position:fixed;inset:0;z-index:70;background:#050505;color:#8a8477;display:flex;
     flex-direction:column;align-items:center;justify-content:center;font-family:'Oswald',sans-serif;letter-spacing:3px;font-size:14px;gap:8px;}
+
+  /* ---------- DEBUG (F3 or ?debug) ---------- */
+  #debug-readout{display:none;}
+  body.debug #debug-readout{display:block;}
+
+  /* ---------- SHARED MENU BITS ---------- */
+  .menu-row{display:flex;gap:12px;justify-content:center;margin-top:14px;flex-wrap:wrap;}
+  .ghost-btn{padding:9px 20px;font-family:'Oswald',sans-serif;font-weight:600;letter-spacing:2px;font-size:13px;
+    background:rgba(0,0,0,.45);color:#e8e4da;border:1px solid #6d675c;cursor:pointer;text-transform:uppercase;
+    transition:border-color .15s, color .15s, background .15s;}
+  .ghost-btn:hover,.ghost-btn:focus-visible{border-color:var(--amber);color:var(--amber);outline:none;}
+  .panel-screen{position:fixed;inset:0;z-index:80;background:rgba(4,3,3,.86);backdrop-filter:blur(3px);
+    display:flex;align-items:center;justify-content:center;padding:16px;}
+  .panel{position:relative;width:100%;max-width:440px;background:#0d0c0a;border:1px solid #3a352d;
+    box-shadow:0 0 0 1px #000, 0 20px 60px rgba(0,0,0,.7), 0 0 40px rgba(200,30,30,.12);padding:28px 28px 22px;}
+  .panel h2{font-family:'Oswald',sans-serif;font-weight:700;letter-spacing:5px;font-size:24px;margin:0 0 4px;color:#f2ede2;}
+  .panel .sub{font-size:13px;color:#8a8477;letter-spacing:1px;margin-bottom:18px;}
+  .x-btn{position:absolute;top:10px;right:12px;background:none;border:none;color:#8a8477;font-size:18px;cursor:pointer;}
+  .x-btn:hover{color:#fff;}
+  .tabs{display:flex;border-bottom:1px solid #2c2822;margin-bottom:16px;}
+  .tabs button{flex:1;background:none;border:none;border-bottom:2px solid transparent;color:#8a8477;padding:9px 0;
+    font-family:'Oswald',sans-serif;letter-spacing:2px;font-size:13px;text-transform:uppercase;cursor:pointer;}
+  .tabs button.active{color:#f2ede2;border-bottom-color:var(--blood);}
+
+  /* ---------- AUTH ---------- */
+  #auth-form label{display:block;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2px;color:#b7b0a2;margin:10px 0 4px;}
+  #auth-form input{width:100%;padding:10px 12px;background:#050505;border:1px solid #3a352d;color:#f2ede2;
+    font-family:'Rajdhani',sans-serif;font-size:16px;user-select:text;}
+  #auth-form input:focus{outline:none;border-color:var(--amber);}
+  #auth-submit{width:100%;margin-top:18px;padding:12px;font-family:'Oswald',sans-serif;font-weight:600;letter-spacing:3px;
+    font-size:15px;background:var(--blood);color:#fff;border:1px solid #ff6b6b;cursor:pointer;text-transform:uppercase;}
+  #auth-submit:hover{background:#e83030;}
+  #auth-submit.loading{opacity:.6;cursor:wait;}
+  #auth-forms.disabled{opacity:.35;pointer-events:none;}
+  .auth-or{display:flex;align-items:center;gap:10px;color:#5a564c;font-size:11px;letter-spacing:2px;margin:16px 0 12px;}
+  .auth-or::before,.auth-or::after{content:"";flex:1;height:1px;background:#2c2822;}
+  #auth-google{width:100%;padding:10px;background:#f2ede2;color:#111;border:none;font-family:'Rajdhani',sans-serif;
+    font-weight:700;font-size:15px;cursor:pointer;}
+  #auth-guest{width:100%;margin-top:10px;}
+  #auth-forgot{background:none;border:none;color:#8a8477;font-size:12px;margin-top:8px;cursor:pointer;padding:0;text-decoration:underline;}
+  .auth-msg{min-height:0;font-size:13px;margin-top:10px;}
+  .auth-msg.error{color:#ff7070;}
+  .auth-msg.ok{color:#5fe07f;}
+  #auth-offline-note{font-size:12.5px;color:var(--amber);border:1px solid rgba(224,168,60,.35);padding:8px 10px;margin-bottom:12px;}
+  .auth-fine{font-size:11.5px;color:#5a564c;margin-top:14px;line-height:1.4;}
+
+  /* ---------- ACCOUNT CHIP ---------- */
+  #account-chip{position:absolute;top:16px;right:18px;z-index:3;display:flex;align-items:center;gap:10px;
+    background:rgba(0,0,0,.6);border:1px solid var(--line);padding:6px 8px 6px 12px;font-size:14px;}
+  #account-chip small{color:#8a8477;}
+  .ac-dot{width:8px;height:8px;border-radius:50%;background:#666;}
+  .ac-dot.ok{background:#5fe07f;box-shadow:0 0 6px #5fe07f;}
+  .ac-dot.busy{background:var(--amber);}
+  .ac-dot.err{background:#ff5050;}
+  .ac-btn{background:none;border:1px solid #4a453c;color:#c8c2b4;font-family:'Oswald',sans-serif;font-size:11px;
+    letter-spacing:1.5px;padding:4px 10px;cursor:pointer;text-transform:uppercase;}
+  .ac-btn:hover{border-color:var(--amber);color:var(--amber);}
+
+  /* ---------- LEVEL SELECT STATS ---------- */
+  #level-buttons button{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:170px;}
+  .lvl-stat{font-family:'Rajdhani',sans-serif;font-weight:500;font-size:12px;letter-spacing:1px;color:#8a8477;text-transform:none;}
+  #level-buttons button.cleared .lvl-stat{color:#5fe07f;}
+  #level-buttons button:hover .lvl-stat{color:#fff;}
+
+  /* ---------- LEADERBOARD ---------- */
+  #leaderboard-screen .panel{max-width:520px;}
+  #lb-mine{font-size:14px;color:#c8c2b4;margin-bottom:12px;}
+  #lb-mine b{color:var(--amber);}
+  .lb-list{list-style:none;margin:0;padding:0;}
+  .lb-list li{display:grid;grid-template-columns:34px 1fr auto 70px;gap:10px;align-items:center;padding:8px 6px;
+    border-bottom:1px solid #1d1a16;font-size:15px;}
+  .lb-list li.me{background:rgba(200,30,30,.14);}
+  .lb-rank{font-family:'Oswald',sans-serif;color:#8a8477;text-align:center;}
+  .lb-list li:nth-child(1) .lb-rank{color:#f0c040;}
+  .lb-time{font-family:'Oswald',sans-serif;color:#f2ede2;letter-spacing:1px;}
+  .lb-kills{font-size:12px;color:#8a8477;text-align:right;}
+  .lb-empty{color:#8a8477;font-size:13px;text-align:center;padding:14px 0;}
+
+  /* ---------- END SCREEN ADDITIONS ---------- */
+  .run-summary{margin-top:16px;}
+  .rs-line{color:#b7b0a2;font-size:14px;letter-spacing:1px;margin-top:4px;}
+  .rs-record{font-family:'Oswald',sans-serif;color:var(--amber);letter-spacing:4px;font-size:18px;
+    text-shadow:0 0 18px rgba(224,168,60,.5);}
+  .end-actions{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;justify-content:center;}
+  .end-screen .end-actions button{margin-top:0;padding:8px 18px;font-size:12px;border-color:#5a554b;color:#b7b0a2;}
+
+  /* ---------- CREDITS ---------- */
+  #credits-screen{position:fixed;inset:0;z-index:90;background:rgba(3,2,2,.9);backdrop-filter:blur(3px);
+    display:flex;align-items:center;justify-content:center;padding:16px;}
+  .cr-panel{width:100%;max-width:760px;max-height:100%;display:flex;flex-direction:column;background:#0b0a09;
+    border:1px solid #3a352d;box-shadow:0 20px 60px rgba(0,0,0,.7);}
+  .cr-head{display:flex;justify-content:space-between;align-items:center;padding:18px 24px;border-bottom:1px solid #2c2822;}
+  .cr-head h1{font-family:'Oswald',sans-serif;font-weight:700;letter-spacing:10px;font-size:26px;margin:0;color:#f2ede2;}
+  .cr-close{background:none;border:1px solid #4a453c;color:#c8c2b4;width:34px;height:34px;cursor:pointer;font-size:15px;}
+  .cr-close:hover{border-color:var(--amber);color:var(--amber);}
+  .cr-scroll{overflow-y:auto;padding:8px 24px 24px;user-select:text;}
+  .cr-section h2{font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:3px;color:var(--blood);text-transform:uppercase;
+    margin:22px 0 8px;padding-bottom:6px;border-bottom:1px solid #1d1a16;}
+  .cr-team ul{margin:6px 0 0;padding-left:18px;color:#c8c2b4;font-size:14.5px;line-height:1.6;}
+  .cr-members{color:#f2ede2;font-size:15px;margin-bottom:6px;}
+  .cr-item{padding:10px 0;border-bottom:1px solid #16140f;}
+  .cr-name{font-family:'Oswald',sans-serif;font-size:16px;color:#f2ede2;letter-spacing:.5px;}
+  .cr-what{font-size:14px;color:#b7b0a2;margin:2px 0 4px;}
+  .cr-meta{font-size:13px;color:#8a8477;line-height:1.5;word-break:break-word;}
+  .cr-meta span{display:inline-block;min-width:58px;color:#5a564c;text-transform:uppercase;font-size:10.5px;letter-spacing:1.5px;}
+  .cr-meta a{color:#c9a65a;}
+  .cr-confirm{font-family:'Rajdhani',sans-serif;font-size:10.5px;letter-spacing:1.5px;color:#111;background:var(--amber);padding:1px 6px;margin-left:6px;vertical-align:middle;}
+  .cr-foot{font-size:12px;color:#5a564c;margin-top:22px;line-height:1.5;}
+  .cr-hint{padding:10px 24px;border-top:1px solid #2c2822;font-size:11px;letter-spacing:2px;color:#5a564c;text-transform:uppercase;}
 </style>
 </head>
 <body>
@@ -232,6 +341,11 @@
     <button data-level="1">Level 1</button>
     <button data-level="2">Level 2</button>
     <button data-level="3">Level 3</button>
+  </div>
+  <div class="menu-row">
+    <button class="ghost-btn" type="button" id="level-back">Back</button>
+    <button class="ghost-btn" type="button" data-open-leaderboard>Leaderboard</button>
+    <button class="ghost-btn" type="button" data-open-credits>Credits</button>
   </div>
 </div>
 
@@ -252,11 +366,15 @@
 </div>
 
 <div id="start-screen">
+  <div id="account-chip"></div>
   <div id="start-inner">
     <h1 id="title">DEAD<span>WAY</span> CITY</h1>
     <div id="subtitle">Vertical Slice — Redline Exodus</div>
-    <div id="build-tag">BUILD 2026-09-05-AD — if this doesn't say "-AD", you're on an old cached copy</div>
     <button id="enter-btn">Enter The City</button>
+    <div class="menu-row">
+      <button class="ghost-btn" type="button" data-open-leaderboard>Leaderboard</button>
+      <button class="ghost-btn" type="button" data-open-credits>Credits</button>
+    </div>
     <div id="controls-grid">
       <div><b>WASD</b> Move</div>
       <div><b>Mouse</b> Look / Aim</div>
@@ -265,8 +383,7 @@
       <div><b>Shift</b> Sprint</div>
       <div><b>W W</b> (double-tap) Toggle sprint</div>
       <div><b>Ctrl / C</b> Crouch</div>
-      <div><b>U</b> Adjust gun grip (dev)</div>
-      <div><b>[ / ]</b> Adjust character scale (dev)</div>
+      <div><b>Q</b> Switch Gun / Knife</div>
       <div><b>Space</b> Jump / Handbrake</div>
       <div><b>F</b> Enter / Exit Vehicle</div>
       <div><b>V</b> Toggle First-Person</div>
@@ -345,7 +462,7 @@
 <div id="deathscreen" class="end-screen hidden">
   <h1 class="end-title">YOU DIED</h1>
   <div class="end-sub" id="death-stats">The infected claimed the block.</div>
-  <button onclick="location.reload()">Restart Demo</button>
+  <button onclick="location.reload()">Try Again</button>
 </div>
 
 <div id="winscreen" class="end-screen hidden">
@@ -358,6 +475,59 @@
   <h1 class="end-title">PAUSED</h1>
   <div class="end-sub">Press Tab or click below to resume.</div>
   <button id="resume-btn">Resume</button>
+  <div class="end-actions">
+    <button type="button" data-open-leaderboard>Leaderboard</button>
+    <button type="button" data-open-credits>Credits</button>
+  </div>
+</div>
+
+<!-- ---------- SIGN IN / SIGN UP ---------- -->
+<div id="auth-screen" class="panel-screen hidden" role="dialog" aria-label="Sign in">
+  <div class="panel">
+    <button class="x-btn" id="auth-close" aria-label="Close">✕</button>
+    <h2>SURVIVOR ID</h2>
+    <div class="sub">Sign in so your progress follows you to any computer.</div>
+    <div id="auth-offline-note" class="hidden">Online accounts aren't configured in this build — you can still play as a guest; progress stays on this computer.</div>
+    <div id="auth-forms">
+      <div class="tabs" id="auth-tabs">
+        <button type="button" data-tab="signin" class="active">Sign in</button>
+        <button type="button" data-tab="signup">Create account</button>
+      </div>
+      <form id="auth-form" data-tab="signin" novalidate>
+        <div id="auth-callsign-row" class="hidden">
+          <label for="auth-callsign">Callsign (shown on leaderboard)</label>
+          <input id="auth-callsign" maxlength="20" autocomplete="nickname" spellcheck="false">
+        </div>
+        <label for="auth-email">Email</label>
+        <input id="auth-email" type="email" autocomplete="email" spellcheck="false">
+        <label for="auth-password">Password</label>
+        <input id="auth-password" type="password" autocomplete="current-password">
+        <button type="button" id="auth-forgot">Forgot password?</button>
+        <button type="submit" id="auth-submit">Sign in</button>
+      </form>
+      <div class="auth-or">OR</div>
+      <button type="button" id="auth-google">Continue with Google</button>
+    </div>
+    <button type="button" id="auth-guest" class="ghost-btn">Play as guest</button>
+    <div id="auth-msg" class="auth-msg" role="status"></div>
+    <div class="auth-fine">Guest progress is kept on this computer only. Create an account later and it carries over.</div>
+  </div>
+</div>
+
+<!-- ---------- LEADERBOARD ---------- -->
+<div id="leaderboard-screen" class="panel-screen hidden" role="dialog" aria-label="Leaderboard">
+  <div class="panel">
+    <button class="x-btn" id="lb-close" aria-label="Close">✕</button>
+    <h2>FASTEST EXTRACTIONS</h2>
+    <div class="sub">Best winning time per survivor.</div>
+    <div class="tabs" id="lb-tabs">
+      <button type="button" data-level="1" class="active">Level 1</button>
+      <button type="button" data-level="2">Level 2</button>
+      <button type="button" data-level="3">Level 3</button>
+    </div>
+    <div id="lb-mine"></div>
+    <div id="lb-body"></div>
+  </div>
 </div>
 
 <script type="importmap">

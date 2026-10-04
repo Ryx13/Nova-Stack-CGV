@@ -36,6 +36,7 @@ import {
   makeBuilding, playerVis, Zombie, concreteTex,
 } from './characters.js';
 import { spawnHitSpark, spawnBlood, bootLevel, registerLevelTick, levelKeyHooks } from './Actions.js';
+import { finishRun } from './account.js';
 
 const LEVEL_CONFIG = {
   id: 3,
@@ -438,6 +439,7 @@ function showLevel3EndScreen() {
   }
   lv3WinStats.textContent = `Infected eliminated: ${state.kills} · Infected cured: ${lv3.curedCount || 0} · Coins: ${state.coins}`;
   lv3Win.classList.remove('hidden');
+  finishRun('win', lv3Win);
 }
 
 /* ---------------------------------------------------------------------
