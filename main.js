@@ -24,13 +24,24 @@ const LEVEL_LOADERS = {
   3: () => import('./Level3.js'),
 };
 
+// The opening is its own module, not part of Level 1. Completing it returns
+// to level selection so every level remains independently launchable.
+async function launchOpening() {
+  const levelSelect = document.getElementById('level-select');
+  const { playStoryboard } = await import('./Intro.js');
+  const { startSafeRoomTutorial } = await import('./IntroTutorial.js');
+  await playStoryboard();
+  startSafeRoomTutorial({ onComplete: () => levelSelect?.classList.remove('hidden') });
+}
+
 function initIntroScreen() {
   const enterBtn = document.getElementById('enter-btn');
   const levelSelect = document.getElementById('level-select');
   if (!enterBtn || !introScreen || !levelSelect) return;
-  enterBtn.addEventListener('click', () => {
+  enterBtn.addEventListener('click', async () => {
     introScreen.classList.add('hidden');
-    levelSelect.classList.remove('hidden');
+    try { await launchOpening(); }
+    catch (err) { console.error('Opening failed to load:', err); levelSelect.classList.remove('hidden'); }
   });
 }
 
