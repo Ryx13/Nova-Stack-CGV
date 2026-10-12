@@ -1,6 +1,51 @@
 # Deadway City
 
-## New in this pass (accounts, credits, load size)
+## New in this pass (presentation pass: HUD, title screen, Level 1 polish)
+- **Title screen atmosphere** — the splash art now sits on its own layer with a
+  slow Ken Burns zoom/pan; a canvas layer drifts ember/ash particles upward;
+  a scanline + vignette overlay gives it a film feel; a three-stage campaign
+  strip (The Street / The Chase / The Broadcast Tower) previews the levels;
+  and the ENTER button carries a periodic shine sweep. All CSS/canvas — no
+  new assets, no runtime cost once gameplay starts (the ember loop parks
+  itself when the intro is hidden).
+- **HUD unified with Level 2's look** — Levels 1 and 3 now use the same
+  angled translucent vitals panel (inline heart/runner icons instead of text
+  labels, blue stamina gradient), objective panel with the amber ◆ active
+  marker, and radar with the teal rim glow + red north tick. Level 2 keeps
+  its own injected HUD unchanged (the stock panel is hidden behind a
+  `body.lv2-hud` guard, and its JS icon injection dedups against the icons
+  now baked into the stock markup).
+- **Level 1 glitch fixes**:
+  - The Day-mode rain sheet is now sized for the 75° max FOV — sprinting
+    (FOV kick 62°→74°) no longer reveals clear rain-free edges at the top
+    and sides of the screen.
+  - The extraction and depot marker rings no longer z-fight/flicker against
+    the lane markings they overlap (depth-write off + polygon offset +
+    render order above the road paint).
+  - **Balance**: player damage now has a 0.5 s post-hit grace window — being
+    surrounded by several infected used to stack ~30 dps into a
+    sub-4-second death; hits now land discretely instead of melting the
+    health bar. The first horde top-up is also delayed (1.2 s → 3 s after
+    level start) for a little breathing room. The opening six infected are
+    still pre-placed down the street (intentional — the road should never
+    look empty), they just take longer to reach you than to kill you.
+- **Level 1 night visuals** — a two-layer star field and a moon (with halo
+  and maria) parented to the sky dome, toggled off in Day mode; building
+  windows that actually glow at night (the facade texture doubles as the
+  emissive map — dark walls emit nothing, lit patches glow; three lit-
+  density variants plus occasional boarded windows); the distant skyline
+  silhouettes now have lit windows too; ~a third of street-facing facades
+  carry neon signs — flat facade signs plus vertical "blade" signs that
+  read from far down the street — each with an additive halo; streetlights
+  gained warm glow sprites; the road gained manhole covers, a zebra
+  crossing + stop line at the depot junction, and a curb normal map. The
+  night sky's zenith was deepened slightly so the star field reads against
+  the amber city glow.
+- Everything above was regression-tested in-browser across all three
+  levels and both Day/Night modes (zero console errors), including HUD
+  style checks and pixel-level reads of the rendered frame.
+
+## Previous pass (accounts, credits, level linking, load size)
 - **Credits screen** (`credits.js`) — opens from the title screen, level
   select, pause menu and every end screen. All third-party entries are
   filled in (sources + licences); the team roster lists all six members.
@@ -441,9 +486,26 @@ playtest it and report anything that looks off, especially:
   browser in front of me.
 
 ## Files
-- `index.html` — page shell, HUD markup/CSS, start/end screens
-- `game.js` — everything else: world building, physics, vehicle, AI, combat, camera
-- `assets/zombie_walker.glb` — animated zombie (walk_relaxed clip), primary enemy
-- `assets/zombie_variant_b.glb`, `zombie_variant_c.glb` — extra zombie variants for visual variety
-- `assets/zombie_corpse.glb` — your original static model, used as scattered corpse set-dressing
-- `assets/splash1.jpg`, `splash2.jpg` — your concept art, used on the title screen
+- `index.html` — page shell, HUD markup/CSS (shared Level 1/3 style), title /
+  level-select / mode-select / loading screens
+- `main.js` — boot: title screen FX (Ken Burns, ember drift), level + Day/Night
+  selection, lazy per-level module loading
+- `Scene.js` — renderer, sky dome (stars/moon/sun), lighting + time-of-day,
+  weather FX, mission tracker, HUD updates, radar
+- `characters.js` — procedural world building: street, buildings (windows,
+  neon), props, player rig, zombie AI/cloning
+- `Actions.js` — movement, camera, combat, vehicle, level bootstrap + game
+  loop
+- `PowerUps.js`, `VendingMachine.js`, `saferoomSupplyCatalog.js` — pickups,
+  purchases, per-level supply tables
+- `shaders.js` — shield, ground fog, rain, fire, puddle, toxic-wound shaders
+- `state.js` — shared game state
+- `Level1.js` / `Level2.js` + `Level2Config.js` / `Level3.js` +
+  `Level3Config.js` — level entry points and per-level tuning (see
+  `level2.md`, `Level3.md`)
+- `account.js`, `cloud.js`, `firebase-config.js`, `firestore.rules`,
+  `credits.js` — accounts, cloud save, leaderboard, credits (see
+  **CLOUD_SETUP.md**)
+- `game.js` — the original single-file build, kept for reference
+- `assets/*.glb` — rigged models (zombies, player, vehicles, props);
+  `assets/splash1.jpg` — title-screen concept art

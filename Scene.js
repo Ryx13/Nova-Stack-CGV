@@ -183,7 +183,11 @@ function onResize() {
   // browsers never dispatch a real 'resize' event during a script's own
   // synchronous top-level execution, so `rain` is always defined by the
   // time this line can actually run.
-  const h = 2 * RAIN_DISTANCE * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.15;
+  // Size for the widest FOV the camera ever uses (the 74° sprint kick),
+  // not the current one — at the stock 62° the card only just covered
+  // the frustum, so sprinting (any FOV widening) revealed its edges at
+  // the sides of the screen.
+  const h = 2 * RAIN_DISTANCE * Math.tan(THREE.MathUtils.degToRad(75 / 2)) * 1.05;
   rain.scale.set(h * camera.aspect, h, 1);
 }
 window.addEventListener('resize', onResize);
@@ -195,10 +199,13 @@ function makeCanvas(w, h, draw) {
   return c;
 }
 
-// NIGHT sky gradient — this is the game's original/default look, unchanged.
+// NIGHT sky gradient — the game's original dusk look, with one touch-up:
+// the zenith stop was deepened slightly (see below) for the star field.
 const nightSkyCanvas = makeCanvas(8, 64, (ctx, w, h) => {
   const g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, '#1c1a22');
+  // Slightly deepened zenith (was #1c1a22) so the star field and moon
+  // read against the sky instead of melting into the light-pollution wash.
+  g.addColorStop(0, '#15141a');
   g.addColorStop(0.45, '#6a5346');
   g.addColorStop(0.72, '#c48a52');
   g.addColorStop(1, '#d9b07a');
@@ -276,6 +283,79 @@ sunVisual.renderOrder = -1; // draw with/just after the sky, behind everything e
 sky.add(sunVisual);
 
 /* ---------------------------------------------------------------------
+   NIGHT SKY — stars + a moon, parented to the sky dome exactly like
+   sunVisual above so they track the camera for free. applyTimeOfDay()
+   toggles them: the day sky is an overcast gradient where they'd be
+   invisible noise anyway, and the sun sprite owns that sky.
+--------------------------------------------------------------------- */
+const starSpriteTex = new THREE.CanvasTexture(makeCanvas(32, 32, (ctx) => {
+  const g = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.4, 'rgba(230,238,255,.8)');
+  g.addColorStop(1, 'rgba(230,238,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 32, 32);
+}));
+function makeStarLayer(count, size, opacity) {
+  const pos = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    // Spread over the upper dome, but kept above ~27° elevation: the
+    // amber city-glow band near the horizon swallows anything fainter,
+    // so stars concentrate where the sky is actually dark.
+    const el = (0.3 + Math.random() * 0.7) * (Math.PI / 2); // elevation
+    const az = Math.random() * Math.PI * 2;
+    const r = 402; // just inside the 420-radius sky sphere
+    pos[i * 3] = Math.cos(el) * Math.cos(az) * r;
+    pos[i * 3 + 1] = Math.sin(el) * r;
+    pos[i * 3 + 2] = Math.cos(el) * Math.sin(az) * r;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({
+    map: starSpriteTex, size, sizeAttenuation: false, transparent: true, opacity,
+    depthWrite: false, fog: false, blending: THREE.AdditiveBlending, color: 0xdfe6ff,
+  });
+  const pts = new THREE.Points(geo, mat);
+  pts.renderOrder = -1; // with the sky, behind everything else
+  sky.add(pts);
+  return pts;
+}
+// Two layers (many faint + a few bright) so the field isn't uniform.
+// Sizes/opacity tuned against the amber city-glow gradient — much dimmer
+// and the faint layer simply disappears into the light pollution.
+export const stars = [makeStarLayer(700, 2.2, 0.85), makeStarLayer(130, 3.4, 1.0)];
+
+const moonTex = new THREE.CanvasTexture(makeCanvas(128, 128, (ctx) => {
+  // Halo, bright disc, a few darker maria — reads as a moon, not a
+  // second sun (additive blending would otherwise make it glare).
+  const g = ctx.createRadialGradient(64, 64, 8, 64, 64, 62);
+  g.addColorStop(0, 'rgba(235,240,255,.95)');
+  g.addColorStop(0.28, 'rgba(210,222,245,.5)');
+  g.addColorStop(1, 'rgba(190,205,235,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
+  ctx.fillStyle = 'rgba(228,235,252,.98)';
+  ctx.beginPath(); ctx.arc(64, 64, 22, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(178,190,215,.5)';
+  [[56, 58, 5], [70, 72, 4], [62, 74, 3], [74, 56, 3]].forEach(([mx, my, mr]) => {
+    ctx.beginPath(); ctx.arc(mx, my, mr, 0, Math.PI * 2); ctx.fill();
+  });
+}));
+export const moonVisual = new THREE.Sprite(new THREE.SpriteMaterial({
+  // depthTest stays ON (unlike the sun sprite): the sky dome never writes
+  // depth so nothing about it occludes the moon, but real geometry does —
+  // a moon shining through a building silhouette would break the illusion.
+  map: moonTex, transparent: true, depthWrite: false, fog: false,
+  blending: THREE.AdditiveBlending, opacity: 0.95,
+}));
+// Elevation ~42°, ~22° right of the spawn forward (-z): high enough to
+// clear the rooftops and sit on the darker upper gradient, low enough to
+// enter the frame on a modest upward glance instead of only when staring
+// at the zenith.
+moonVisual.position.set(111, 268, -276);
+moonVisual.scale.set(50, 50, 1);
+moonVisual.renderOrder = -1;
+sky.add(moonVisual);
+
+/* ---------------------------------------------------------------------
    DAY / NIGHT MODE
 
    TIME_OF_DAY_CONFIG holds every value that differs between the two
@@ -294,6 +374,7 @@ const TIME_OF_DAY_CONFIG = {
     fogDensity: 0.009,
     hemiSky: 0xe7c9a0, hemiGround: 0x1a1612, hemiIntensity: 0.55,
     sunColor: 0xffc48a, sunIntensity: 0, sunVisible: false, // sun switched off — streetlights carry the night
+    celestial: true, // stars + moon own the night sky
     ambientColor: 0x3a322c, ambientIntensity: 0.28,
     hazeColor: 0xb9c4cf, hazeOpacity: 0.5, hazeCoverage: 0.35,
     rainOn: false,
@@ -306,6 +387,7 @@ const TIME_OF_DAY_CONFIG = {
     fogDensity: 0.03, // thinner than night — daylight haze, not a wall of fog
     hemiSky: 0xdfe7ee, hemiGround: 0x4a4c46, hemiIntensity: 0.95,
     sunColor: 0xfff6e0, sunIntensity: 2.1, sunVisible: true, // strong, clearly-visible sun
+    celestial: false, // overcast day — no stars, no moon
     ambientColor: 0x545c62, ambientIntensity: 0.42,
     hazeColor: 0xe8ecef, hazeOpacity: 0.65, hazeCoverage: 0.6,
     rainOn: true,
@@ -329,6 +411,8 @@ export function applyTimeOfDay(mode) {
   sun.color.setHex(cfg.sunColor);
   sun.intensity = cfg.sunIntensity;
   sunVisual.visible = cfg.sunVisible;
+  stars.forEach((s) => { s.visible = cfg.celestial; });
+  moonVisual.visible = cfg.celestial;
   ambientLight.color.setHex(cfg.ambientColor);
   ambientLight.intensity = cfg.ambientIntensity;
 
@@ -476,10 +560,17 @@ export function loadWorldBounds() {
 export const extractPos = new THREE.Vector3(0, 0, -STREET_LENGTH + 24);
 export const extractRing = new THREE.Mesh(
   new THREE.RingGeometry(2.2, 2.65, 40),
-  new THREE.MeshBasicMaterial({ color: 0x33ff77, side: THREE.DoubleSide, transparent: true, opacity: 0.85 })
+  // depthWrite off + a negative polygonOffset keeps this flat ring from
+  // z-fighting the lane markings it overlaps (reported shimmering at
+  // the extraction point, visible from hundreds of metres away).
+  new THREE.MeshBasicMaterial({
+    color: 0x33ff77, side: THREE.DoubleSide, transparent: true, opacity: 0.85,
+    depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+  })
 );
 extractRing.rotation.x = -Math.PI / 2;
-extractRing.position.copy(extractPos).setY(0.06);
+extractRing.position.copy(extractPos).setY(0.1);
+extractRing.renderOrder = 3;
 extractRing.visible = false;
 scene.add(extractRing);
 export const extractLight = new THREE.PointLight(0x33ff77, 0, 16, 2);

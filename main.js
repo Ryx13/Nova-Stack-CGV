@@ -19,7 +19,11 @@ import { initAccountUI, sessionReady, showAuth, takeResumeRequest } from './acco
 import { getSession } from './cloud.js';
 
 const introScreen = document.getElementById('start-screen');
-if (introScreen) introScreen.style.backgroundImage = "url('assets/splash1.jpg')";
+// The splash art lives on its own layer (#splash-bg) so it can carry the
+// slow Ken Burns zoom/pan in CSS without animating the screen's other
+// children along with it.
+const splashBg = document.getElementById('splash-bg');
+if (splashBg) splashBg.style.backgroundImage = "url('assets/splash1.jpg')";
 
 const LEVEL_LOADERS = {
   1: () => import('./Level1.js'),
@@ -141,5 +145,53 @@ function boot() {
   initIntroScreen();
   initLevelSelect();
   initModeSelect();
+  startEmberDrift();
   handleResume();
+}
+
+/* ---------------------------------------------------------------------
+   Title-screen ember/ash drift — a whisper of motion on top of the
+   splash art so the home page never sits perfectly still (the Ken Burns
+   pan handles the background layer; this handles the foreground).
+   Pure canvas 2D, ~54 particles, no assets. The loop keeps running
+   while the intro screen is hidden but skips all drawing, so returning
+   to the home screen from level-select resumes it for free.
+--------------------------------------------------------------------- */
+function startEmberDrift() {
+  const intro = document.getElementById('start-screen');
+  const canvas = document.getElementById('ember-canvas');
+  if (!intro || !canvas) return;
+  const ctx = canvas.getContext('2d');
+  const fit = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
+  fit();
+  window.addEventListener('resize', fit);
+  const R = Math.random;
+  const parts = [];
+  for (let i = 0; i < 54; i++) parts.push({
+    x: R() * window.innerWidth, y: R() * window.innerHeight,
+    r: 0.8 + R() * 2.1, v: 6 + R() * 16, // px/s upward drift
+    sway: 12 + R() * 26, ph: R() * Math.PI * 2,
+    a: 0.12 + R() * 0.5, ember: R() < 0.45,
+  });
+  let last = performance.now();
+  (function tick(now) {
+    requestAnimationFrame(tick);
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+    if (intro.classList.contains('hidden')) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const t = now / 1000;
+    for (const p of parts) {
+      p.y -= p.v * dt;
+      if (p.y < -8) { p.y = canvas.height + 8; p.x = R() * canvas.width; }
+      const x = p.x + Math.sin(t * 0.7 + p.ph) * p.sway;
+      const flick = p.ember ? 0.55 + 0.45 * Math.sin(t * 3 + p.ph * 2) : 1;
+      ctx.globalAlpha = p.a * flick;
+      ctx.fillStyle = p.ember ? '#ffb45e' : '#9a917f';
+      ctx.beginPath();
+      ctx.arc(x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  })(last);
 }

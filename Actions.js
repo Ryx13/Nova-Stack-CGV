@@ -300,6 +300,14 @@ export function startReload() {
 export function damagePlayer(dmg) {
   if (state.isDead) return;
   if (state.shieldActive) return; // shield blocks all attacks outright
+  // Brief grace after any hit. Without it, every zombie swings on its
+  // own ~0.95s cooldown, so a pack of three stacked ~30 dps into a
+  // 100 HP player — dead in roughly three seconds of contact, which
+  // read as a glitch ("insta-death swarm") rather than difficulty. One
+  // shared 0.5s window caps the worst case at about one hit's worth of
+  // damage per half-second no matter how many are swinging at once.
+  if (state.hurtGrace > 0) return;
+  state.hurtGrace = 0.5;
   state.playerHealth = Math.max(0, state.playerHealth - dmg);
   dom.healthFill.style.width = (state.playerHealth / state.playerMaxHealth) * 100 + '%';
   if (dom.bloodVig) dom.bloodVig.style.opacity = String(1 - state.playerHealth / state.playerMaxHealth);
@@ -867,6 +875,7 @@ function startAnimationLoop() {
     const dt = Math.min(clock.getDelta(), 0.05);
     state.shake = Math.max(0, state.shake - dt * 1.8);
     state.meleeTimer = Math.max(0, state.meleeTimer - dt);
+    state.hurtGrace = Math.max(0, state.hurtGrace - dt);
     sky.position.copy(camera.position);
     updateWeatherFX(dt);
     if (!state.isDead && !state.paused && dom.hud && !dom.hud.classList.contains('hidden')) {

@@ -202,19 +202,133 @@ laneTex.wrapS = laneTex.wrapT = THREE.RepeatWrapping;
 laneTex.repeat.set(1, 18);
 laneTex.transparent = true;
 
-export const windowTex = new THREE.CanvasTexture(makeCanvas(128, 256, (ctx, w, h) => {
-  ctx.fillStyle = '#2a2724'; ctx.fillRect(0, 0, w, h);
-  const cols = 5, rows = 10;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const lit = Math.random() < 0.18;
-      ctx.fillStyle = lit ? `rgba(255,${170 + Math.random() * 50},90,0.95)` : 'rgba(8,9,11,0.92)';
-      const cw = w / cols, rh = h / rows;
-      ctx.fillRect(c * cw + 4, r * rh + 4, cw - 8, rh - 8);
+// Three window-grid variants at different lit densities — buildings
+// pick one at random so adjacent facades don't repeat the same pattern.
+// The same canvas doubles as each building's emissiveMap (makeBuilding),
+// so at night the lit windows actually glow instead of merely being
+// bright texels under streetlight falloff.
+function makeWindowTexture(litChance) {
+  const tex = new THREE.CanvasTexture(makeCanvas(128, 256, (ctx, w, h) => {
+    ctx.fillStyle = '#2a2724'; ctx.fillRect(0, 0, w, h);
+    const cols = 5, rows = 10;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cw = w / cols, rh = h / rows;
+        const roll = Math.random();
+        if (roll < litChance) {
+          ctx.fillStyle = `rgba(255,${170 + Math.random() * 50},90,0.95)`;
+          ctx.fillRect(c * cw + 4, r * rh + 4, cw - 8, rh - 8);
+        } else if (roll < litChance + 0.06) {
+          // boarded-up — a few dead windows per facade sell the abandonment
+          ctx.fillStyle = '#3a2e22';
+          ctx.fillRect(c * cw + 3, r * rh + 4, cw - 6, rh - 8);
+          ctx.strokeStyle = 'rgba(18,13,8,0.8)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(c * cw + 3, r * rh + rh / 2 - 2); ctx.lineTo(c * cw + cw - 3, r * rh + rh / 2 - 2);
+          ctx.moveTo(c * cw + 3, r * rh + rh / 2 + 2); ctx.lineTo(c * cw + cw - 3, r * rh + rh / 2 + 2);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = 'rgba(8,9,11,0.92)';
+          ctx.fillRect(c * cw + 4, r * rh + 4, cw - 8, rh - 8);
+        }
+      }
     }
-  }
+  }));
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+export const windowTex = makeWindowTexture(0.18); // kept exported for compatibility
+const windowTexVariants = [makeWindowTexture(0.08), makeWindowTexture(0.18), makeWindowTexture(0.32)];
+
+// Shared radial glow sprite for streetlight heads (and any future prop
+// dressing) — one texture, many sprites.
+const streetGlowTex = new THREE.CanvasTexture(makeCanvas(64, 64, (ctx) => {
+  const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+  g.addColorStop(0, 'rgba(255,244,214,1)');
+  g.addColorStop(0.35, 'rgba(255,196,112,.55)');
+  g.addColorStop(1, 'rgba(255,196,112,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
 }));
-windowTex.wrapS = windowTex.wrapT = THREE.RepeatWrapping;
+
+/* ---------------------------------------------------------------------
+   NEON SIGNS — canvas-text panels on the street faces of a random
+   subset of buildings. No extra scene lights: the panel is unlit
+   MeshBasicMaterial (always readable) plus one soft additive sprite for
+   the halo — together they read as neon without paying a PointLight
+   per sign.
+--------------------------------------------------------------------- */
+const NEON_WORDS = ['DINER', 'MOTEL', 'BAR', 'PAWN', 'LIQUOR', '24 HR', 'CASH', 'HOTEL'];
+const NEON_COLORS = ['#ff5a5a', '#37c8ff', '#ffb84a', '#7dff9a', '#ff7ad9'];
+const neonTexCache = new Map();
+function makeNeonTexture(word, color, vertical = false) {
+  const key = word + '|' + color + '|' + (vertical ? 'v' : 'h');
+  if (neonTexCache.has(key)) return neonTexCache.get(key);
+  const chars = word.split('');
+  const tex = new THREE.CanvasTexture(makeCanvas(vertical ? 96 : 256, vertical ? chars.length * 58 + 40 : 96, (ctx, w, h) => {
+    ctx.clearRect(0, 0, w, h);
+    ctx.shadowColor = color;
+    ctx.shadowBlur = vertical ? 16 : 22;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 5;
+    ctx.strokeRect(12, 12, w - 24, h - 24);
+    ctx.font = '700 44px Oswald, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const drawText = () => {
+      if (vertical) chars.forEach((ch, i) => { if (ch !== ' ') ctx.fillText(ch, w / 2, 44 + i * 58); });
+      else ctx.fillText(word, w / 2, h / 2 + 2);
+    };
+    ctx.fillStyle = '#fff';
+    drawText();
+    ctx.shadowBlur = 10; // second pass — hotter core on the letters
+    ctx.fillStyle = color;
+    drawText();
+  }));
+  neonTexCache.set(key, tex);
+  return tex;
+}
+const neonGlowTex = new THREE.CanvasTexture(makeCanvas(128, 128, (ctx) => {
+  const g = ctx.createRadialGradient(64, 64, 4, 64, 64, 62);
+  g.addColorStop(0, 'rgba(255,255,255,.5)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
+}));
+function addNeonSign(g, w, d, streetSide, night) {
+  const word = NEON_WORDS[Math.floor(rnd() * NEON_WORDS.length)];
+  const color = NEON_COLORS[Math.floor(rnd() * NEON_COLORS.length)];
+  // ~45% mount as a "blade" sign sticking out perpendicular to the facade
+  // with the word stacked vertically — the classic roadside-diner mount,
+  // readable from far down the street instead of only once you're nearly
+  // abreast of the building. The rest stay flat on the facade itself.
+  const blade = rnd() < 0.45;
+  const panel = blade
+    ? new THREE.Mesh(
+        new THREE.PlaneGeometry(0.95, 3.6),
+        new THREE.MeshBasicMaterial({ map: makeNeonTexture(word, color, true), transparent: true, fog: false, side: THREE.DoubleSide })
+      )
+    : new THREE.Mesh(
+        new THREE.PlaneGeometry(2.9, 1.05),
+        new THREE.MeshBasicMaterial({ map: makeNeonTexture(word, color), transparent: true, fog: false })
+      );
+  if (blade) {
+    panel.position.set(streetSide * (w / 2 + 0.85), 4.9 + rnd() * 1.4, (rnd() - 0.5) * d * 0.5);
+    // no yaw: the plane already faces along the street (±z), and
+    // DoubleSide covers both approach directions.
+  } else {
+    panel.position.set(streetSide * (w / 2 + 0.09), 4.4 + rnd() * 1.6, (rnd() - 0.5) * d * 0.55);
+    panel.rotation.y = streetSide > 0 ? Math.PI / 2 : -Math.PI / 2;
+  }
+  g.add(panel);
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: neonGlowTex, transparent: true, depthWrite: false, fog: false,
+    blending: THREE.AdditiveBlending, opacity: night ? 0.65 : 0.25,
+  }));
+  halo.material.color.set(color);
+  halo.position.copy(panel.position);
+  halo.scale.set(blade ? 4.2 : 6.8, blade ? 8 : 3.1, 1);
+  g.add(halo);
+}
 
 export const concreteTex = new THREE.CanvasTexture(makeCanvas(128, 128, (ctx, w, h) => {
   ctx.fillStyle = '#4d4a44'; ctx.fillRect(0, 0, w, h);
@@ -451,9 +565,18 @@ export function loadStreetSurface() {
     walk.position.set(side * (STREET_HALF_W + 2.1), 0.03, -STREET_LENGTH / 2 + 20);
     walk.receiveShadow = true;
     scene.add(walk);
+    const curbNormalTex = concreteNormalTex.clone();
+    curbNormalTex.needsUpdate = true;
+    curbNormalTex.wrapS = curbNormalTex.wrapT = THREE.RepeatWrapping;
+    curbNormalTex.repeat.set(1, 60);
     const curb = new THREE.Mesh(
       new THREE.BoxGeometry(0.22, 0.16, STREET_LENGTH + 70),
-      new THREE.MeshStandardMaterial({ color: 0x6e6a62, roughness: 0.9 })
+      // Concrete normal map (tiled along the run) gives the curb a
+      // chipped-stone read instead of a flat bar.
+      new THREE.MeshStandardMaterial({
+        color: 0x6e6a62, roughness: 0.9,
+        normalMap: curbNormalTex, normalScale: new THREE.Vector2(0.6, 0.6),
+      })
     );
     curb.position.set(side * STREET_HALF_W, 0.08, -STREET_LENGTH / 2 + 20);
     curb.castShadow = true; curb.receiveShadow = true;
@@ -466,6 +589,34 @@ export function loadStreetSurface() {
   laneMesh.rotation.x = -Math.PI / 2;
   laneMesh.position.set(0, 0.02, -STREET_LENGTH / 2 + 20);
   scene.add(laneMesh);
+  // Manhole covers — a few dark iron discs scattered down the lanes;
+  // purely cosmetic, but they break up the asphalt's repetition.
+  const manholeMat = new THREE.MeshStandardMaterial({ color: 0x232628, roughness: 0.55, metalness: 0.75 });
+  for (let i = 0; i < 7; i++) {
+    const mh = new THREE.Mesh(new THREE.CircleGeometry(0.55, 18), manholeMat);
+    mh.rotation.x = -Math.PI / 2;
+    mh.position.set((rnd() < 0.5 ? -1 : 1) * (2.2 + rnd() * 3.5), 0.011, 16 - rnd() * (STREET_LENGTH - 6));
+    mh.receiveShadow = true;
+    scene.add(mh);
+  }
+  // Road paint at the depot cross-street junction: a zebra crossing over
+  // the main road plus a stop line, so the side road reads as a real
+  // intersection instead of a driveway. renderOrder + depthWrite:false
+  // layer the transparent paint above the lane markings without fighting.
+  const paintMat = new THREE.MeshBasicMaterial({ color: 0xd8d5c8, transparent: true, opacity: 0.5, depthWrite: false });
+  const crossZ = DEPOT_POS.z + 6.5;
+  for (let i = 0; i < 7; i++) {
+    const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 2.6), paintMat);
+    stripe.rotation.x = -Math.PI / 2;
+    stripe.position.set(-8.4 + i * 2.8, 0.024, crossZ);
+    stripe.renderOrder = 1;
+    scene.add(stripe);
+  }
+  const stopLine = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 0.55), paintMat);
+  stopLine.rotation.x = -Math.PI / 2;
+  stopLine.position.set(-5.5, 0.024, crossZ + 3.6);
+  stopLine.renderOrder = 1;
+  scene.add(stopLine);
 }
 
 /* ---------------------------------------------------------------------
@@ -473,11 +624,20 @@ export function loadStreetSurface() {
 --------------------------------------------------------------------- */
 export function makeBuilding(x, z, w, h, d) {
   const g = new THREE.Group();
-  const tex = windowTex.clone(); tex.needsUpdate = true;
+  const tex = windowTexVariants[Math.floor(rnd() * windowTexVariants.length)].clone();
+  tex.needsUpdate = true;
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(Math.max(2, Math.round(w / 4)), Math.max(3, Math.round(h / 4)));
   const tint = new THREE.Color().setHSL(0.08, 0.08, 0.38 + rnd() * 0.12);
-  const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.94, color: tint });
+  // Lit windows glow: the facade texture doubles as the emissive map —
+  // dark walls contribute ~nothing, lit patches emit. Full strength at
+  // night when the sun is off and they're the point; softened in Day
+  // mode where a glowing facade reads odd under full sun.
+  const night = state.timeOfDay === 'night';
+  const mat = new THREE.MeshStandardMaterial({
+    map: tex, roughness: 0.94, color: tint,
+    emissive: 0xffb066, emissiveMap: tex, emissiveIntensity: night ? 0.9 : 0.22,
+  });
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   mesh.position.y = h / 2;
   mesh.castShadow = true; mesh.receiveShadow = true;
@@ -503,6 +663,9 @@ export function makeBuilding(x, z, w, h, d) {
   );
   roof.position.y = h + 0.15;
   g.add(roof);
+  // Roughly a third of the street-facing facades carry a neon sign
+  // (streetSide: east row faces -x, west row faces +x toward the road).
+  if (rnd() < 0.35) addNeonSign(g, w, d, x > 0 ? -1 : 1, night);
   if (rnd() > 0.4) {
     const ac = new THREE.Mesh(
       new THREE.BoxGeometry(1.6, 0.7, 1.2),
@@ -553,10 +716,22 @@ export function loadBuildings() {
     }
   }
   buildWestPocket();
+  const night = state.timeOfDay === 'night';
   for (let i = 0; i < 18; i++) {
+    // Distant skyline: window textures instead of flat black so the far
+    // blocks read as buildings — and a handful of lit windows survive
+    // out there too, via the same emissive-map trick the street-facing
+    // buildings use.
+    const silTex = windowTexVariants[2].clone();
+    silTex.needsUpdate = true;
+    silTex.wrapS = silTex.wrapT = THREE.RepeatWrapping;
+    silTex.repeat.set(3 + rnd() * 3, 6 + rnd() * 6);
     const sil = new THREE.Mesh(
       new THREE.BoxGeometry(18 + rnd() * 22, 28 + rnd() * 50, 16 + rnd() * 18),
-      new THREE.MeshStandardMaterial({ color: 0x1b1816, roughness: 1 })
+      new THREE.MeshStandardMaterial({
+        map: silTex, color: 0x35302a, roughness: 1,
+        emissive: 0xffb066, emissiveMap: silTex, emissiveIntensity: night ? 0.8 : 0.15,
+      })
     );
     sil.position.set((rnd() < 0.5 ? -1 : 1) * (48 + rnd() * 40), sil.geometry.parameters.height / 2, -20 - rnd() * STREET_LENGTH);
     scene.add(sil);
@@ -706,6 +881,16 @@ export function makeStreetlight(x, z) {
   scene.add(spotTarget);
   spot.target = spotTarget;
   scene.add(spot);
+
+  // Soft additive halo at the lamp head — the light source itself reads
+  // at a distance without paying for another real light.
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: streetGlowTex, transparent: true, depthWrite: false, fog: false,
+    blending: THREE.AdditiveBlending, opacity: isDay ? 0.5 : 0.85, color: 0xffc070,
+  }));
+  glow.position.copy(lamp.position);
+  glow.scale.set(2.2, 2.2, 1);
+  scene.add(glow);
 
   // Visible cone mesh — a soft, additive-blended cone from the lamp
   // down to the ground so the beam itself reads as a radiating cone of
@@ -893,10 +1078,15 @@ function buildDepotYard() {
   }
   const marker = new THREE.Mesh(
     new THREE.RingGeometry(1.5, 1.85, 32),
-    new THREE.MeshBasicMaterial({ color: 0xffaa22, side: THREE.DoubleSide, transparent: true, opacity: 0.9 })
+    // Same anti-z-fight treatment as the extraction ring in Scene.js.
+    new THREE.MeshBasicMaterial({
+      color: 0xffaa22, side: THREE.DoubleSide, transparent: true, opacity: 0.9,
+      depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+    })
   );
   marker.rotation.x = -Math.PI / 2;
-  marker.position.set(cx, 0.08, cz);
+  marker.position.set(cx, 0.1, cz);
+  marker.renderOrder = 3;
   scene.add(marker);
   const markerLight = new THREE.PointLight(0xffaa22, 2.4, 14, 2);
   markerLight.position.set(cx, 2, cz);
