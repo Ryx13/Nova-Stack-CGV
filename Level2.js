@@ -1385,6 +1385,9 @@ function buildLevel2HUD(portTarget) {
   style.textContent = `
     /* ---- stock HUD elements restyled for Level 2 only ---- */
     body.lv2-hud #objective, body.lv2-hud #killcount { display: none; }
+    /* #objective-panel is the wrapper those two now live in — it would
+       otherwise show up as an empty styled box here. */
+    body.lv2-hud #objective-panel { display: none; }
     body.lv2-hud #coin-label { display: none !important; }
     body.lv2-hud #killfeed { top: 248px; }
     /* Reference-matching cuts: no center compass (the radar's target

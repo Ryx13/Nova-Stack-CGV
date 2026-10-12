@@ -76,14 +76,29 @@
     position:fixed;inset:0;z-index:50;
     background:#050505;
     display:flex;flex-direction:column;align-items:center;justify-content:flex-end;
-    background-size:cover;background-position:center;
     transition:opacity .6s ease;
   }
+  /* Ken Burns layer — the splash art slowly zooms/pans behind the
+     gradient; main.js paints the image onto this div. */
+  #splash-bg{position:absolute;inset:0;z-index:0;background:#050505 center/cover no-repeat;
+    animation:kenburns 28s ease-in-out infinite alternate;}
+  @keyframes kenburns{
+    from{transform:scale(1.04) translate(-1.2%,.8%);}
+    to{transform:scale(1.16) translate(1.4%,-1.2%);}
+  }
   #start-screen::before{
-    content:"";position:absolute;inset:0;
+    content:"";position:absolute;inset:0;z-index:1;
     background:linear-gradient(180deg, rgba(5,5,5,.15) 0%, rgba(5,5,5,.55) 55%, rgba(5,5,5,.96) 100%);
   }
-  #start-inner{position:relative;z-index:2;width:100%;max-width:880px;padding:0 28px 38px;text-align:center;}
+  /* Faint scanlines + corner vignette — a touch of found-footage grain. */
+  #splash-fx{position:absolute;inset:0;z-index:2;pointer-events:none;
+    background:repeating-linear-gradient(0deg, rgba(255,255,255,.03) 0 1px, transparent 1px 3px);
+    opacity:.6;}
+  #splash-fx::after{content:"";position:absolute;inset:0;
+    background:radial-gradient(ellipse at 50% 38%, transparent 52%, rgba(0,0,0,.55) 100%);}
+  /* Ember/ash drift canvas — driven from main.js, only on this screen. */
+  #ember-canvas{position:absolute;inset:0;z-index:3;pointer-events:none;}
+  #start-inner{position:relative;z-index:5;width:100%;max-width:880px;padding:0 28px 38px;text-align:center;}
   .splash-eyebrow{
     font-family:'Oswald',sans-serif;font-weight:600;font-size:12px;letter-spacing:7px;
     color:#b7b0a2;text-transform:uppercase;margin-bottom:12px;
@@ -103,12 +118,18 @@
   #subtitle{letter-spacing:5px;color:#c8c2b4;font-size:14px;margin-top:12px;text-transform:uppercase;
     animation:fadeUp .7s ease .3s both;}
   #enter-btn{
+    position:relative;overflow:hidden;
     margin-top:28px;padding:16px 52px;font-family:'Oswald',sans-serif;font-weight:600;
     letter-spacing:4px;font-size:18px;background:var(--blood);color:#fff;border:1px solid #ff6b6b;
     cursor:pointer;text-transform:uppercase;
     animation:fadeUp .7s ease .4s both, btnPulse 2.6s ease-in-out 1.4s infinite;
     transition:transform .15s, background .15s;
   }
+  /* Slow light sweep across the CTA. */
+  #enter-btn::after{content:"";position:absolute;top:0;left:-70%;width:45%;height:100%;pointer-events:none;
+    background:linear-gradient(105deg, transparent, rgba(255,255,255,.32), transparent);
+    transform:skewX(-20deg);animation:btnShine 3.4s ease-in-out 2s infinite;}
+  @keyframes btnShine{0%,60%{left:-70%;}90%,100%{left:135%;}}
   #enter-btn:hover{background:#e83030;transform:translateY(-2px);}
   #start-screen .menu-row{animation:fadeUp .7s ease .48s both;}
   #controls-panel{
@@ -137,6 +158,19 @@
     animation:fadeUp .7s ease .72s both;
   }
   #splash-footer b{color:#8a8477;font-weight:700;}
+  /* Campaign strip — the three-level arc at a glance. */
+  #campaign-strip{display:flex;gap:14px;justify-content:center;margin-top:24px;flex-wrap:wrap;
+    animation:fadeUp .7s ease .5s both;}
+  .camp-card{width:176px;padding:12px 14px 10px;text-align:left;background:rgba(8,10,14,.6);
+    border:1px solid rgba(255,255,255,.12);border-radius:4px;
+    clip-path:polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%);
+    transition:border-color .2s, background .2s, transform .2s;}
+  .camp-card:hover{border-color:rgba(224,168,60,.5);background:rgba(22,17,11,.72);transform:translateY(-2px);}
+  .camp-num{display:block;font-family:'Oswald',sans-serif;font-weight:700;font-size:11px;
+    letter-spacing:3px;color:var(--blood);}
+  .camp-name{display:block;font-family:'Oswald',sans-serif;font-weight:600;font-size:15px;
+    letter-spacing:1.5px;color:#f2ede2;margin:3px 0 4px;text-transform:uppercase;}
+  .camp-desc{display:block;font-size:11.5px;letter-spacing:.5px;color:#b7b0a2;line-height:1.35;}
   @keyframes fadeUp{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
   @keyframes titleGlow{
     0%,100%{text-shadow:0 0 30px rgba(200,30,30,.55), 0 4px 0 #000;}
@@ -164,13 +198,21 @@
   #hitmarker::before{left:2px;top:2px;transform:rotate(45deg);}
   #hitmarker::after{right:2px;top:2px;transform:rotate(-45deg);}
 
-  #bottom-left{position:absolute;left:22px;bottom:22px;width:260px;}
-  .bar-label{font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2px;color:#b7b0a2;margin-bottom:3px;}
-  .bar-bg{width:100%;height:16px;background:rgba(0,0,0,.55);border:1px solid var(--line);position:relative;}
+  /* Bottom-left vitals — Level 2's angled translucent panel look, with
+     inline white glyphs instead of text labels and the blue stamina fill. */
+  #bottom-left{position:absolute;left:22px;bottom:22px;width:240px;padding:12px 14px;
+    background:rgba(8,10,14,.58);border:1px solid rgba(255,255,255,.14);
+    clip-path:polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));}
+  .bar-label{display:none;}
+  .bar-wrap{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+  .bar-wrap:last-child{margin-bottom:0;}
+  .bar-icon{display:flex;color:#fff;width:18px;height:18px;flex:none;
+    filter:drop-shadow(0 0 3px rgba(255,255,255,.35));}
+  .bar-icon svg{width:100%;height:100%;display:block;}
+  .bar-bg{flex:1;height:16px;background:rgba(0,0,0,.55);border:1px solid var(--line);position:relative;}
   .bar-fill{height:100%;transition:width .15s;}
   #health-fill{background:linear-gradient(90deg,#7a1010,#d02020);}
-  #stamina-fill{background:linear-gradient(90deg,#8a6a10,#e0b030);}
-  .bar-wrap{margin-bottom:10px;}
+  #stamina-fill{background:linear-gradient(90deg,#0d3a8a,#2f7fe0);}
 
   #bottom-right{position:absolute;right:22px;bottom:22px;text-align:right;}
   #ammo{font-family:'Oswald',sans-serif;font-size:40px;font-weight:700;color:#f2ede2;line-height:1;}
@@ -187,13 +229,24 @@
     color:#f2ede2;font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:1px;
     display:flex;align-items:center;justify-content:center;}
   #pause-btn:hover{background:rgba(255,255,255,.08);}
-  #objective{background:var(--panel);border:1px solid var(--line);padding:8px 14px;font-size:13px;
-    letter-spacing:1px;max-width:340px;}
+  /* Objectives panel — Level 2's dimmed-panel look on the stock
+     Level 1/3 objective + kills readout; the amber diamond marks the
+     live goal, the kills line sits as the secondary row. */
+  #objective-panel{background:rgba(8,10,14,.58);border:1px solid rgba(255,255,255,.14);
+    border-radius:4px;padding:12px 16px;max-width:330px;font-size:14.5px;font-weight:600;
+    letter-spacing:.5px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.85);}
+  #objective{font-size:inherit;font-weight:inherit;letter-spacing:inherit;line-height:1.25;max-width:none;}
+  #objective::before{content:"◆ ";color:var(--amber);text-shadow:0 0 8px rgba(224,168,60,.8);}
   #objective b{color:var(--amber);font-family:'Oswald',sans-serif;}
-  #killcount{font-family:'Oswald',sans-serif;font-size:13px;color:#e8e4da;margin-top:4px;letter-spacing:1px;}
+  #objective i{color:#b7b0a2;font-style:normal;}
+  #killcount{font-family:'Oswald',sans-serif;font-size:13px;color:#b7b0a2;margin-top:5px;letter-spacing:1px;}
 
-  #radar-wrap{width:150px;height:150px;background:rgba(0,0,0,.5);border:1px solid var(--line);border-radius:50%;
-    position:relative;overflow:hidden;}
+  /* Radar — Level 2's compass-ring treatment: teal rim glow + red N. */
+  #radar-wrap{width:150px;height:150px;background:rgba(0,0,0,.5);border-radius:50%;
+    border:1px solid rgba(42,255,213,.4);position:relative;overflow:hidden;
+    box-shadow:0 0 14px rgba(42,255,213,.22), inset 0 0 18px rgba(42,255,213,.1);}
+  #radar-wrap::before{content:"N";position:absolute;top:0;left:50%;transform:translateX(-50%);
+    font:700 11px/12px 'Oswald',sans-serif;color:#ff5252;text-shadow:0 0 6px rgba(255,80,80,.9);z-index:2;}
   #radar{width:100%;height:100%;}
 
   #objective-compass{position:absolute;left:50%;top:78px;transform:translateX(-50%);
@@ -305,7 +358,7 @@
   .auth-fine{font-size:11.5px;color:#5a564c;margin-top:14px;line-height:1.4;}
 
   /* ---------- ACCOUNT CHIP ---------- */
-  #account-chip{position:absolute;top:16px;right:18px;z-index:3;display:flex;align-items:center;gap:10px;
+  #account-chip{position:absolute;top:16px;right:18px;z-index:6;display:flex;align-items:center;gap:10px;
     background:rgba(0,0,0,.6);border:1px solid var(--line);padding:6px 8px 6px 12px;font-size:14px;}
   #account-chip small{color:#8a8477;}
   .ac-dot{width:8px;height:8px;border-radius:50%;background:#666;}
@@ -415,6 +468,9 @@
 </div>
 
 <div id="start-screen">
+  <div id="splash-bg"></div>
+  <div id="splash-fx"></div>
+  <canvas id="ember-canvas"></canvas>
   <div id="account-chip"></div>
   <div id="start-inner">
     <div class="splash-eyebrow">A Nova Stack Production</div>
@@ -425,6 +481,11 @@
     <div class="menu-row">
       <button class="ghost-btn" type="button" data-open-leaderboard>Leaderboard</button>
       <button class="ghost-btn" type="button" data-open-credits>Credits</button>
+    </div>
+    <div id="campaign-strip" aria-label="Campaign levels">
+      <div class="camp-card"><span class="camp-num">STAGE 01</span><span class="camp-name">The Street</span><span class="camp-desc">Clear the route · recover the sample · extract</span></div>
+      <div class="camp-card"><span class="camp-num">STAGE 02</span><span class="camp-name">The Chase</span><span class="camp-desc">Catch the girl before she reaches the port</span></div>
+      <div class="camp-card"><span class="camp-num">STAGE 03</span><span class="camp-name">The Broadcast Tower</span><span class="camp-desc">Restore the signal · reverse the outbreak</span></div>
     </div>
     <div id="controls-panel">
       <div class="controls-head">Field Manual</div>
@@ -457,7 +518,7 @@
   <div id="hitmarker"></div>
 
   <div id="top-bar">
-    <div>
+    <div id="objective-panel">
       <div id="objective">Objective: <b>Fight through to the depot</b> — neutralize <span id="obj-count">0/10</span> infected.</div>
       <div id="killcount">Kills: <span id="kills">0</span></div>
     </div>
@@ -486,11 +547,11 @@
 
   <div id="bottom-left">
     <div class="bar-wrap">
-      <div class="bar-label">HEALTH</div>
+      <span class="bar-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 21S4.5 16.1 2.2 11.8C.4 8.6 2 5 5.5 5c2 0 3.4 1.1 4.3 2.6C10.7 6.1 12.1 5 14.1 5c3.5 0 5.1 3.6 3.3 6.8C19.5 16.1 12 21 12 21z"/></svg></span>
       <div class="bar-bg"><div class="bar-fill" id="health-fill" style="width:100%"></div></div>
     </div>
     <div class="bar-wrap">
-      <div class="bar-label">STAMINA</div>
+      <span class="bar-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M13 3a2 2 0 1 1-2 2 2 2 0 0 1 2-2m-1.2 6.7.9-2.3 4.6 2.1v3h-2v-1.8l-2.1-1-1.8 4.6 2.6 2.6v5.1h-2v-4l-3.2-3.2-1.6 4.5-5.4 2.5-.8-1.8 4.4-2 2.6-7.5-1.6.9v3.5h-2v-4.7l4.4-2.5a2.5 2.5 0 0 1 3 .5z"/></svg></span>
       <div class="bar-bg"><div class="bar-fill" id="stamina-fill" style="width:100%"></div></div>
     </div>
   </div>

@@ -43,12 +43,17 @@ export const state = {
   coins: 0,
   killStreak: 0,
   spawnedTotal: 0,
-  spawnTimer: 1.2,
+  // 3s of calm before the first infected spawns — a fresh run used to
+  // have one closing in almost immediately (see Actions.js boot note).
+  spawnTimer: 3,
 
   // Player state
   playerHealth: 100,
   playerMaxHealth: 100,
   heartbeatTimer: 0, // counts down to next low-health heartbeat pulse; see updateLowHealthFX
+  // Post-hit damage grace (seconds, see damagePlayer in Actions.js) —
+  // caps how fast a whole pack can chew through health.
+  hurtGrace: 0,
   playerStamina: 100,
   staminaExhausted: false, // set when stamina hits 0; cleared once it recovers past STAMINA_RECOVER
   isDead: false,
