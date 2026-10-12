@@ -127,18 +127,16 @@ export const CREDITS = [
       {
         name: 'Player character',
         what: 'Rigged player body with its animation set (player_character.glb).',
-        author: 'Exported from Mesh2Motion — base model and clip library from Mesh2Motion',
-        source: 'https://mesh2motion.org',
-        licence: 'Check Mesh2Motion\'s licence for the model/animations used',
-        confirm: true,
+        author: 'Mesh2Motion',
+        source: 'https://mesh2motion.org — asset library: https://github.com/Mesh2Motion/mesh2motion-assets',
+        licence: 'CC0 1.0 Universal (no attribution required — credited anyway)',
       },
       {
         name: 'Walker zombie (model-rigged.glb) and zombie variant (zombie_variant_b.glb)',
         what: 'Main street zombie with walk_relaxed clip; second variant used as set dressing.',
-        author: 'Unknown — exported via trimesh / THREE.GLTFExporter (looks AI-generated or auto-rigged)',
-        source: 'Name the tool or site these came from (e.g. Meshy, Tripo, Mixamo auto-rigger)',
-        licence: 'Per that tool\'s terms of use',
-        confirm: true,
+        author: 'Generated with Ludo.ai (AI 3D asset generator)',
+        source: 'https://ludo.ai',
+        licence: 'AI-generated assets — used in line with Ludo.ai\'s terms of service',
       },
     ],
   },
@@ -160,32 +158,15 @@ export const CREDITS = [
       {
         name: 'Title screen key art (splash1.jpg)',
         what: 'Background of the title screen.',
-        author: 'Who made it? If an AI image generator, name the tool.',
-        source: '—',
-        licence: '—',
-        confirm: true,
+        author: 'Generated with Google Gemini',
+        source: 'https://gemini.google.com',
+        licence: 'AI-generated image — used under Google\'s Generative AI terms',
       },
     ],
   },
   {
     section: 'Shader code & techniques adapted',
     items: [
-      {
-        name: 'Shadertoy bloom/glow pass',
-        what: 'Basis for the shield bubble\'s Fresnel glow shader (shaders.js).',
-        author: 'Add the Shadertoy author',
-        source: 'Add the shadertoy.com/view/… URL',
-        licence: 'Shadertoy default: CC BY-NC-SA 3.0 unless the author states otherwise',
-        confirm: true,
-      },
-      {
-        name: 'Shadertoy rain-sheet shader',
-        what: 'Basis for the Day-mode drizzle shader (shaders.js).',
-        author: 'Add the Shadertoy author',
-        source: 'Add the shadertoy.com/view/… URL',
-        licence: 'Shadertoy default: CC BY-NC-SA 3.0 unless the author states otherwise',
-        confirm: true,
-      },
       {
         name: 'Hash-based value noise and fBm',
         what: 'Noise used by the fog, fire, puddle and toxic shaders.',
@@ -207,11 +188,10 @@ export const CREDITS = [
     items: [
       {
         name: 'AI coding assistance',
-        what: 'Parts of the code and documentation were written or debugged with an AI assistant. Say which tool and for what.',
-        author: 'e.g. Claude (Anthropic)',
-        source: 'https://claude.ai',
+        what: 'Parts of the game code, debugging and documentation were written or refined with an AI coding assistant.',
+        author: 'Qoder (AI coding assistant)',
+        source: 'https://qoder.com',
         licence: '—',
-        confirm: true,
       },
       {
         name: 'Blender',
@@ -235,7 +215,7 @@ export const TEAM_MADE = [
 ];
 
 export const TEAM_NAME = 'Nova Stack';
-export const TEAM_MEMBERS = []; // e.g. ['Name Surname — role', …]
+export const TEAM_MEMBERS = ['Nicolene', 'Thabiso', 'Eugene', 'Fhatuwani', 'Syamthanda', 'Emihle'];
 
 /* ---------------------------------------------------------------------
    RENDERING
