@@ -2,14 +2,21 @@
 
 ## New in this pass (accounts, credits, load size)
 - **Credits screen** (`credits.js`) — opens from the title screen, level
-  select, pause menu and every end screen. Entries tagged
-  *TEAM TO CONFIRM* still need a source/licence filled in before submission.
+  select, pause menu and every end screen. All third-party entries are
+  filled in (sources + licences); the team roster lists all six members.
 - **Accounts + cloud save** (`cloud.js`, `account.js`, `firebase-config.js`,
   `firestore.rules`) — sign up / sign in / Google / guest, per-level stats and
   best times, online leaderboard. Runs offline as guest until Firebase is
   configured: see **CLOUD_SETUP.md**.
 - **Retry** relaunches the same level + mode directly; **Main menu** button on
   every end screen.
+- **Levels are linked** — winning a level offers a primary "Continue to
+  Level N" button that auto-advances after 6 s (any other click cancels),
+  booting the next level directly with the same day/night mode. The Level 3
+  win screen shows a campaign-complete line instead.
+- **Title screen redesign** — production eyebrow, gradient title rule,
+  keycap-styled controls panel and a team/course footer, with staggered
+  entrance animations.
 - Debug readout and dev keys (`[` `]`) hidden behind **F3** or `?debug`.
 - Model textures resized/WebP-compressed (assets/ 300 MB → 24 MB, Level 1
   download ~88 MB → ~23 MB); 11 unused asset files removed from the build.

@@ -179,7 +179,7 @@ export async function finishRun(result, endScreenEl) {
       endScreenEl.insertBefore(box, firstBtn || null);
     }
     box.innerHTML = `<div class="rs-line">Time ${formatTime(timeSec)} · saving…</div>`;
-    addEndScreenButtons(endScreenEl);
+    addEndScreenButtons(endScreenEl, result);
   }
 
   let res;
@@ -205,12 +205,32 @@ export async function finishRun(result, endScreenEl) {
 /* Every end screen gets the same menu: retry, main menu, leaderboard,
    credits. Existing "Play Again"/"Restart" buttons are re-pointed at
    retry (same level + mode) instead of dumping the player at the title. */
-function addEndScreenButtons(el) {
+function addEndScreenButtons(el, result) {
   if (el.querySelector('.end-actions')) return;
   el.querySelectorAll('button[onclick*="location.reload"]').forEach((b) => {
     b.removeAttribute('onclick');
+    b.addEventListener('click', stopAutoAdvance);
     b.addEventListener('click', retryLevel);
   });
+  // Levels chain: a WIN offers the through-line into the next level. The
+  // countdown makes finishing a level flow into the next one on its own
+  // (any other click cancels it), and the button jumps straight there.
+  const next = result === 'win' ? NEXT_LEVEL[state.levelId] : null;
+  if (next) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'end-next';
+    btn.textContent = `Continue to Level ${next}`;
+    btn.addEventListener('click', playNextLevel);
+    el.insertBefore(btn, el.querySelector('button') || null);
+    startAutoAdvance(btn, next);
+  } else if (result === 'win') {
+    // No next level — the campaign is done. Small flourish instead.
+    const done = document.createElement('div');
+    done.className = 'campaign-complete';
+    done.textContent = 'ALL LEVELS CLEARED — CAMPAIGN COMPLETE';
+    el.insertBefore(done, el.querySelector('button') || null);
+  }
   const row = document.createElement('div');
   row.className = 'end-actions';
   row.innerHTML = `
@@ -218,7 +238,31 @@ function addEndScreenButtons(el) {
     <button type="button" data-open-leaderboard>Leaderboard</button>
     <button type="button" data-open-credits>Credits</button>`;
   row.querySelector('[data-act="menu"]').addEventListener('click', toMainMenu);
+  // Opening the leaderboard or credits means the player is still hanging
+  // around this screen — stop the auto-advance so it can't pull the page
+  // out from under the overlay they just opened.
+  row.querySelectorAll('button').forEach((b) => b.addEventListener('click', stopAutoAdvance));
   el.appendChild(row);
+}
+
+/* Auto-advance countdown on the next-level button (see addEndScreenButtons). */
+let autoAdv = null; // { timer, btn, next }
+function startAutoAdvance(btn, next) {
+  let left = 6;
+  const paint = () => { btn.textContent = `Continue to Level ${next} · ${left}s`; };
+  paint();
+  const timer = setInterval(() => {
+    left -= 1;
+    if (left <= 0) { stopAutoAdvance(); playNextLevel(); return; }
+    paint();
+  }, 1000);
+  autoAdv = { timer, btn, next };
+}
+function stopAutoAdvance() {
+  if (!autoAdv) return;
+  clearInterval(autoAdv.timer);
+  autoAdv.btn.textContent = `Continue to Level ${autoAdv.next}`;
+  autoAdv = null;
 }
 
 /* Restarting still reloads the page (each level builds its world at
@@ -228,6 +272,17 @@ function addEndScreenButtons(el) {
 const RESUME_KEY = 'deadway.resume';
 export function retryLevel() {
   try { sessionStorage.setItem(RESUME_KEY, JSON.stringify({ level: state.levelId || 1, mode: state.timeOfDay || 'night' })); } catch { /* ignore */ }
+  location.reload();
+}
+
+/* The campaign chain: 1 → 2 → 3. Same resume-request mechanism as
+   retryLevel — the current day/night mode carries over and the session
+   survives the reload. */
+const NEXT_LEVEL = { 1: 2, 2: 3 };
+export function playNextLevel() {
+  const next = NEXT_LEVEL[state.levelId];
+  if (!next) return;
+  try { sessionStorage.setItem(RESUME_KEY, JSON.stringify({ level: next, mode: state.timeOfDay || 'night' })); } catch { /* ignore */ }
   location.reload();
 }
 export function toMainMenu() {
