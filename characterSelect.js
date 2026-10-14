@@ -13,7 +13,7 @@ import * as THREE from 'three';
 import { ROSTER, getSelectedCharacter, setSelectedCharacter, instantiateCharacter, clipsFor } from './roster.js';
 
 const IDLE_CLIPS = ['listen', 'idle'];  // first one present wins
-const SHOWCASE_CLIP = 'dance';
+const SHOWCASE_CLIP = 'dance';    // unless the roster entry names its own
 const SPACING = 1.15;
 const STEP_FORWARD = 0.9;
 const FADE = 0.35;
@@ -197,9 +197,13 @@ function select(id, { showcase: doShowcase = true } = {}) {
 }
 
 function showcase(slot) {
-  const act = slot.actions?.[SHOWCASE_CLIP];
+  const name = ROSTER.find((r) => r.id === slot.id).showcase || SHOWCASE_CLIP;
+  const act = slot.actions?.[name];
   if (!act) return;
   ctx.pendingShowcase = false;
+  // Showcasing the clip they already idle on: restart it in the spotlight
+  // and keep it looping (a finite loop would end with nothing to fade to).
+  if (act === slot.idle) { act.time = 0; return; }
   act.reset();
   act.setLoop(THREE.LoopRepeat, 2);
   act.clampWhenFinished = false;

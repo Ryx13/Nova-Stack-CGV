@@ -18,11 +18,12 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 
+// showcase: the clip played when picked on the select screen (default 'dance').
 export const ROSTER = [
   { id: 'viper',    name: 'Viper',    role: 'Commando',       blurb: 'Jungle-born, never misses a flank.' },
-  { id: 'breacher', name: 'Breacher', role: 'SWAT Pointman',  blurb: 'First through every door.' },
+  { id: 'breacher', name: 'Breacher', role: 'SWAT Pointman',  blurb: 'First through every door.', showcase: 'shoot' },
   { id: 'cipher',   name: 'Cipher',   role: 'Netrunner',      blurb: 'Hacks the grid while it burns.' },
-  { id: 'ironhand', name: 'Ironhand', role: 'Veteran',        blurb: 'Lost an arm. Kept the grudge.' },
+  { id: 'ironhand', name: 'Ironhand', role: 'Veteran',        blurb: 'Lost an arm. Kept the grudge.', showcase: 'shoot' },
   { id: 'ember',    name: 'Ember',    role: 'Gunslinger',     blurb: 'Twin holsters, short fuse.' },
 ];
 export const DEFAULT_CHARACTER = 'viper';
