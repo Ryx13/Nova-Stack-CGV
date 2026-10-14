@@ -761,7 +761,16 @@ function initInputHandlers() {
   });
   dom.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   document.addEventListener('pointerlockchange', () => {
+    const wasLocked = state.pointerLocked;
     state.pointerLocked = document.pointerLockElement === dom.canvas;
+    // Esc while the mouse is captured never reaches keydown — the browser
+    // spends it releasing the pointer. So losing the lock mid-run IS the
+    // Esc press: pause, the way players expect. Not when the game itself
+    // let go (pausing already, end screens, a menu panel opening).
+    if (wasLocked && !state.pointerLocked && !state.paused && !state.isDead
+      && !document.querySelector('.end-screen:not(.hidden), .panel-screen:not(.hidden)')) {
+      togglePause();
+    }
   });
   dom.canvas.addEventListener('click', () => {
     const gameActive = !dom.hud.classList.contains('hidden') && dom.death.classList.contains('hidden') && dom.win.classList.contains('hidden');
@@ -791,13 +800,34 @@ function initInputHandlers() {
     // purchase/activation from firing on held-key auto-repeat.
     if (!e.repeat && e.code === 'KeyE' && levelKeyHooks.KeyE) levelKeyHooks.KeyE();
     if (!e.repeat && e.code === 'KeyG' && levelKeyHooks.KeyG) levelKeyHooks.KeyG();
-    if (e.code === 'Tab') {
+    // Tab, P, or Esc (Esc only arrives here once the mouse is free — e.g.
+    // to resume from the pause screen; see pointerlockchange above)
+    if (e.code === 'Tab' || e.code === 'KeyP' || e.code === 'Escape') {
+      // Esc over an open Leaderboard/Credits panel belongs to the panel
+      if (e.code === 'Escape' && document.querySelector('.panel-screen:not(.hidden)')) return;
       e.preventDefault(); // Tab normally shifts browser focus — stop that
-      togglePause();
+      if (!e.repeat) togglePause();
     }
   });
   if (dom.pauseBtn) dom.pauseBtn.addEventListener('click', () => togglePause());
   if (dom.resumeBtn) dom.resumeBtn.addEventListener('click', () => togglePause());
+  // Quit to the title screen: a fresh page load is the clean teardown (the
+  // level owns a renderer, physics world and timers). Asks twice so a
+  // stray click doesn't throw away a run.
+  const menuBtn = document.getElementById('pause-menu-btn');
+  if (menuBtn) {
+    let armed = null;
+    menuBtn.addEventListener('click', () => {
+      if (armed) { location.reload(); return; }
+      menuBtn.textContent = 'Quit this run? Click again';
+      menuBtn.classList.add('armed');
+      armed = setTimeout(() => {
+        armed = null;
+        menuBtn.textContent = '← Main Menu';
+        menuBtn.classList.remove('armed');
+      }, 3000);
+    });
+  }
 }
 
 /* ---------------------------------------------------------------------

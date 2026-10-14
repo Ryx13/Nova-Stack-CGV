@@ -80,6 +80,9 @@ function initLevelSelect() {
       levelSelect.classList.add('hidden');
       modeSelect.classList.remove('hidden');
       modeSelect.dataset.pendingLevel = levelId;
+      // Level 2's day is its own clear, smoky afternoon (Level2Config.js)
+      const daySub = document.querySelector('#mode-day .mode-sub');
+      if (daySub) daySub.textContent = levelId === '2' ? 'Low sun through the smoke' : 'Overcast, light drizzle';
     });
   });
 }
@@ -92,6 +95,13 @@ function initModeSelect() {
   if (!modeSelect) return;
 
   let modeChosen = false;
+
+  // ← Back: one step up the menu chain (mode -> level -> character -> start)
+  const modeBack = document.getElementById('mode-back');
+  if (modeBack) modeBack.addEventListener('click', () => {
+    modeSelect.classList.add('hidden');
+    document.getElementById('level-select').classList.remove('hidden');
+  });
 
   buttons.forEach((btn) => {
     btn.addEventListener('click', async () => {

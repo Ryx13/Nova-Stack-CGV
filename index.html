@@ -341,6 +341,15 @@
     font-size:15px;background:transparent;border:1px solid #c8c2b4;color:#f2ede2;cursor:pointer;
     text-transform:uppercase;}
   .end-screen button:hover{background:#c8c2b4;color:#000;}
+  .end-screen .menu-exit{margin-top:12px;padding:9px 26px;font-size:13px;border-color:#5a564c;color:#b7b0a2;}
+  .end-screen .menu-exit.armed{border-color:var(--blood);color:#ff8a8a;}
+
+  /* ---------- BACK ARROW (character / level / mode select) ---------- */
+  .back-arrow{position:absolute;top:22px;left:22px;z-index:2;padding:9px 16px;
+    font-family:'Oswald',sans-serif;font-weight:600;letter-spacing:2px;font-size:14px;text-transform:uppercase;
+    background:rgba(10,10,8,.55);color:#f2ede2;border:1px solid #5a564c;cursor:pointer;
+    transition:border-color .15s, background .15s, transform .15s;}
+  .back-arrow:hover{border-color:#c8c2b4;background:rgba(255,255,255,.08);transform:translateX(-2px);}
 
   #loading{position:fixed;inset:0;z-index:70;background:#050505;color:#8a8477;display:flex;
     flex-direction:column;align-items:center;justify-content:center;font-family:'Oswald',sans-serif;letter-spacing:3px;font-size:14px;gap:8px;}
@@ -472,6 +481,7 @@
 
 <div id="character-select" class="hidden">
   <canvas id="cs-canvas"></canvas>
+  <button type="button" class="back-arrow" id="cs-back" aria-label="Back to the start screen">← Back</button>
   <div id="cs-top">
     <h1>Choose Your <span>Survivor</span></h1>
     <div id="cs-detail">
@@ -483,13 +493,11 @@
   <div id="cs-bottom">
     <div id="cs-cards"></div>
     <button type="button" id="cs-confirm">Deploy</button>
-    <div class="menu-row" style="margin-top:0">
-      <button class="ghost-btn" type="button" id="cs-back">Back</button>
-    </div>
   </div>
 </div>
 
 <div id="level-select" class="hidden">
+  <button type="button" class="back-arrow" id="level-back" aria-label="Back to character select">← Back</button>
   <h1>DEAD<span>WAY</span> CITY</h1>
   <div id="level-buttons">
     <button data-level="1">Level 1</button>
@@ -497,13 +505,13 @@
     <button data-level="3">Level 3</button>
   </div>
   <div class="menu-row">
-    <button class="ghost-btn" type="button" id="level-back">Back</button>
     <button class="ghost-btn" type="button" data-open-leaderboard>Leaderboard</button>
     <button class="ghost-btn" type="button" data-open-credits>Credits</button>
   </div>
 </div>
 
 <div id="mode-select" class="hidden">
+  <button type="button" class="back-arrow" id="mode-back" aria-label="Back to level select">← Back</button>
   <h1>Choose Your Deployment Conditions</h1>
   <div id="mode-buttons">
     <div id="mode-day" class="mode-card" data-mode="day">
@@ -554,8 +562,7 @@
         <div><b>F</b> Enter / Exit Vehicle</div>
         <div><b>V</b> Toggle First-Person</div>
         <div><b>R</b> Reload</div>
-        <div><b>Tab</b> Pause</div>
-        <div><b>Esc</b> Release Mouse</div>
+        <div><b>Esc / Tab</b> Pause</div>
       </div>
     </div>
     <div id="note">Desktop prototype — keyboard &amp; mouse required. Pick a level, choose your deployment conditions, and link up your runs — clearing a level rolls straight into the next.</div>
@@ -641,8 +648,9 @@
 
 <div id="pause-overlay" class="end-screen hidden">
   <h1 class="end-title">PAUSED</h1>
-  <div class="end-sub">Press Tab or click below to resume.</div>
+  <div class="end-sub">Press Esc, Tab or P — or click below — to resume.</div>
   <button id="resume-btn">Resume</button>
+  <button type="button" id="pause-menu-btn" class="menu-exit">← Main Menu</button>
   <div class="end-actions">
     <button type="button" data-open-leaderboard>Leaderboard</button>
     <button type="button" data-open-credits>Credits</button>
