@@ -24,6 +24,8 @@ import { bootLevel, registerLevelTick, levelKeyHooks } from './Actions.js';
 import { VendingMachine, makeIcon } from './VendingMachine.js';
 import { finishRun } from './account.js';
 import { instantiateCharacter, loadGLB, fitClip } from './roster.js';
+import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
+import { buildStreetDressing } from './streetDressing.js';
 
 const LEVEL_CONFIG = {
   id: 2,
@@ -50,7 +52,15 @@ export function startLevel(mode) {
   // Level 2 dressing layer on top of the loaded base world (port,
   // blockage, collapse nest, machines, coins). Handles returned for the
   // logic phase — machines (purchase wiring) + teleportPoint (lose).
+  const sceneryStart = scene.children.length;
   const sceneHandles = buildLevel2Scene();
+  markStaticSince(scene, sceneryStart);
+  // Base world + this level's dressing are all fixed scenery now: merge it
+  // (~1,500 meshes into a few hundred chunked ones — see mergeStatic.js)
+  const mergeStats = mergeStaticScenery(scene);
+  console.log(`[mergeStatic] ${mergeStats.meshesBefore} meshes -> ${mergeStats.meshesAfter}`);
+  // Trees, rubble, litter, stains, cables — instanced, so added after the merge
+  buildStreetDressing();
   lv2Scene = sceneHandles;
   // Reference-style HUD (objectives, distances, inventory panel).
   lv2HUD = buildLevel2HUD(sceneHandles.teleportPoint);

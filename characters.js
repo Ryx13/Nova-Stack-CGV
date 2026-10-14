@@ -1306,7 +1306,12 @@ export function makeBarrier(x, z, ry) {
   addStaticBox(1.2, 0.42, 0.28, x, 0.42, z, ry);
 }
 
+// Every lamp post placed, as [x, z] — Level 2's street dressing strings
+// overhead cables between neighbours
+export const streetlightSpots = [];
+
 export function makeStreetlight(x, z) {
+  streetlightSpots.push([x, z]);
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x2c2c2c, roughness: 0.55, metalness: 0.65 });
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 6, 8), poleMat);
   pole.position.set(x, 3, z); pole.castShadow = true;

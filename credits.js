@@ -194,6 +194,13 @@ export const CREDITS = [
         licence: '—',
       },
       {
+        name: 'Claude Code (AI coding assistant)',
+        what: 'Character roster pipeline and select screen, clip fitting and pistol grip, vending machine lighting, Level 2 clear-day atmosphere (painted sky lighting, following sun shadows, smoke, daylight facades), ruined buildings, street dressing and scenery merging, with debugging and documentation.',
+        author: 'Anthropic',
+        source: 'https://claude.com/claude-code',
+        licence: '—',
+      },
+      {
         name: 'Blender',
         what: 'Converting/retargeting FBX animation files to .glb; reducing the roster characters to 30k triangles and building assets/characters/ (tools/build_characters.py).',
         author: 'Blender Foundation',
@@ -213,6 +220,7 @@ export const TEAM_MADE = [
   'Procedural city: buildings, road and sidewalk canvas textures, street props',
   'Procedural dead-city daylight: painted smoky sky, weathered daylight facades, smoke columns',
   'Procedural ruins: battle-damaged rooflines, blown-out corners with exposed floors, collapsed blocks, rubble mounds, shopfront ground floors',
+  'Procedural street dressing (dead trees, rubble, litter, stains, overhead cables) and static-scenery merging for performance',
   'Vending machine and supply catalogue system, procedural item icons',
 ];
 

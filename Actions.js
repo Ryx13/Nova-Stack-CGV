@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { state } from './state.js';
+import { markStaticSince } from './mergeStatic.js';
 import {
   scene, world, camera, renderer, dom, sfx, sky,
   pushKillFeed, doDeath, doWin, checkExtraction, updateExtractRing,
@@ -839,11 +840,15 @@ export function bootLevel(levelConfig = {}) {
 
   // World population — mirrors the exact order the original monolithic
   // game.js ran this in at module load time.
+  // Everything built from here to the trash cans is fixed scenery — a
+  // level may merge it into a few big meshes (mergeStatic.js)
+  const sceneryStart = scene.children.length;
   loadWorldBounds();
   loadStreetSurface();
   const { depotYard } = loadBuildings();
   loadObstacles();
   loadTrashCans();
+  markStaticSince(scene, sceneryStart);
   if (!state.skipCar) loadCars();
   loadMainCharacter();
   loadZombies();

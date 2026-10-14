@@ -514,6 +514,14 @@ playtest it and report anything that looks off, especially:
   level-select / mode-select / loading screens
 - `main.js` — boot: title screen FX (Ken Burns, ember drift), level + Day/Night
   selection, lazy per-level module loading
+- `mergeStatic.js` — merges a level's fixed scenery into a few hundred
+  chunked meshes (Level 2: ~1,600 draw calls down to ~500)
+- `streetDressing.js` — Level 2's instanced dead trees, rubble, litter,
+  stains and overhead cables
+- `roster.js`, `characterSelect.js` — playable characters, shared clip
+  loading/fitting, and the character-select screen
+- `art/`, `tools/build_characters.py` — Mixamo source FBXs and the Blender
+  script that builds `assets/characters/` from them
 - `Scene.js` — renderer, sky dome (stars/moon/sun), lighting + time-of-day,
   weather FX, mission tracker, HUD updates, radar
 - `characters.js` — procedural world building: street, buildings (windows,
