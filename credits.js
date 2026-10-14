@@ -211,6 +211,7 @@ export const TEAM_MADE = [
   'Custom GLSL shaders: shield, fog, rain, fire, puddles, toxic sludge',
   'Every sound effect — synthesised live with the Web Audio API, no audio files',
   'Procedural city: buildings, road and sidewalk canvas textures, street props',
+  'Procedural dead-city daylight: painted smoky sky, weathered daylight facades, smoke columns',
   'Vending machine and supply catalogue system, procedural item icons',
 ];
 

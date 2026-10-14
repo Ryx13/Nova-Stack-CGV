@@ -8,6 +8,7 @@ import {
   addStaticBox, addObstacle, pushKillFeed, flashDamage, markLoaded, updateObjectiveHUD,
   STREET_HALF_W, STREET_LENGTH, KILL_TARGET, ZOMBIE_MAX_ALIVE, DEPOT_POS, WEST_POCKET_Z, rowX,
   matPlayer, matChassis,
+  addLight,
 } from './Scene.js';
 import { spawnPickup, spawnCoin, registerKillstreak } from './PowerUps.js';
 import { damagePlayer, spawnHitSpark, spawnBlood } from './Actions.js';
@@ -242,6 +243,94 @@ function makeWindowTexture(litChance) {
 export const windowTex = makeWindowTexture(0.18); // kept exported for compatibility
 const windowTexVariants = [makeWindowTexture(0.08), makeWindowTexture(0.18), makeWindowTexture(0.32)];
 
+/* DAYLIGHT FACADES (clear-day levels) — nothing glows in daylight, and an
+   abandoned block looks it: one tile is two storeys (6.4 m) by three bays
+   (7.5 m) at real proportions, each window dark glass catching the sky,
+   smashed, boarded, or burnt out with soot licking up the wall above,
+   and grime streaking down from every sill. Light plaster/concrete base
+   so the per-building tint and the sun do the shading. Built only when a
+   clear-day level asks for one. */
+export const FACADE_TILE_W = 7.5;
+export const FACADE_TILE_H = 6.4;
+let dayFacadeVariants = null;
+function dayFacades() {
+  if (!dayFacadeVariants) dayFacadeVariants = [0, 1, 2, 3].map(() => makeDayFacadeTexture());
+  return dayFacadeVariants;
+}
+function makeDayFacadeTexture() {
+  const tex = new THREE.CanvasTexture(makeCanvas(256, 256, (ctx, w, h) => {
+    ctx.fillStyle = '#d9d0c4'; ctx.fillRect(0, 0, w, h);
+    // plaster mottling
+    for (let i = 0; i < 260; i++) {
+      ctx.fillStyle = `rgba(${Math.random() < 0.5 ? '40,34,28' : '255,250,240'},${(Math.random() * 0.07).toFixed(3)})`;
+      ctx.beginPath(); ctx.arc(Math.random() * w, Math.random() * h, 3 + Math.random() * 18, 0, Math.PI * 2); ctx.fill();
+    }
+    const storeyH = h / 2, bayW = w / 3;
+    for (let r = 0; r < 2; r++) {
+      // floor-line ledge
+      ctx.fillStyle = 'rgba(60,52,44,0.35)'; ctx.fillRect(0, r * storeyH + storeyH - 6, w, 4);
+      for (let c = 0; c < 3; c++) {
+        const x = c * bayW + bayW * 0.24, y = r * storeyH + storeyH * 0.22;
+        const ww = bayW * 0.52, wh = storeyH * 0.5;
+        const roll = Math.random();
+        // sill grime runs down the wall below every window
+        for (let k = 0; k < 6; k++) {
+          const sx = x + Math.random() * ww;
+          const g = ctx.createLinearGradient(0, y + wh, 0, y + wh + 20 + Math.random() * 40);
+          g.addColorStop(0, 'rgba(45,38,30,0.35)'); g.addColorStop(1, 'rgba(45,38,30,0)');
+          ctx.fillStyle = g; ctx.fillRect(sx, y + wh, 1.5 + Math.random() * 2.5, 60);
+        }
+        if (roll < 0.18) {
+          // burnt out: black hole, soot plume up the wall
+          const g = ctx.createLinearGradient(0, y + wh, 0, y - storeyH * 0.55);
+          g.addColorStop(0, 'rgba(20,16,12,0.85)'); g.addColorStop(1, 'rgba(20,16,12,0)');
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.moveTo(x - 4, y + wh); ctx.lineTo(x + ww + 4, y + wh);
+          ctx.lineTo(x + ww + 14, y - storeyH * 0.5); ctx.lineTo(x - 14, y - storeyH * 0.5);
+          ctx.fill();
+          ctx.fillStyle = '#0b0907'; ctx.fillRect(x, y, ww, wh);
+        } else {
+          // frame + reveal
+          ctx.fillStyle = '#3b342d'; ctx.fillRect(x - 3, y - 3, ww + 6, wh + 6);
+          if (roll < 0.36) {
+            // boarded up
+            ctx.fillStyle = '#5a4630'; ctx.fillRect(x, y, ww, wh);
+            ctx.strokeStyle = 'rgba(25,18,10,0.7)'; ctx.lineWidth = 1.5;
+            for (let b = 1; b < 5; b++) { ctx.beginPath(); ctx.moveTo(x, y + (wh * b) / 5); ctx.lineTo(x + ww, y + (wh * b) / 5); ctx.stroke(); }
+            ctx.fillStyle = '#6b5539'; ctx.save(); ctx.translate(x + ww / 2, y + wh / 2); ctx.rotate(-0.5); ctx.fillRect(-ww * 0.65, -4, ww * 1.3, 8); ctx.restore();
+          } else {
+            // glass: dark interior, sky reflection brightening toward the top
+            const g = ctx.createLinearGradient(0, y, 0, y + wh);
+            g.addColorStop(0, '#6d6f70'); g.addColorStop(0.45, '#2b2d2f'); g.addColorStop(1, '#131415');
+            ctx.fillStyle = g; ctx.fillRect(x, y, ww, wh);
+            ctx.fillStyle = '#3b342d'; ctx.fillRect(x + ww / 2 - 1.5, y, 3, wh); // mullion
+            if (roll < 0.62) {
+              // smashed: a dark hole with jagged shards left in the frame
+              ctx.fillStyle = '#0d0d0e';
+              ctx.beginPath();
+              const cx = x + ww * (0.3 + Math.random() * 0.4), cy = y + wh * (0.3 + Math.random() * 0.4);
+              for (let a = 0; a < 9; a++) {
+                const ang = (a / 9) * Math.PI * 2, rr = Math.min(ww, wh) * (0.2 + Math.random() * 0.35);
+                ctx.lineTo(cx + Math.cos(ang) * rr, cy + Math.sin(ang) * rr);
+              }
+              ctx.fill();
+            }
+          }
+        }
+      }
+    }
+    // weather streaks top to bottom + darkening toward the ground
+    for (let i = 0; i < 40; i++) {
+      ctx.fillStyle = `rgba(50,42,34,${(Math.random() * 0.08).toFixed(3)})`;
+      ctx.fillRect(Math.random() * w, 0, 1 + Math.random() * 3, h);
+    }
+  }));
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 // Shared radial glow sprite for streetlight heads (and any future prop
 // dressing) — one texture, many sprites.
 const streetGlowTex = new THREE.CanvasTexture(makeCanvas(64, 64, (ctx) => {
@@ -295,7 +384,7 @@ const neonGlowTex = new THREE.CanvasTexture(makeCanvas(128, 128, (ctx) => {
   g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
 }));
-function addNeonSign(g, w, d, streetSide, night) {
+function addNeonSign(g, w, d, streetSide, night, dead = false) {
   const word = NEON_WORDS[Math.floor(rnd() * NEON_WORDS.length)];
   const color = NEON_COLORS[Math.floor(rnd() * NEON_COLORS.length)];
   // ~45% mount as a "blade" sign sticking out perpendicular to the facade
@@ -321,6 +410,12 @@ function addNeonSign(g, w, d, streetSide, night) {
     panel.rotation.y = streetSide > 0 ? Math.PI / 2 : -Math.PI / 2;
   }
   g.add(panel);
+  if (dead) {
+    // Daylight in a dead city: the sign hangs there switched off — tube
+    // colours dulled to grey-tinted glass, no glow
+    panel.material.color.setRGB(0.32, 0.3, 0.28);
+    return;
+  }
   const halo = new THREE.Sprite(new THREE.SpriteMaterial({
     map: neonGlowTex, transparent: true, depthWrite: false, fog: false,
     blending: THREE.AdditiveBlending, opacity: night ? 0.65 : 0.25,
@@ -625,20 +720,36 @@ export function loadStreetSurface() {
 --------------------------------------------------------------------- */
 export function makeBuilding(x, z, w, h, d) {
   const g = new THREE.Group();
-  const tex = windowTexVariants[Math.floor(rnd() * windowTexVariants.length)].clone();
-  tex.needsUpdate = true;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(Math.max(2, Math.round(w / 4)), Math.max(3, Math.round(h / 4)));
-  const tint = new THREE.Color().setHSL(0.08, 0.08, 0.38 + rnd() * 0.12);
-  // Lit windows glow: the facade texture doubles as the emissive map —
-  // dark walls contribute ~nothing, lit patches emit. Full strength at
-  // night when the sun is off and they're the point; softened in Day
-  // mode where a glowing facade reads odd under full sun.
   const night = state.timeOfDay === 'night';
-  const mat = new THREE.MeshStandardMaterial({
-    map: tex, roughness: 0.94, color: tint,
-    emissive: 0xffb066, emissiveMap: tex, emissiveIntensity: night ? 0.9 : 0.22,
-  });
+  const clearDay = state.timeOfDay === 'day' && state.clearDay;
+  // Same rnd() calls in every mode, so the city's layout never changes
+  // with the time of day
+  const variant = rnd();
+  const lightness = rnd();
+  let mat;
+  if (clearDay) {
+    const set = dayFacades();
+    const tex = set[Math.floor(variant * set.length)].clone();
+    tex.needsUpdate = true;
+    tex.repeat.set(Math.max(1, Math.round(w / FACADE_TILE_W)), Math.max(1, Math.round(h / FACADE_TILE_H)));
+    // Varied weathered plaster/concrete/brick-ish tints
+    const tint = new THREE.Color().setHSL(0.06 + variant * 0.05, 0.12 + lightness * 0.12, 0.5 + lightness * 0.18);
+    mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, color: tint });
+  } else {
+    const tex = windowTexVariants[Math.floor(variant * windowTexVariants.length)].clone();
+    tex.needsUpdate = true;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(Math.max(2, Math.round(w / 4)), Math.max(3, Math.round(h / 4)));
+    const tint = new THREE.Color().setHSL(0.08, 0.08, 0.38 + lightness * 0.12);
+    // Lit windows glow: the facade texture doubles as the emissive map —
+    // dark walls contribute ~nothing, lit patches emit. Full strength at
+    // night when the sun is off and they're the point; softened in Day
+    // mode where a glowing facade reads odd under full sun.
+    mat = new THREE.MeshStandardMaterial({
+      map: tex, roughness: 0.94, color: tint,
+      emissive: 0xffb066, emissiveMap: tex, emissiveIntensity: night ? 0.9 : 0.22,
+    });
+  }
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   mesh.position.y = h / 2;
   mesh.castShadow = true; mesh.receiveShadow = true;
@@ -666,7 +777,7 @@ export function makeBuilding(x, z, w, h, d) {
   g.add(roof);
   // Roughly a third of the street-facing facades carry a neon sign
   // (streetSide: east row faces -x, west row faces +x toward the road).
-  if (rnd() < 0.35) addNeonSign(g, w, d, x > 0 ? -1 : 1, night);
+  if (rnd() < 0.35) addNeonSign(g, w, d, x > 0 ? -1 : 1, night, clearDay);
   if (rnd() > 0.4) {
     const ac = new THREE.Mesh(
       new THREE.BoxGeometry(1.6, 0.7, 1.2),
@@ -718,21 +829,25 @@ export function loadBuildings() {
   }
   buildWestPocket();
   const night = state.timeOfDay === 'night';
+  const clearDay = state.timeOfDay === 'day' && state.clearDay;
   for (let i = 0; i < 18; i++) {
     // Distant skyline: window textures instead of flat black so the far
     // blocks read as buildings — and a handful of lit windows survive
     // out there too, via the same emissive-map trick the street-facing
     // buildings use.
-    const silTex = windowTexVariants[2].clone();
+    const silTex = (clearDay ? dayFacades()[3] : windowTexVariants[2]).clone();
     silTex.needsUpdate = true;
     silTex.wrapS = silTex.wrapT = THREE.RepeatWrapping;
-    silTex.repeat.set(3 + rnd() * 3, 6 + rnd() * 6);
+    const rx = 3 + rnd() * 3, ry = 6 + rnd() * 6;
+    silTex.repeat.set(clearDay ? rx * 0.6 : rx, clearDay ? ry * 0.6 : ry);
     const sil = new THREE.Mesh(
       new THREE.BoxGeometry(18 + rnd() * 22, 28 + rnd() * 50, 16 + rnd() * 18),
-      new THREE.MeshStandardMaterial({
-        map: silTex, color: 0x35302a, roughness: 1,
-        emissive: 0xffb066, emissiveMap: silTex, emissiveIntensity: night ? 0.8 : 0.15,
-      })
+      clearDay
+        ? new THREE.MeshStandardMaterial({ map: silTex, color: 0x8a7e72, roughness: 1 })
+        : new THREE.MeshStandardMaterial({
+          map: silTex, color: 0x35302a, roughness: 1,
+          emissive: 0xffb066, emissiveMap: silTex, emissiveIntensity: night ? 0.8 : 0.15,
+        })
     );
     sil.position.set((rnd() < 0.5 ? -1 : 1) * (48 + rnd() * 40), sil.geometry.parameters.height / 2, -20 - rnd() * STREET_LENGTH);
     scene.add(sil);
@@ -801,7 +916,7 @@ export function makeWreck(x, z, ry, burning) {
   if (burning) {
     const light = new THREE.PointLight(0xff6a1a, 3.4, 11, 2);
     light.position.set(x, 1.15, z);
-    scene.add(light);
+    addLight(scene, light);
     spawnFireEffect(new THREE.Vector3(x, 0.9, z));
     spawnFlameBillboards(new THREE.Vector3(x, 0.45, z), 1.3);
   }
@@ -858,12 +973,20 @@ export function makeStreetlight(x, z) {
   arm.rotation.z = Math.PI / 2;
   arm.position.set(x + (x > 0 ? -0.7 : 0.7), 5.9, z);
   scene.add(arm);
+  // Clear-day levels (state.clearDay, Level 2) switch the lamps off in
+  // daylight: an unlit bulb, and none of the light, halo or cone below —
+  // which also takes ~two dozen SpotLights off every lit pixel's bill.
+  const lampOn = !(state.timeOfDay === 'day' && state.clearDay);
   const lamp = new THREE.Mesh(
     new THREE.SphereGeometry(0.18, 8, 8),
-    new THREE.MeshStandardMaterial({ color: 0xfff2c0, emissive: 0xffc266, emissiveIntensity: 1.8 })
+    new THREE.MeshStandardMaterial({ color: 0xfff2c0, emissive: 0xffc266, emissiveIntensity: lampOn ? 1.8 : 0 })
   );
   lamp.position.set(x + (x > 0 ? -1.35 : 1.35), 5.85, z);
   scene.add(lamp);
+  if (!lampOn) {
+    addObstacle(x, z, 0.35);
+    return;
+  }
 
   // SpotLight, not PointLight — this is what actually gives the light a
   // cone-shaped falloff (a PointLight radiates evenly in every
@@ -1091,7 +1214,7 @@ function buildDepotYard() {
   scene.add(marker);
   const markerLight = new THREE.PointLight(0xffaa22, 2.4, 14, 2);
   markerLight.position.set(cx, 2, cz);
-  scene.add(markerLight);
+  addLight(scene, markerLight);
   const beam = new THREE.Mesh(
     new THREE.CylinderGeometry(0.15, 2.2, 34, 16, 1, true),
     new THREE.MeshBasicMaterial({
@@ -1940,7 +2063,7 @@ export function spawnDeathSparkles(pos) {
   const center = pos.clone().add(new THREE.Vector3(0, 0.9, 0));
   const flash = new THREE.PointLight(0xbfe9ff, 6, 6, 2);
   flash.position.copy(center);
-  scene.add(flash);
+  addLight(scene, flash);
   setTimeout(() => scene.remove(flash), 120);
   for (let i = 0; i < 22; i++) {
     const color = DEATH_SPARK_COLORS[Math.floor(Math.random() * DEATH_SPARK_COLORS.length)];

@@ -30,6 +30,9 @@ export const state = {
   // had; 'day' is the new alternative. Scene.js reads this to drive
   // lighting/sky/fog, and to decide whether rain + puddles are active.
   timeOfDay: 'night',
+  // Set by a level's config (Level2Config.js) to swap Day mode's overcast
+  // drizzle for a clear sunlit day — see applyTimeOfDay in Scene.js.
+  clearDay: false,
 
   // Run tracking (account.js / cloud.js): which level is running, how
   // long it has been actively played (paused/dead time excluded), and

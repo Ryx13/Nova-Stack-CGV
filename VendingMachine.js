@@ -11,6 +11,8 @@
        position: new THREE.Vector3(13.05, 0, 27), // cabinet center, floor level
        rotationY: -Math.PI / 2,                   // cabinet front faces local +Z
        catalog: saferoomSupplyCatalog,             // omit for a blank machine, no stock
+       glowColor: 0x33ff55,                       // optional: colour of the light it throws
+       frontLight: true,                          // optional: false = no real light (sunlit scenes)
      });
 
      vending.update(dt);   // once per frame from the host's own loop
@@ -54,6 +56,16 @@
    - saferoomSupplyCatalog.js — the example supplies preset (the
      products shown inside the machine); copy it per level. It imports
      makeIcon from this file.
+
+   LIGHTING (cheap on purpose)
+   The cabinet is opaque, so it only lights what's in front of it. The
+   inside glows through emissive materials (shelves, trims, back panel —
+   no lights, nothing to leak through the walls), and ONE shadowless
+   SpotLight mounted at the glass aims down and out onto the ground in
+   front, backed by a flat glow decal on the floor. Every light in a
+   three.js scene costs every lit surface in the level, so this is one
+   light per machine instead of five point lights that also lit the top,
+   sides and the wall behind.
 
    DEPENDENCIES: `three` and `three/addons/` (RoundedBoxGeometry for the
    bevelled panels) — both resolve through the host's import map. The
@@ -199,7 +211,7 @@ export class VendingMachine {
   static HEIGHT = HEIGHT * SCALE;
   static DEPTH = DEPTH * SCALE;
 
-  constructor({ scene, position = new THREE.Vector3(0, 0, 0), rotationY = 0, catalog } = {}) {
+  constructor({ scene, position = new THREE.Vector3(0, 0, 0), rotationY = 0, catalog, glowColor = 0x33ff55, frontLight = true } = {}) {
     if (!scene) throw new Error('VendingMachine: options.scene (THREE.Scene) is required');
     this.scene = scene;
     // Each instance owns its own categories array (built from the shared
@@ -229,11 +241,15 @@ export class VendingMachine {
 
     this._mats = {
       body:     new THREE.MeshStandardMaterial({ map: bodyTex,     metalness: 0.5,  roughness: 0.62 }),
-      frame:    new THREE.MeshStandardMaterial({ map: frameTex,    metalness: 0.55, roughness: 0.58 }),
-      interior: new THREE.MeshStandardMaterial({ map: interiorTex, metalness: 0.2,  roughness: 0.9 }),
-      shelf:    new THREE.MeshStandardMaterial({ map: shelfTex,    metalness: 0.35, roughness: 0.65 }),
+      // Front frame + glass catch a little of the interior glow, so the
+      // face reads lit while the top, sides and back stay dark
+      frame:    new THREE.MeshStandardMaterial({ map: frameTex,    metalness: 0.55, roughness: 0.58, emissive: 0x33ff55, emissiveMap: frameTex, emissiveIntensity: 0.6 }),
+      // Interior and shelves glow faintly green themselves: the lit look
+      // of a stocked cabinet without any light source inside it
+      interior: new THREE.MeshStandardMaterial({ map: interiorTex, metalness: 0.2,  roughness: 0.9, emissive: 0x33ff55, emissiveIntensity: 0.10 }),
+      shelf:    new THREE.MeshStandardMaterial({ map: shelfTex,    metalness: 0.35, roughness: 0.65, emissive: 0x33ff55, emissiveIntensity: 0.22 }),
       door:     new THREE.MeshStandardMaterial({ map: doorTex,     metalness: 0.45, roughness: 0.6 }),
-      glass:    new THREE.MeshStandardMaterial({ color: 0xaec6b4, metalness: 0.1, roughness: 0.05, transparent: true, opacity: 0.14, depthWrite: false }),
+      glass:    new THREE.MeshStandardMaterial({ color: 0xaec6b4, metalness: 0.1, roughness: 0.05, transparent: true, opacity: 0.14, depthWrite: false, emissive: 0x33ff55, emissiveIntensity: 0.35 }),
       bezel:    new THREE.MeshStandardMaterial({ color: 0x14160f, metalness: 0.4,  roughness: 0.7 }),
       screen:   new THREE.MeshStandardMaterial({ color: 0x0b0d09, metalness: 0.2, roughness: 0.45 }),
       key:      new THREE.MeshStandardMaterial({ color: 0x232821, metalness: 0.2,  roughness: 0.7 }),
@@ -251,6 +267,7 @@ export class VendingMachine {
     this._buildCatalogCards();
     this._buildRetrievalCompartment();
     this._buildShelfLighting();
+    this._buildFrontLight(glowColor, frontLight);
     this._buildStatusLEDs();
     this._buildMountPlate();
 
@@ -516,11 +533,6 @@ export class VendingMachine {
     });
 
     this._renderDisplay();
-
-
-    const displayLight = new THREE.PointLight(0x33ff55, 1.0, 0.8, 2);
-    displayLight.position.set(0.405, 1.71, 0.38);
-    this.root.add(displayLight);
   }
 
 
@@ -714,22 +726,50 @@ export class VendingMachine {
 
   _buildShelfLighting() {
     const { shelfTrim } = this._mats;
-
-
-    [0.725, 1.075, 1.425, 1.775].forEach((y) => {
-      const light = new THREE.PointLight(0x33ff55, 2.5, 1.2, 2);
-      light.position.set(-0.135, y, 0.05);
-      this.root.add(light);
-    });
-
-
-
     const trimGeo = new THREE.BoxGeometry(0.70, 0.007, 0.012);
     [0.55, 0.90, 1.25, 1.60].forEach((y) => {
       const trim = new THREE.Mesh(trimGeo, shelfTrim);
       trim.position.set(-0.135, y + 0.019, 0.228);
       this.root.add(trim);
     });
+  }
+
+
+  // The one real light: just in front of the glass near the top, aimed
+  // down-and-out. Its cone starts in front of the cabinet, so the top,
+  // sides and back are never lit. No shadows — a shadow map per machine
+  // is the expensive part of a spotlight.
+  _buildFrontLight(color, withLight) {
+    if (withLight) {
+      const spot = new THREE.SpotLight(color, 9, 8, 0.85, 0.75, 2);
+      spot.position.set(-0.05, 1.9, 0.42);
+      const target = new THREE.Object3D();
+      target.position.set(-0.05, 0, 1.6);
+      this.root.add(spot, target);
+      spot.target = target;
+      this._frontLight = spot;
+    }
+
+    // Floor pool: a painted radial glow, so the ground in front reads as
+    // lit at any distance for the cost of one transparent quad
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    g.addColorStop(0, 'rgba(255,255,255,0.55)');
+    g.addColorStop(0.5, 'rgba(255,255,255,0.18)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 128, 128);
+    const tex = new THREE.CanvasTexture(c);
+    this._texs.push(tex);
+    this._mats.floorGlow = new THREE.MeshBasicMaterial({
+      map: tex, color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.1), this._mats.floorGlow);
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.set(-0.05, 0.012, 0.85);
+    this.root.add(pool);
   }
 
 
@@ -746,7 +786,7 @@ export class VendingMachine {
 
 
   _buildMountPlate() {
-    this._box(1.0, 0.05, 0.07, 0, 2.045, -0.275, this._mats.frame, 0.01);
+    this._box(1.0, 0.05, 0.07, 0, 2.045, -0.275, this._mats.body, 0.01); // body, not frame: no glow on top
     this._bolt(-0.44, 2.078, -0.275, true);
     this._bolt(0.44, 2.078, -0.275, true);
   }

@@ -15,7 +15,7 @@
 import './Level2Config.js';  // MUST be first — sets skip flags before heavy modules
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { scene, camera, addStaticBox, pushKillFeed, dom, sfx, KILL_TARGET, STREET_HALF_W } from './Scene.js';
+import { scene, camera, addStaticBox, pushKillFeed, dom, sfx, KILL_TARGET, STREET_HALF_W, addLight, sunlightOnly } from './Scene.js';
 import { state } from './state.js';
 import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis, spawnZombie, loadDeferredAssets } from './characters.js';
 import { spawnCoin } from './PowerUps.js';
@@ -360,15 +360,12 @@ function makeFallenZombie(x, z, ry) {
   return g;
 }
 
-/** Vending machine + its collider + full beacon. The beacon is how the
-    player finds the machine in the fog, in the machine's own glow
-    color: a ground ring marking the stand-here spot, a vertical light
-    column rising from the cabinet top (crests wrecks and containers
-    from afar, but tops out well below the port's taller teal spire,
-    which stays THE landmark), and a point light washing the cabinet
-    front so it reads up close too. Ring and beam use the same unfogged,
-    pulsing toxic material as the port beacon. `catalog` is the
-    machine's supplies preset — Level 2 passes its own one-product
+/** Vending machine + its collider + ground marker, in the machine's own
+    glow color: the cabinet's front light is thrown in that colour, and a
+    ground ring (the same unfogged, pulsing toxic material as the port
+    beacon) marks the stand-here spot. Nothing is lit above or behind the
+    cabinet — it's opaque, so its light only falls in front. `catalog` is
+    the machine's supplies preset — Level 2 passes its own one-product
     presets (radar / adrenaline) below. */
 function placeVendingMachine(x, z, ry, catalog, glow = RADAR_GLOW) {
   const machine = new VendingMachine({
@@ -376,6 +373,8 @@ function placeVendingMachine(x, z, ry, catalog, glow = RADAR_GLOW) {
     position: new THREE.Vector3(x, 0, z),
     rotationY: ry,
     catalog,
+    glowColor: glow,
+    frontLight: !sunlightOnly(),
   });
   addStaticBox(
     VendingMachine.WIDTH / 2, VendingMachine.HEIGHT / 2, VendingMachine.DEPTH / 2,
@@ -388,14 +387,6 @@ function placeVendingMachine(x, z, ry, catalog, glow = RADAR_GLOW) {
   // Local +Z is the cabinet front — drop the marker in front of it.
   marker.position.set(x + Math.sin(ry) * 2.2, 0.05, z + Math.cos(ry) * 2.2);
   scene.add(marker);
-  // Vertical beam from the cabinet top — the position landmark.
-  const beam = new THREE.Mesh(new THREE.BoxGeometry(0.35, 5.5, 0.35), createToxicMaterial(glow));
-  beam.position.set(x, VendingMachine.HEIGHT + 2.75, z);
-  scene.add(beam);
-  // Close-range wash so the cabinet itself reads in its glow color.
-  const wash = new THREE.PointLight(glow, 1.6, 10, 2);
-  wash.position.set(x + Math.sin(ry) * 0.8, 2.4, z + Math.cos(ry) * 0.8);
-  scene.add(wash);
   return machine;
 }
 
@@ -487,7 +478,7 @@ function buildPort() {
   // docks" once the player is close enough to see surfaces again.
   const wash = new THREE.PointLight(TEAL_LIGHT, 1.3, 30, 2);
   wash.position.set(0, 8, -196);
-  scene.add(wash);
+  addLight(scene, wash);
 
   // The pier — walkway over the water to the teleport beacon. The south
   // bound wall stops the player around z ≈ -208; the pier visual extends
@@ -521,7 +512,7 @@ function buildPort() {
   g.add(beam);
   const beaconLight = new THREE.PointLight(TEAL_LIGHT, 2.6, 20, 2);
   beaconLight.position.set(0, 2.6, -208.4);
-  g.add(beaconLight);
+  addLight(g, beaconLight);
   scene.add(g);
 
   return { teleportPoint: new THREE.Vector3(0, 0, -208.6) };
@@ -732,7 +723,7 @@ function spawnGirl() {
     // swap, so it also washes the ground under her when she's seen).
     const glint = new THREE.PointLight(TEAL_LIGHT, 1.4, 7, 2);
     glint.position.set(0, 1.3, 0);
-    group.add(glint);
+    addLight(group, glint);
     const wp = GIRL_WAYPOINTS[0];
     group.position.set(wp.x, wp.y, wp.z);
     scene.add(group);
@@ -755,7 +746,7 @@ function spawnGirl() {
     // fallback chase stays readable.
     const glint = new THREE.PointLight(TEAL_LIGHT, 1.4, 7, 2);
     glint.position.set(0, 1.3, 0);
-    group.add(glint);
+    addLight(group, glint);
     scene.add(group);
     girl = { group, mixer: null, wpIndex: 1, mats: [], glint };
     state.girlPos = group.position;
@@ -1129,7 +1120,7 @@ function updateLoseCinematic(dt) {
       scene.add(flash);
       const light = new THREE.PointLight(TEAL_LIGHT, 0, 26, 2);
       light.position.copy(p); light.position.y += 1.4;
-      scene.add(light);
+      addLight(scene, light);
       c.flash = flash;
       c.flashLight = light;
       sfx.burst('sawtooth', 720, 1.1, 0.3);

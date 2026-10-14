@@ -9,7 +9,7 @@ import {
   forwardFromYaw, rightFromYaw,
   STREET_HALF_W, ZOMBIE_SPAWN_INTERVAL,
   updateFuelHUD as updateFuelHUDBase,
-  applyTimeOfDay, updateWeatherFX,
+  applyTimeOfDay, updateWeatherFX, addLight,
 } from './Scene.js';
 // Actions.js and characters.js import from each other (characters.js needs
 // damagePlayer/spawnHitSpark/spawnBlood for zombie hits; Actions.js needs
@@ -110,7 +110,7 @@ function spawnMuzzleFlash() {
   const gunWorldPos = new THREE.Vector3();
   activeGunMesh().getWorldPosition(gunWorldPos);
   flash.position.copy(gunWorldPos);
-  scene.add(flash);
+  addLight(scene, flash);
   setTimeout(() => scene.remove(flash), 50);
 }
 const tracerMat = new THREE.MeshBasicMaterial({ color: 0xfff4c2, transparent: true, opacity: 0.95 });

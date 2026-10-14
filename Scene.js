@@ -248,6 +248,23 @@ const ambientLight = new THREE.AmbientLight(0x3a322c, 0.28);
 scene.add(ambientLight);
 
 /* ---------------------------------------------------------------------
+   SUNLIGHT-ONLY DAYS — Level 2's clear day (state.clearDay) is lit by
+   the sun and the sky's fill (hemisphere + ambient) alone: no lamps,
+   glints, beacons, fire or muzzle-flash lights. Every other light in the
+   game is attached through addLight(); in that mode the light is still
+   built but never attached, so code that recolours, flickers or removes
+   it keeps working on a detached light that renders nothing. Besides
+   reading right in daylight, it keeps the per-pixel light count at the
+   sun + sky, and a shot or explosion no longer adds a light (which made
+   every lit material recompile its shader mid-fight).
+--------------------------------------------------------------------- */
+export const sunlightOnly = () => state.timeOfDay === 'day' && state.clearDay;
+export function addLight(parent, light) {
+  if (!sunlightOnly()) parent.add(light);
+  return light;
+}
+
+/* ---------------------------------------------------------------------
    SUN DISC — a visible glowing disc placed in the sky along the exact
    direction the DirectionalLight above already shines from (its
    position IS that direction, since directional lights only care about
@@ -393,36 +410,257 @@ const TIME_OF_DAY_CONFIG = {
     rainOn: true,
     puddlesOn: true,
   },
+  // Day for levels that set state.clearDay (Level 2): a dead city's late
+  // afternoon — low warm sun through smoke, see CLEAR DAY ATMOSPHERE
+  // below. Lit by the sun plus the painted sky itself (environment map);
+  // the flat hemisphere/ambient fills are switched off. Distance dust
+  // starts far out so nothing near the player looks fogged; the low
+  // ground-haze layer, rain and puddles are off.
+  clearDay: {
+    skyTex: null, // painted on first use: duskSkyTexture()
+    bgColor: 0xb59f86,
+    fogColor: 0xb8a48a, fogNear: 70, fogFar: 460,
+    sunColor: 0xffc58a, sunIntensity: 3.4, sunVisible: true,
+    sunDirection: [-0.62, 0.42, -0.66], // low in the west-southwest, slanting down the street
+    celestial: false,
+    hazeColor: 0xe8ecef, hazeOpacity: 0, hazeCoverage: 0, hazeVisible: false,
+    rainOn: false,
+    // The puddle shader is unlit (no sun, no shadow), so under a hard
+    // low sun it reads as black paint — dry street on the clear day
+    puddlesOn: false,
+    exposure: 0.95,
+    // Graded on the canvas by the compositor, not an extra render pass:
+    // drained colour, a warm cast and a touch of contrast, after the key art
+    grade: 'saturate(0.78) sepia(0.14) contrast(1.07)',
+  },
 };
 
 export function applyTimeOfDay(mode) {
-  const cfg = TIME_OF_DAY_CONFIG[mode] || TIME_OF_DAY_CONFIG.night;
   state.timeOfDay = TIME_OF_DAY_CONFIG[mode] ? mode : 'night';
+  const clear = state.timeOfDay === 'day' && state.clearDay;
+  const cfg = clear ? TIME_OF_DAY_CONFIG.clearDay : TIME_OF_DAY_CONFIG[state.timeOfDay];
+  if (clear && !cfg.skyTex) cfg.skyTex = duskSkyTexture();
 
   sky.material.map = cfg.skyTex;
   sky.material.needsUpdate = true;
   scene.background = new THREE.Color(cfg.bgColor);
-  scene.fog.color.setHex(cfg.fogColor);
-  scene.fog.density = cfg.fogDensity;
+  if (clear) {
+    scene.fog = new THREE.Fog(cfg.fogColor, cfg.fogNear, cfg.fogFar);
+  } else {
+    scene.fog.color.setHex(cfg.fogColor);
+    scene.fog.density = cfg.fogDensity;
+  }
 
-  hemiLight.color.setHex(cfg.hemiSky);
-  hemiLight.groundColor.setHex(cfg.hemiGround);
-  hemiLight.intensity = cfg.hemiIntensity;
+  // Clear days are lit by sun + sky (environment map, set up below); the
+  // flat fills would only wash out the shadows, so they're left out of
+  // the render entirely (an invisible light isn't uploaded to shaders)
+  hemiLight.visible = !clear;
+  ambientLight.visible = !clear;
+  if (!clear) {
+    hemiLight.color.setHex(cfg.hemiSky);
+    hemiLight.groundColor.setHex(cfg.hemiGround);
+    hemiLight.intensity = cfg.hemiIntensity;
+    ambientLight.color.setHex(cfg.ambientColor);
+    ambientLight.intensity = cfg.ambientIntensity;
+  }
   sun.color.setHex(cfg.sunColor);
   sun.intensity = cfg.sunIntensity;
   sunVisual.visible = cfg.sunVisible;
   stars.forEach((s) => { s.visible = cfg.celestial; });
   moonVisual.visible = cfg.celestial;
-  ambientLight.color.setHex(cfg.ambientColor);
-  ambientLight.intensity = cfg.ambientIntensity;
+  renderer.toneMappingExposure = cfg.exposure ?? 0.92;
+  dom.canvas.style.filter = cfg.grade || '';
+  if (clear) setupClearDay(cfg);
 
   fogUniforms.uColor.value.setHex(cfg.hazeColor);
   fogUniforms.uOpacity.value = cfg.hazeOpacity;
   fogUniforms.uCoverage.value = cfg.hazeCoverage;
+  fog.visible = cfg.hazeVisible !== false;
+  // extractLight is built at module load, before the mode is known
+  if (sunlightOnly()) scene.remove(extractLight);
+  else if (!extractLight.parent) scene.add(extractLight);
   rain.visible = cfg.rainOn;
+  puddleUniforms.uRipple.value = cfg.puddleRipple ?? 1;
 
   createPuddles(cfg.puddlesOn);
 }
+
+/* ---------------------------------------------------------------------
+   CLEAR DAY ATMOSPHERE (Level 2 day) — a dead city's late afternoon,
+   after the title-screen key art: a low warm sun through smoke, smoke
+   columns over the rooftops. Built only for that mode, and
+   cheap by construction:
+   - SKY: painted once on a canvas (warm smoky gradient, fBm cloud bank)
+     and reused as the scene's environment map via PMREM, so everything
+     is lit by the same sky it sits under for one texture lookup per
+     pixel — no extra lights.
+   - SUN SHADOWS: one 2048 map over ~90 m that follows the camera
+     (snapped to whole shadow texels so edges don't shimmer as you move)
+     instead of one 1024 map stretched over 240 m: ~4 cm texels, crisp.
+   - SMOKE: a few billboard stacks far beyond the street, drifting.
+--------------------------------------------------------------------- */
+const SUN_SHADOW_HALF = 45;      // metres covered either side of the focus point
+const SUN_SHADOW_MAP = 2048;
+const SUN_DISTANCE_FROM_FOCUS = 220;
+let clearDay = null;             // { sunDir, smoke[], time } once built
+
+function duskSkyTexture() {
+  const W = 1024, H = 512;
+  const canvas = makeCanvas(W, H, (ctx) => {
+    // Gradient: smoky grey-blue overhead, warm dust at the horizon, dark
+    // haze below it (only seen past the street end)
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0.0, '#5d6268');
+    g.addColorStop(0.28, '#857d74');
+    g.addColorStop(0.44, '#b49c80');
+    g.addColorStop(0.5, '#c8ad8a');
+    g.addColorStop(0.56, '#8a7663');
+    g.addColorStop(1.0, '#3a3129');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    // Cloud/smoke bank over the upper half: value-noise fBm that wraps
+    // horizontally, so the sphere's seam doesn't show
+    const img = ctx.getImageData(0, 0, W, H / 2);
+    const rnd = mulberrySky(7);
+    const octaves = [];
+    for (let o = 0; o < 5; o++) {
+      const gw = 6 << o, gh = 3 << o;
+      const cells = [];
+      for (let i = 0; i < gw * gh; i++) cells.push(rnd());
+      octaves.push({ gw, gh, cells });
+    }
+    const sample = ({ gw, gh, cells }, u, v) => {
+      const x = u * gw, y = v * gh;
+      const x0 = Math.floor(x), y0 = Math.floor(y);
+      const fx = x - x0, fy = y - y0;
+      const at = (cx, cy) => cells[(((cy % gh) + gh) % gh) * gw + (((cx % gw) + gw) % gw)];
+      const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+      const a = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * sx;
+      const b = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * sx;
+      return a + (b - a) * sy;
+    };
+    for (let y = 0; y < H / 2; y++) {
+      const v = y / (H / 2);
+      // clouds thicken toward the horizon and thin overhead
+      const band = Math.min(1, Math.max(0, (v - 0.15) / 0.75));
+      for (let x = 0; x < W; x++) {
+        const u = x / W;
+        let n = 0, amp = 0.5;
+        for (const oct of octaves) { n += sample(oct, u, v * 0.8) * amp; amp *= 0.5; }
+        const cover = Math.min(0.85, Math.max(0, n - 0.42) * 2.4 * (0.35 + band * 0.65));
+        const i = (y * W + x) * 4;
+        // smoke-tinted cloud: brown-grey, lighter where the noise is high
+        const shade = 70 + n * 70;
+        img.data[i] += (shade + 8 - img.data[i]) * cover;
+        img.data[i + 1] += (shade - img.data[i + 1]) * cover;
+        img.data[i + 2] += (shade - 10 - img.data[i + 2]) * cover;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  });
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+function mulberrySky(a) {
+  return () => {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function setupClearDay(cfg) {
+  if (clearDay) return;
+  const sunDir = new THREE.Vector3(...cfg.sunDirection).normalize();
+  sunVisual.position.copy(sunDir).multiplyScalar(SUN_DISTANCE);
+  // smaller and dimmer than the overcast day's sun: a hazy disc behind smoke
+  sunVisual.scale.set(42, 42, 1);
+  sunVisual.material.color.setHex(0xffd2a0);
+  sunVisual.material.opacity = 0.75;
+
+  sun.shadow.mapSize.set(SUN_SHADOW_MAP, SUN_SHADOW_MAP);
+  const cam = sun.shadow.camera;
+  cam.left = -SUN_SHADOW_HALF; cam.right = SUN_SHADOW_HALF;
+  cam.top = SUN_SHADOW_HALF; cam.bottom = -SUN_SHADOW_HALF;
+  cam.near = 1; cam.far = SUN_DISTANCE_FROM_FOCUS + 160;
+  cam.updateProjectionMatrix();
+  sun.shadow.bias = -0.0004;
+  sun.shadow.normalBias = 0.03;
+
+  // Environment: the painted sky, prefiltered for every roughness level
+  const envScene = new THREE.Scene();
+  envScene.add(new THREE.Mesh(sky.geometry, new THREE.MeshBasicMaterial({ map: cfg.skyTex, side: THREE.BackSide })));
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(envScene, 0.04, 1, 1000).texture; // far must reach the 420 m sky
+  pmrem.dispose();
+
+  clearDay = { sunDir, smoke: makeSmokeColumns(), time: 0 };
+}
+
+// Smoke columns rising beyond the rooftops — soft billboards stacked and
+// widening with height, each slowly drifting downwind.
+function makeSmokeColumns() {
+  const tex = new THREE.CanvasTexture(makeCanvas(128, 128, (ctx, w, h) => {
+    for (let i = 0; i < 14; i++) {
+      const x = w * (0.3 + Math.random() * 0.4), y = h * (0.3 + Math.random() * 0.4), r = w * (0.18 + Math.random() * 0.2);
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, 'rgba(255,255,255,0.32)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    }
+  }));
+  const columns = [];
+  [[-75, -150, 1.0], [85, -70, 0.8], [30, -300, 1.3]].forEach(([x, z, s]) => {
+    const puffs = [];
+    for (let i = 0; i < 12; i++) {
+      const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color: 0x3a342e, transparent: true, depthWrite: false }));
+      m.material.rotation = Math.random() * Math.PI * 2;
+      scene.add(m);
+      puffs.push({ m, h: i / 12 });
+    }
+    columns.push({ x, z, s, puffs });
+  });
+  return columns;
+}
+
+function updateClearDay(dt) {
+  if (!clearDay) return;
+  // Shadow frustum follows a point ahead of the camera, snapped to the
+  // shadow map's texel grid in light space so edges stay put while moving
+  const focus = _sunFocus.copy(camera.position);
+  camera.getWorldDirection(_sunTmp);
+  focus.addScaledVector(_sunTmp.setY(0).normalize(), SUN_SHADOW_HALF * 0.45);
+  focus.y = 0;
+  const texel = (SUN_SHADOW_HALF * 2) / SUN_SHADOW_MAP;
+  _sunBasisZ.copy(clearDay.sunDir).negate();
+  _sunBasisX.crossVectors(_up, _sunBasisZ).normalize();
+  _sunBasisY.crossVectors(_sunBasisZ, _sunBasisX);
+  const lx = Math.round(focus.dot(_sunBasisX) / texel) * texel;
+  const ly = Math.round(focus.dot(_sunBasisY) / texel) * texel;
+  const lz = focus.dot(_sunBasisZ);
+  focus.copy(_sunBasisX).multiplyScalar(lx).addScaledVector(_sunBasisY, ly).addScaledVector(_sunBasisZ, lz);
+  sun.target.position.copy(focus);
+  sun.position.copy(focus).addScaledVector(clearDay.sunDir, SUN_DISTANCE_FROM_FOCUS);
+  sun.target.updateMatrixWorld();
+
+  clearDay.time += dt;
+  const t = clearDay.time;
+  for (const col of clearDay.smoke) {
+    for (const p of col.puffs) {
+      p.h = (p.h + dt * 0.012) % 1;
+      const k = p.h;
+      p.m.position.set(col.x + k * k * 28 * col.s + Math.sin(t * 0.2 + k * 6) * 2, 8 + k * 95 * col.s, col.z + k * 10);
+      const size = (12 + k * 46) * col.s;
+      p.m.scale.set(size, size, 1);
+      p.m.material.opacity = Math.min(1, k * 8) * (1 - k) * 0.9;
+      p.m.material.rotation += dt * 0.02;
+    }
+  }
+}
+const _sunFocus = new THREE.Vector3(), _sunTmp = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
+const _sunBasisX = new THREE.Vector3(), _sunBasisY = new THREE.Vector3(), _sunBasisZ = new THREE.Vector3();
 
 /* ---------------------------------------------------------------------
    FOG — a horizontal plane sitting low to the ground, tracking the
@@ -496,6 +734,7 @@ export function updateWeatherFX(dt) {
   puddleUniforms.uTime.value += dt;
   fireUniforms.uTime.value += dt;
   toxicUniforms.uTime.value += dt;
+  updateClearDay(dt);
 }
 
 /* ---------------------------------------------------------------------

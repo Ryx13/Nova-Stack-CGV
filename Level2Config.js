@@ -22,3 +22,8 @@ state.lazyExplosionVFX = true;
 // wrecks / a Level2.js fallen-zombie prop. Cuts the boot-critical
 // fetch set from ~62 MB of racing downloads to ~18 MB.
 state.lightBoot = true;
+// Day mode is a clear, sunlit afternoon here rather than the shared
+// overcast drizzle: no fog bank or ground haze, no falling rain (puddles
+// stay, still), and the streetlights are off — see applyTimeOfDay in
+// Scene.js and makeStreetlight in characters.js.
+state.clearDay = true;

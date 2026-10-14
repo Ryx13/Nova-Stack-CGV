@@ -42,7 +42,7 @@ cutting exactly at 25 m.
   `roster.js`'s `fitClip()` rescales its hip height to her body. The
   sight glow's emissive is masked by her texture so the pink tints her
   instead of flooding her into a silhouette
-- **Economy** — two beaconed vending machines (radar @ z +10, lime;
+- **Economy** — two front-lit vending machines with ground rings (radar @ z +10, lime;
   adrenaline @ z −90, pink), E-key purchases, coins from kills + persistent
   clusters; radar upgrade reveals her on radar/compass + live distance row,
   adrenaline (G) gives ×1.45 speed for 10 s
