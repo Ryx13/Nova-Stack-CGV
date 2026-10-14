@@ -12,6 +12,7 @@ import {
 import { spawnPickup, spawnCoin, registerKillstreak } from './PowerUps.js';
 import { damagePlayer, spawnHitSpark, spawnBlood } from './Actions.js';
 import { createFireMaterial, createToxicMaterial } from './shaders.js';
+import { getSelectedCharacter, instantiateCharacter, clipsFor, boneByName } from './roster.js';
 
 /* ======================================================================
    characters.js — LOADING/CREATION OF CHARACTERS AND SCENE OBJECTS
@@ -1413,22 +1414,41 @@ export function triggerShootAnim() {
   playerVis.shootAction.play();
 }
 
+// Player action -> clip name in assets/characters/animations.glb (built
+// from art/animations/<clip>.fbx). A missing clip just leaves that action
+// out: pickLocomotionAction falls back (strafes/back -> walk, jumpBack ->
+// jump) and death skips its animation.
+const PLAYER_CLIPS = {
+  idle: ['idle', 'listen'],
+  walk: ['walk'],
+  sprint: ['run', 'walk'],
+  walkBack: ['walk_back'],
+  strafeL: ['strafe_left'],
+  strafeR: ['strafe_right'],
+  jump: ['jump'],
+  die: ['die'],
+};
+const PLAYER_ONE_SHOTS = new Set(['jump', 'die']);
+
 export function loadMainCharacter() {
-  new GLTFLoader().load('assets/player_character.glb', (gltf) => {
-    const obj = gltf.scene;
+  const characterId = getSelectedCharacter();
+  instantiateCharacter(characterId).then(async (obj) => {
+    const clips = await clipsFor(obj);
+    // A fresh clone has never had its world matrices computed; measuring
+    // before this reads the Armature's cm->m 0.01 scale as identity.
+    obj.updateMatrixWorld(true);
     const box0 = new THREE.Box3().setFromObject(obj);
     const size = new THREE.Vector3(); box0.getSize(size);
     state.playerBaseScale = THREE.MathUtils.clamp(PLAYER_TARGET_HEIGHT / Math.max(size.y, 0.2), 0.05, 2.8);
     obj.rotation.y = state.PLAYER_RIG_YAW_OFFSET;
-    obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     playerVis.proceduralBody.visible = false;
     playerVis.group.add(obj);
     playerVis.rigged = true;
     playerVis.rigObj = obj;
     playerRigObjRef = obj;
     applyPlayerScale();
-    playerVis.footBoneL = obj.getObjectByName('foot_l') || findBoneLike(obj, 'foot_l') || findBoneLike(obj, 'LeftFoot') || null;
-    playerVis.footBoneR = obj.getObjectByName('foot_r') || findBoneLike(obj, 'foot_r') || findBoneLike(obj, 'RightFoot') || null;
+    playerVis.footBoneL = boneByName(obj, 'LeftFoot');
+    playerVis.footBoneR = boneByName(obj, 'RightFoot');
     if (!playerVis.footBoneL && !playerVis.footBoneR) {
       // Without a foot bone, groundClampRig() silently no-ops every frame
       // and the player's height is whatever applyPlayerScale set once at
@@ -1438,148 +1458,82 @@ export function loadMainCharacter() {
     } else {
       playerVis.ankleToSole = measureAnkleToSole(obj, playerVis.footBoneL, playerVis.footBoneR);
     }
-    const handBone = obj.getObjectByName('hand_r');
+    const handBone = boneByName(obj, 'RightHand');
     if (handBone) {
       playerVis.handBone = handBone;
+      playerVis.handGrip = solveHandGrip(obj, handBone);
       playerVis.gunOnHand = true;
+      if (playerVis.gun) playerVis.gun.rotation.set(0, 0, 0); // the grip orients the whole pivot now
+      knifeThirdPerson.rotation.set(0, Math.PI, 0); // blade along the gun's muzzle (+Z), not back up the arm
       playerVis.group.remove(playerVis.gunPivot);
       scene.add(playerVis.gunPivot);
     }
-    if (gltf.animations && gltf.animations.length) {
-      playerVis.mixer = new THREE.AnimationMixer(obj);
-      const findClip = (name) => THREE.AnimationClip.findByName(gltf.animations, name);
-      const walkClip = findClip('Walk');
-      const runClip = findClip('Run_Anime') || walkClip;
-      const jumpClip = findClip('Jump_2');
-      const shootClip = findClip('Pistol_Shoot');
-      const idleClip = findClip('Pistol_Idle') || walkClip;
-      const found = { Walk: !!walkClip, Run_Anime: !!runClip, Jump_2: !!jumpClip, Pistol_Shoot: !!shootClip, Pistol_Idle: !!findClip('Pistol_Idle') };
-      pushKillFeed('Anim clips: ' + Object.entries(found).map(([k, v]) => `${k}${v ? '✓' : '✗'}`).join(' '));
-      playerVis.actions = {};
-      if (walkClip) playerVis.actions.walk = playerVis.mixer.clipAction(walkClip);
-      if (runClip) playerVis.actions.sprint = playerVis.mixer.clipAction(runClip);
-      if (idleClip) playerVis.actions.idle = playerVis.mixer.clipAction(idleClip);
-      if (jumpClip) {
-        playerVis.actions.jump = playerVis.mixer.clipAction(jumpClip);
-        playerVis.actions.jump.setLoop(THREE.LoopOnce);
-        playerVis.actions.jump.clampWhenFinished = true;
-        playerVis.jumpDuration = jumpClip.duration;
+
+    playerVis.mixer = new THREE.AnimationMixer(obj);
+    playerVis.actions = {};
+    for (const [key, names] of Object.entries(PLAYER_CLIPS)) {
+      const clip = names.map((n) => clips[n]).find(Boolean);
+      if (!clip) continue;
+      const action = playerVis.mixer.clipAction(clip);
+      if (PLAYER_ONE_SHOTS.has(key)) {
+        action.setLoop(THREE.LoopOnce);
+        action.clampWhenFinished = true;
       }
-      if (shootClip) {
-        const additiveShoot = THREE.AnimationUtils.makeClipAdditive(shootClip);
-        playerVis.shootAction = playerVis.mixer.clipAction(additiveShoot);
-        playerVis.shootAction.blendMode = THREE.AdditiveAnimationBlendMode;
-        playerVis.shootAction.setLoop(THREE.LoopOnce);
-        playerVis.shootAction.clampWhenFinished = true;
-        playerVis.shootAction.enabled = true;
-        playerVis.shootAction.setEffectiveWeight(1);
-      }
-      if (playerVis.actions.idle) {
-        playerVis.actions.idle.play();
-        playerVis.currentActionName = 'idle';
-      }
-    } else {
-      // No baked-in animations on this model at all — still stand up a
-      // mixer + actions table so loadShooterPack() below has somewhere
-      // to attach the Shooter_Pack clips once they finish loading.
-      playerVis.mixer = new THREE.AnimationMixer(obj);
-      playerVis.actions = {};
+      playerVis.actions[key] = action;
+    }
+    if (clips.jump) playerVis.jumpDuration = clips.jump.duration;
+    if (clips.die) playerVis.dieDuration = clips.die.duration;
+    if (clips.shoot) {
+      // Additive, so the recoil layers over whatever locomotion is playing
+      const additiveShoot = THREE.AnimationUtils.makeClipAdditive(clips.shoot);
+      playerVis.shootAction = playerVis.mixer.clipAction(additiveShoot);
+      playerVis.shootAction.blendMode = THREE.AdditiveAnimationBlendMode;
+      playerVis.shootAction.setLoop(THREE.LoopOnce);
+      playerVis.shootAction.clampWhenFinished = true;
+      playerVis.shootAction.enabled = true;
+      playerVis.shootAction.setEffectiveWeight(1);
+    }
+    const missing = [...Object.keys(PLAYER_CLIPS), 'shoot'].filter((k) => !playerVis.actions[k] && !(k === 'shoot' && playerVis.shootAction));
+    if (missing.length) pushKillFeed(`Player anims missing: ${missing.join(', ')}`);
+    if (playerVis.actions.idle) {
+      playerVis.actions.idle.play();
+      playerVis.currentActionName = 'idle';
     }
     state.loadFlags.player = true;
     markLoaded('player');
-    // Shooter_Pack DISABLED — verified its files (walking.glb etc.) use
-    // 'L_Wrist'/'bone_12'/'Pelvis'-style bone names, the same skeleton as
-    // the WRONG zombie_walker.glb model this loader used to point at, not
-    // player_character.glb's actual rig ('hand_r'/'foot_l'/'pelvis').
-    // AnimationMixer resolves tracks by exact bone name, so binding these
-    // clips to player_character.glb's rig finds nothing to attach to and
-    // does nothing — but it still OVERWRITES the walk/sprint/idle/jump
-    // actions already correctly set up above from the model's own real
-    // clips (Walk/Run_Anime/Jump_2/Pistol_Idle), replacing working
-    // animations with non-functional ones. That's the direct cause of
-    // "stuck in the pistol-pointing pose, no walk/run/jump" — the working
-    // idle pose was the last thing to actually animate before being
-    // clobbered. If a Shooter_Pack rebuilt for player_character.glb's
-    // actual skeleton becomes available later, re-enable this call.
-    // loadShooterPack();
-  }, undefined, (err) => {
+  }).catch((err) => {
     console.error('Player model failed to load:', err);
     pushKillFeed('Player model failed to load — using fallback body');
     markLoaded('player');
   });
 }
 
-/* -----------------------------------------------------------------
-   SHOOTER PACK — per-animation FBX exports for the rifle-carrying
-   player rig (walking.fbx, "rifle run.fbx", strafe.fbx x2, "firing
-   rifle.fbx", "rifle aiming idle.fbx", backward variants, jump
-   forward/backward, and a death clip). Expected on disk at
-   assets/<original filename>.fbx — unzip Shooter_Pack.zip
-   there, keeping the original filenames (spaces included) so the paths
-   below match exactly.
-
-   THREE's AnimationMixer binds a clip's tracks to the target skeleton
-   purely by bone name, so a clip loaded from a completely different FBX
-   file will drive the player's actual rig correctly as long as both
-   were exported from the same underlying skeleton, which is the case
-   here. If a file is missing or the rig doesn't line up for some
-   reason, that one animation is simply skipped (falls back to whatever
-   was baked into the base model, or to 'idle') — nothing else breaks.
---------------------------------------------------------------------- */
-const SHOOTER_ANIM_FILES = {
-  idle: '/rifle aiming idle.glb',
-  walk: 'assets/walking.glb',
-  sprint: 'assets/rifle run.glb',
-  walkBack: 'assets/walking backwards.glb',
-  runBack: 'assets/run backwards.glb',
-  strafeL: 'assets/strafe.glb',
-  strafeR: 'assets/strafe (2).glb',
-  jump: 'assets/jump forward.glb',
-  jumpBack: 'assets/jump backward.glb',
-  startWalk: 'assets/start walking.glb',
-  stopWalk: 'assets/stop walking.glb',
-  startWalkBack: 'assets/start walking backwards.glb',
-  stopWalkBack: 'assets/walk backwards stop.glb',
-  shoot: 'assets/firing rifle.glb',
-  die: 'assets/walking to dying.glb',
-};
-const ONE_SHOT_KEYS = new Set(['jump', 'jumpBack', 'startWalk', 'stopWalk', 'startWalkBack', 'stopWalkBack', 'die']);
-
-export function loadShooterPack() {
-  if (!playerVis.mixer || !playerVis.rigObj) return; // nothing to attach clips to yet
-  if (!playerVis.actions) playerVis.actions = {};
-  Object.entries(SHOOTER_ANIM_FILES).forEach(([key, path]) => {
-    new GLTFLoader().load(path, (gltf) => {
-      const clip = gltf.animations && gltf.animations[0];
-      if (!clip) return;
-      if (key === 'shoot') {
-        const additive = THREE.AnimationUtils.makeClipAdditive(clip);
-        const shootAction = playerVis.mixer.clipAction(additive, playerVis.rigObj);
-        shootAction.blendMode = THREE.AdditiveAnimationBlendMode;
-        shootAction.setLoop(THREE.LoopOnce);
-        shootAction.clampWhenFinished = true;
-        shootAction.enabled = true;
-        shootAction.setEffectiveWeight(1);
-        playerVis.shootAction = shootAction; // takes over from the baked-in Pistol_Shoot, if any
-        return;
-      }
-      const action = playerVis.mixer.clipAction(clip, playerVis.rigObj);
-      if (ONE_SHOT_KEYS.has(key)) {
-        action.setLoop(THREE.LoopOnce);
-        action.clampWhenFinished = true;
-      }
-      if (key === 'jump') playerVis.jumpDuration = clip.duration;
-      if (key === 'jumpBack') playerVis.jumpBackDuration = clip.duration;
-      if (key === 'die') playerVis.dieDuration = clip.duration;
-      playerVis.actions[key] = action;
-      if (key === 'idle' && !playerVis.currentActionName) {
-        action.play();
-        playerVis.currentActionName = 'idle';
-      }
-    }, undefined, () => {
-      pushKillFeed(`Shooter pack: "${key}" clip failed to load`);
-    });
-  });
+// Pistol pose relative to the roster rig's RightHand bone, solved per
+// character from its rest T-pose (right arm out along -X, palm down, thumb
+// forward) because hand bones rest at slightly different angles on each
+// body. pistol.glb has its slide on +Y and muzzle on +Z; it's set with the
+// muzzle along the hand, slide toward the back of the hand and the grip
+// (model point 0,-3,-1) in the palm. The rigs have no finger bones, so this
+// is as close as the hand can get to holding it — verified on the pistol
+// idle, walk and shooting clips. Must run before any clip poses the rig.
+const GRIP_PALM_ALONG_HAND = 8;   // hand-bone units (cm) out from the wrist
+const GRIP_PALM_BELOW = 0.02;     // metres toward the palm side
+function solveHandGrip(rig, hand) {
+  rig.updateMatrixWorld(true);
+  const rigQ = rig.getWorldQuaternion(new THREE.Quaternion());
+  const toRig = rigQ.clone().invert();
+  const handQ = toRig.clone().multiply(hand.getWorldQuaternion(new THREE.Quaternion()));
+  const gunQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(-1, 0, 0), Math.PI / 2)
+    .multiply(new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(
+      new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(-1, 0, 0))));
+  const handPos = hand.getWorldPosition(new THREE.Vector3());
+  const palm = hand.localToWorld(new THREE.Vector3(0, GRIP_PALM_ALONG_HAND, 0)).sub(handPos)
+    .applyQuaternion(toRig).add(new THREE.Vector3(0, -GRIP_PALM_BELOW, 0));
+  const grip = new THREE.Vector3(0, -3, -1).multiplyScalar(PISTOL_SCALE).applyQuaternion(gunQ);
+  return {
+    quat: handQ.invert().multiply(gunQ),
+    pos: palm.sub(grip).applyQuaternion(gunQ.clone().invert()),
+  };
 }
 
 const _gunSyncPos = new THREE.Vector3();
@@ -1590,6 +1544,15 @@ export function syncHandGun() {
   if (!playerVis.gunOnHand || !playerVis.handBone || state.inVehicle) return;
   playerVis.handBone.getWorldPosition(_gunSyncPos);
   playerVis.handBone.getWorldQuaternion(_gunSyncQuat);
+  const grip = playerVis.handGrip;
+  if (grip) {
+    playerVis.gunPivot.position.copy(_gunSyncPos);
+    playerVis.gunPivot.quaternion.copy(_gunSyncQuat).multiply(grip.quat);
+    playerVis.gunPivot.translateX(grip.pos.x);
+    playerVis.gunPivot.translateY(grip.pos.y);
+    playerVis.gunPivot.translateZ(grip.pos.z);
+    return;
+  }
   const preset = GUN_GRIP_PRESETS[state.gunGripIndex];
   playerVis.gunPivot.position.copy(_gunSyncPos);
   playerVis.gunPivot.quaternion.copy(_gunSyncQuat);

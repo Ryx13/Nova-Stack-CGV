@@ -36,12 +36,12 @@ cutting exactly at 25 m.
   (emissive + her glint light): unmistakable against the dark zombies;
   beyond it she reverts to the subtle teal runner — sight is limited,
   and the radar machine sells tracking beyond it
-- **Girl body (procedural)** — `Injured Run.glb` is anim-only (skeleton +
-  clip, no meshes), so a bright mannequin figure — pale top, slate legs,
-  skin head/hands — is attached to her real Mixamo bones and driven by
-  the run clip; per-bone counter-scale handles the file's 0.01 Armature
-  scale, and limbs articulate free because each capsule parents to the
-  upper bone of its pair
+- **Girl body** — the roster's `detention` character (zombie schoolgirl,
+  `assets/characters/detention.glb`) driven by `Injured Run.glb`'s run
+  clip; both are Mixamo rigs, so the clip binds by bone name and
+  `roster.js`'s `fitClip()` rescales its hip height to her body. The
+  sight glow's emissive is masked by her texture so the pink tints her
+  instead of flooding her into a silhouette
 - **Economy** — two beaconed vending machines (radar @ z +10, lime;
   adrenaline @ z −90, pink), E-key purchases, coins from kills + persistent
   clusters; radar upgrade reveals her on radar/compass + live distance row,
@@ -83,8 +83,6 @@ cutting exactly at 25 m.
 ## Suggestions — what to improve next
 
 **Visuals & feel**
-- Replace the mannequin with a meshed Mixamo re-export (same rig, with
-  skin) — the procedural body was the fallback that became the feature
 - Lose-cinematic polish: pink flash + fog burst at the teleport instead
   of the instant vanish
 - Directional footstep audio while she's out of sight — sells "close"

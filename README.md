@@ -1,5 +1,29 @@
 # Deadway City
 
+## Characters (character-select pass)
+- **Choose Your Survivor** — after Enter (and sign-in), the whole roster
+  stands in a lineup; pick one (click them or their card) and they step
+  into a spotlight for a showcase dance while the rest watch. **Deploy**
+  goes on to level select. The pick is remembered on this device and is
+  who you play in every level (`characterSelect.js`).
+- **Roster** — Viper, Breacher, Cipher, Ironhand, Ember. Level 2's girl is
+  the sixth character, Detention.
+- **One skeleton, shared clips** — every character is a Mixamo rig with the
+  same 25 bones, and every clip lives once in
+  `assets/characters/animations.glb`, so any clip plays on any body.
+  `roster.js` rescales each clip's hip height to the body it plays on.
+- **Adding a character**: put its Mixamo download in
+  `art/characters/<name>_rigged.fbx`, add it to `ROSTER` in `roster.js`,
+  then rebuild (below).
+- **Adding a clip**: download it from Mixamo (FBX Binary, *Without Skin*,
+  30 fps) to `art/animations/<clip>.fbx`, then rebuild. Movement clips
+  (`walk`, `run`, `walk_back`, `strafe_left`, `strafe_right`, `jump`) have
+  their travel stripped by the build even if *In Place* wasn't ticked. The player maps clip names to actions in `PLAYER_CLIPS`
+  (`characters.js`): `idle`, `walk`, `run`, `walk_back`, `strafe_left`,
+  `strafe_right`, `jump`, `shoot`, `die`.
+- **Rebuild** (Blender 5.2):
+  `& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b -P tools\build_characters.py`
+
 ## New in this pass (presentation pass: HUD, title screen, Level 1 polish)
 - **Title screen atmosphere** — the splash art now sits on its own layer with a
   slow Ken Burns zoom/pan; a canvas layer drifts ember/ash particles upward;
@@ -507,5 +531,6 @@ playtest it and report anything that looks off, especially:
   `credits.js` — accounts, cloud save, leaderboard, credits (see
   **CLOUD_SETUP.md**)
 - `game.js` — the original single-file build, kept for reference
-- `assets/*.glb` — rigged models (zombies, player, vehicles, props);
+- `assets/characters/` — roster characters + shared `animations.glb`;
+  `assets/*.glb` — rigged models (zombies, vehicles, props);
   `assets/splash1.jpg` — title-screen concept art

@@ -69,13 +69,11 @@ export const state = {
   bobPhase: 0,
   sprintToggle: false,
   lastWTapTime: 0,
-  playerScaleOverride: 0.5, // was 0.55 — measured "a little too big" now that
-                            // ground-clamping actually works (previously this
-                            // number was being judged against a floating,
-                            // wrongly-modeled character, so it wasn't a
-                            // reliable data point). Still live-adjustable
-                            // with [ / ] against the debug readout's meters
-                            // display.
+  playerScaleOverride: 1, // roster characters are measured in their true
+                          // world size, so PLAYER_TARGET_HEIGHT applies as
+                          // is (the old player_character.glb needed 0.5).
+                          // Still live-adjustable with [ / ] against the
+                          // debug readout's meters display.
   playerBaseScale: 1,
   playerCurrentHeight: 0,
 

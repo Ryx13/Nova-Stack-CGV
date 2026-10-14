@@ -125,11 +125,11 @@ export const CREDITS = [
         licence: 'CC BY 4.0',
       },
       {
-        name: 'Player character',
-        what: 'Rigged player body with its animation set (player_character.glb).',
-        author: 'Mesh2Motion',
-        source: 'https://mesh2motion.org — asset library: https://github.com/Mesh2Motion/mesh2motion-assets',
-        licence: 'CC0 1.0 Universal (no attribution required — credited anyway)',
+        name: 'Survivor roster (Viper, Breacher, Cipher, Ironhand, Ember) and Detention',
+        what: 'Playable characters and the Level 2 runner (assets/characters/). Character design, mesh optimisation (reduced to 30k triangles in Blender) and rigging by Nova Stack; base meshes generated with Mesh.ai.',
+        author: 'Nova Stack',
+        source: 'Sources in art/characters/; rebuilt with tools/build_characters.py',
+        licence: 'Project-owned (Mesh.ai base meshes used in line with its terms of service)',
       },
       {
         name: 'Walker zombie (model-rigged.glb) and zombie variant (zombie_variant_b.glb)',
@@ -145,7 +145,7 @@ export const CREDITS = [
     items: [
       {
         name: 'Mixamo animation clips',
-        what: 'Walking, rifle run, strafes, start/stop, jumps, firing rifle, dying (14 clips in assets/), and the Level 2 runner\'s Injured Run.',
+        what: 'Every character clip in assets/characters/animations.glb (movement, shooting, dying, the select-screen dance and listening idle), and the Level 2 runner\'s Injured Run.',
         author: 'Adobe Mixamo',
         source: 'https://www.mixamo.com',
         licence: 'Royalty-free under the Adobe/Mixamo terms of use (no attribution required, credited anyway)',
@@ -195,7 +195,7 @@ export const CREDITS = [
       },
       {
         name: 'Blender',
-        what: 'Converting/retargeting FBX animation files to .glb.',
+        what: 'Converting/retargeting FBX animation files to .glb; reducing the roster characters to 30k triangles and building assets/characters/ (tools/build_characters.py).',
         author: 'Blender Foundation',
         source: 'https://www.blender.org',
         licence: 'GPL (tool only — output files are ours)',

@@ -23,6 +23,7 @@ import { createToxicMaterial } from './shaders.js';
 import { bootLevel, registerLevelTick, levelKeyHooks } from './Actions.js';
 import { VendingMachine, makeIcon } from './VendingMachine.js';
 import { finishRun } from './account.js';
+import { instantiateCharacter, loadGLB, fitClip } from './roster.js';
 
 const LEVEL_CONFIG = {
   id: 2,
@@ -644,10 +645,12 @@ function buildLevel2Scene() {
 
 
 
-// Placeholder model: Injured Run.glb (single Mixamo run clip — a
-// fleeing figure, thematically right for the chase). Any single-clip
-// rigged GLB drops in here; the loader plays animations[0].
-const GIRL_GLB = 'assets/Injured Run.glb';
+// She's the roster's zombie-schoolgirl body (assets/characters/
+// detention.glb) driven by Injured Run.glb's single Mixamo run clip — a
+// fleeing figure, thematically right for the chase. Both share the Mixamo
+// skeleton, so the clip binds by bone name (see roster.js).
+const GIRL_CHARACTER = 'detention';
+const GIRL_RUN_GLB = 'assets/Injured Run.glb';
 const GIRL_SPEED = 3.7;          // = player walk speed — the locked design
 const GIRL_TARGET_HEIGHT = 1.65;
 const GIRL_RIG_YAW_OFFSET = 0;   // flip to Math.PI if she runs backwards
@@ -695,182 +698,33 @@ let girl = null; // { group, mixer, wpIndex, mats, glint }
 let girlSpotted = false;
 let girlAnnounced = false; // "head start" beat — fired on the first live frame
 
-/* PROCEDURAL BODY for the anim-only girl rig — VERIFIED against the
-   file: Injured Run.glb is a Mixamo skeleton + run clip with ZERO
-   meshes/materials (66 nodes, 65 joints, one animation), so the loader
-   alone renders nothing at all — she was literally invisible (only her
-   glint light and the zombies it lit were visible). This clothes the
-   actual bones: joint spheres + limb cylinders, attached world-aligned
-   at the clip's FIRST RUNNING FRAME (not the bind pose — this file's
-   bind is a lying/folded Blender-import artifact, while the clip
-   assembles a properly standing run), so the run clip drives them like
-   a real character from frame one.
-   Deliberately a BRIGHT, mannequin-style figure (pale top, slate legs,
-   skin head/hands) — reads as “the light figure” against the dark,
-   dull-green zombies even before the sight glow kicks in. All materials
-   are MeshStandardMaterial and land in girlMats, so the 25 m pink sight
-   glow (emissive pulse) hits every part; the lose-cinematic opacity
-   fade works on her too (it traverses meshes). */
-function buildGirlBody(obj, girlMats, unitsPerMeter) {
-  const find = (n) => {
-    let hit = obj.getObjectByName('mixamorig:' + n) || obj.getObjectByName(n);
-    if (hit) return hit;
-    obj.traverse((o) => { if (!hit && o.isBone && o.name.endsWith(n)) hit = o; });
-    return hit;
-  };
-  const B = {};
-  ['Hips', 'Neck', 'Head', 'HeadTop_End',
-   'LeftShoulder', 'LeftArm', 'LeftForeArm', 'LeftHand',
-   'RightShoulder', 'RightArm', 'RightForeArm', 'RightHand',
-   'LeftUpLeg', 'LeftLeg', 'LeftFoot',
-   'RightUpLeg', 'RightLeg', 'RightFoot'].forEach((n) => { B[n] = find(n); });
-  if (!B.Hips || !B.Head) return; // not a Mixamo-style rig — leave her a glow-only marker rather than half-build
-
-  const skinMat = new THREE.MeshStandardMaterial({ color: 0xe6c9a8, roughness: 0.75 });
-  const suitMat = new THREE.MeshStandardMaterial({ color: 0xe3edf2, roughness: 0.85 }); // pale top
-  const legMat = new THREE.MeshStandardMaterial({ color: 0x8fa9bc, roughness: 0.85 });  // slate leggings
-  for (const m of [skinMat, suitMat, legMat]) {
-    m.emissive = new THREE.Color(0x1f5a4d); // subtle teal runner base — same look as a meshed model
-    girlMats.push(m);
-  }
-  // With attach()'s per-bone counter-scale, part geometry is authored
-  // directly in world meters — unitsPerMeter is 1 and kept only so the
-  // helper reads symmetrically at every call below.
-  const M = (meters) => meters * unitsPerMeter;
-  const wp = (b) => { const p = new THREE.Vector3(); b.getWorldPosition(p); return p; };
-  const Y_AXIS = new THREE.Vector3(0, 1, 0);
-  const IDENTITY_Q = new THREE.Quaternion();
-
-  // Attach a mesh to a bone at a WORLD position/orientation (bind pose):
-  // converted into the bone's local space so the clip's bone rotations
-  // carry the part from frame one.
-  function attach(mesh, bone, worldPos, worldQuat) {
-    bone.updateWorldMatrix(true, false);
-    mesh.position.copy(bone.worldToLocal(worldPos.clone()));
-    const qb = new THREE.Quaternion(); bone.getWorldQuaternion(qb);
-    mesh.quaternion.copy(worldQuat).premultiply(qb.invert());
-    // CRITICAL scale compensation: the bones sit under the file's scene
-    // root "Armature" node, which carries the Mixamo cm→m scale 0.01
-    // (verified in the GLB). Parts parented to bones inherit it, so
-    // without this counter-scale every sphere/capsule renders ~100x too
-    // small — right positions, microscopic body: the invisible-girl
-    // symptom all over again. Counter-scaling by the bone's live world
-    // scale means the geometry below is authored directly in meters.
-    const bs = new THREE.Vector3(); bone.getWorldScale(bs);
-    mesh.scale.setScalar(1 / Math.max(bs.x, 1e-9));
-    mesh.castShadow = mesh.receiveShadow = true;
-    bone.add(mesh);
-  }
-  // Capsule between two bones' world positions, parented to the upper
-  // bone (approximate below the elbow/knee — plenty at street distance).
-  function limb(a, b, r, mat) {
-    if (!a || !b) return;
-    const pa = wp(a), pb = wp(b);
-    const mid = pa.clone().add(pb).multiplyScalar(0.5);
-    const len = Math.max(pa.distanceTo(pb), 0.01);
-    const q = new THREE.Quaternion().setFromUnitVectors(Y_AXIS, pb.clone().sub(pa).normalize());
-    attach(new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 8), mat), a, mid, q);
-  }
-  function joint(b, r, mat) {
-    if (!b) return;
-    attach(new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), mat), b, wp(b), IDENTITY_Q);
-  }
-
-  // Torso + pelvis + neck + head
-  limb(B.Hips, B.Neck, M(0.13), suitMat);
-  joint(B.Hips, M(0.125), legMat);
-  limb(B.Neck, B.Head, M(0.045), skinMat);
-  if (B.Head && B.HeadTop_End) {
-    const headCenter = wp(B.Head).lerp(wp(B.HeadTop_End), 0.5);
-    attach(new THREE.Mesh(new THREE.SphereGeometry(M(0.105), 12, 10), skinMat), B.Head, headCenter, IDENTITY_Q);
-  } else {
-    joint(B.Head, M(0.105), skinMat);
-  }
-  // Arms — pale sleeves to the elbow, bare forearms + hands
-  ['Left', 'Right'].forEach((side) => {
-    limb(B[side + 'Arm'], B[side + 'ForeArm'], M(0.05), suitMat);
-    limb(B[side + 'ForeArm'], B[side + 'Hand'], M(0.045), skinMat);
-    joint(B[side + 'Shoulder'], M(0.065), suitMat);
-    joint(B[side + 'Hand'], M(0.05), skinMat);
-  });
-  // Legs + feet
-  ['Left', 'Right'].forEach((side) => {
-    limb(B[side + 'UpLeg'], B[side + 'Leg'], M(0.065), legMat);
-    limb(B[side + 'Leg'], B[side + 'Foot'], M(0.05), legMat);
-    joint(B[side + 'Foot'], M(0.06), legMat);
-  });
-}
-
 function spawnGirl() {
-  new GLTFLoader().load(GIRL_GLB, (gltf) => {
-    const obj = gltf.scene;
+  Promise.all([instantiateCharacter(GIRL_CHARACTER), loadGLB(GIRL_RUN_GLB)]).then(([obj, run]) => {
     const girlMats = [];
-    // Single-clip model — the mixer is created up front (not at the
-    // tail) so the anim-only branch below can pose the skeleton to the
-    // clip's first running frame BEFORE measuring and clothing it.
-    let mixer = null;
-    if (gltf.animations && gltf.animations.length) {
-      mixer = new THREE.AnimationMixer(obj);
-      mixer.clipAction(gltf.animations[0]).play();
-    }
-    let hasMeshes = false;
-    obj.traverse((o) => { if (o.isMesh) hasMeshes = true; });
-    if (hasMeshes) {
-      // Ground-snap + scale to target height — the loadDecorCar pattern.
-      const box = new THREE.Box3().setFromObject(obj);
-      const size = new THREE.Vector3(); box.getSize(size);
-      obj.scale.setScalar(GIRL_TARGET_HEIGHT / Math.max(size.y, 0.2));
-      const box2 = new THREE.Box3().setFromObject(obj);
-      const center = new THREE.Vector3(); box2.getCenter(center);
-      obj.position.set(-center.x, -box2.min.y, -center.z);
-      // Distinct cool tint + raised emissive: readable through night fog
-      // without glowing like a beacon.
-      obj.traverse((o) => {
-        if (!o.isMesh) return;
-        o.castShadow = true; o.receiveShadow = true;
-        o.material = o.material.clone();
-        o.material.color.multiply(new THREE.Color(0.75, 1.15, 1.05));
-        o.material.emissive = new THREE.Color(0x1f5a4d);
-        girlMats.push(o.material);
-      });
-    } else {
-      // ANIM-ONLY MODEL (this is what Injured Run.glb actually is — see
-      // buildGirlBody's header). Two file quirks break the naive path:
-      // (1) the geometry-Box3 sizing degenerates on the empty scene, and
-      // (2) the BIND pose is a lying/folded Blender-import artifact —
-      // but the clip itself assembles a properly standing run (verified
-      // in the file: hips track puts them at ~0.93 m world height,
-      // torso leaning up-forward like a runner). So advance the mixer
-      // ~one keyframe FIRST — the clip starts at t≈0.017 s — posing the
-      // skeleton into the actual running figure, then measure and
-      // clothe THAT. Any future single-clip GLB WITH a mesh still takes
-      // the hasMeshes branch unchanged.
-      if (mixer) mixer.update(0.02);
-      obj.updateMatrixWorld(true);
-      const boneBox = () => {
-        let minX = Infinity, minY = Infinity, minZ = Infinity;
-        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-        obj.traverse((o) => {
-          if (!o.isBone) return;
-          const p = new THREE.Vector3(); o.getWorldPosition(p);
-          if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
-          if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
-          if (p.z < minZ) minZ = p.z; if (p.z > maxZ) maxZ = p.z;
-        });
-        return { minX, minY, minZ, maxX, maxY, maxZ };
-      };
-      obj.updateMatrixWorld(true);
-      let bb = boneBox();
-      const height = Math.max(bb.maxY - bb.minY, 0.2);
-      const s = GIRL_TARGET_HEIGHT / height;
-      obj.scale.setScalar(s);
-      obj.position.set(0, 0, 0); // re-measure from a clean origin
-      obj.updateMatrixWorld(true);
-      bb = boneBox();
-      obj.position.set(-(bb.minX + bb.maxX) / 2, -bb.minY, -(bb.minZ + bb.maxZ) / 2);
-      obj.updateMatrixWorld(true);
-      buildGirlBody(obj, girlMats, 1);
-    }
+    const mixer = new THREE.AnimationMixer(obj);
+    if (run.animations.length) mixer.clipAction(fitClip(run.animations[0], run.scene, obj)).play();
+    // Ground-snap + scale to target height — the loadDecorCar pattern.
+    // A fresh clone has never had its world matrices computed; measuring
+    // before this reads the Armature's cm->m 0.01 scale as identity.
+    obj.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(obj);
+    const size = new THREE.Vector3(); box.getSize(size);
+    obj.scale.setScalar(GIRL_TARGET_HEIGHT / Math.max(size.y, 0.2));
+    const box2 = new THREE.Box3().setFromObject(obj);
+    const center = new THREE.Vector3(); box2.getCenter(center);
+    obj.position.set(-center.x, -box2.min.y, -center.z);
+    // Distinct cool tint + raised emissive: readable through night fog
+    // without glowing like a beacon. The emissive is masked by her own
+    // texture, so the in-sight pink glow tints her rather than flooding
+    // her into a flat silhouette.
+    obj.traverse((o) => {
+      if (!o.isMesh) return;
+      o.material = o.material.clone();
+      o.material.color.multiply(new THREE.Color(0.75, 1.15, 1.05));
+      o.material.emissive = new THREE.Color(0x1f5a4d);
+      o.material.emissiveMap = o.material.map;
+      girlMats.push(o.material);
+    });
     const group = new THREE.Group();
     group.add(obj);
     // A glint light travelling with her — teal while out of sight, hot
@@ -887,7 +741,8 @@ function spawnGirl() {
     // "Head start" announcement moved to updateGirl's first LIVE frame —
     // pushed here it would fire behind the loading overlay and fade
     // before anyone can read it.
-  }, undefined, () => {
+  }).catch((err) => {
+    console.error('Chase girl failed to load:', err);
     // Model failed to load — spawn an invisible marker girl instead so
     // the CHASE still fully functions (movement, radar dot, catch/lose
     // checks all key off state.girlPos): there's just no visible runner.
