@@ -242,7 +242,7 @@ function makeWindowTexture(litChance) {
   return tex;
 }
 export const windowTex = makeWindowTexture(0.18); // kept exported for compatibility
-const windowTexVariants = [makeWindowTexture(0.08), makeWindowTexture(0.18), makeWindowTexture(0.32)];
+export const windowTexVariants = [makeWindowTexture(0.08), makeWindowTexture(0.18), makeWindowTexture(0.32)];
 
 /* DAYLIGHT FACADES (clear-day levels) — nothing glows in daylight, and an
    abandoned block looks it: one tile is two storeys (6.4 m) by three bays
@@ -254,7 +254,7 @@ const windowTexVariants = [makeWindowTexture(0.08), makeWindowTexture(0.18), mak
 export const FACADE_TILE_W = 7.5;
 export const FACADE_TILE_H = 6.4;
 let dayFacadeVariants = null;
-function dayFacades() {
+export function dayFacades() {
   if (!dayFacadeVariants) dayFacadeVariants = [0, 1, 2, 3].map(() => makeDayFacadeTexture());
   return dayFacadeVariants;
 }
@@ -749,7 +749,7 @@ function ruinMaterials() {
 
 // World-scale planar UVs: side faces map (along-face, height) / tile,
 // tops map (x, z). Works on any box — cut, jagged or translated.
-function planarFacadeUVs(geo, tileW, tileH) {
+export function planarFacadeUVs(geo, tileW, tileH) {
   const pos = geo.attributes.position, nrm = geo.attributes.normal, uv = geo.attributes.uv;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
@@ -765,7 +765,7 @@ function planarFacadeUVs(geo, tileW, tileH) {
 // whole storeys (plus a ragged fraction) column by column. `dropAt`
 // maps a top vertex (x, z) to how much it loses; keyed by position so
 // faces sharing an edge agree and the shell stays closed.
-function brokenBox(w, h, d, y0, dropAt) {
+export function brokenBox(w, h, d, y0, dropAt) {
   const geo = new THREE.BoxGeometry(w, h, d, Math.max(2, Math.round(w / 2.4)), 1, Math.max(2, Math.round(d / 2.4)));
   geo.translate(0, y0 + h / 2, 0);
   const pos = geo.attributes.position;
@@ -1201,7 +1201,10 @@ export function loadBuildings() {
         })
     );
     sil.position.set((rnd() < 0.5 ? -1 : 1) * (48 + rnd() * 40), sil.geometry.parameters.height / 2, -20 - rnd() * STREET_LENGTH);
-    scene.add(sil);
+    // A level with its own city behind the street (state.backCity — Level
+    // 2) has real blocks here; the draws above still happen so nothing
+    // placed after them moves
+    if (!state.backCity) scene.add(sil);
   }
   const depotYard = state.skipDepot ? null : buildDepotYard();
   return { depotYard };

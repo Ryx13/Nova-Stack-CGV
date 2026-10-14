@@ -46,4 +46,8 @@ state.collapsedBlocks = [
 // in the sun. Streams in with the other deferred assets (lightBoot).
 // `strip`: node-name prefixes to drop — this export's 4 m ground card,
 // and its glass, which wouldn't survive the fire.
+// The city carries on behind the street-front rows: blocks thinning out
+// toward the mountains (Level2Surroundings.js) in place of the stock
+// skyline boxes.
+state.backCity = true;
 state.burningCarModel = { url: 'assets/old_rusty_car_2.glb', length: 4.4, strip: ['Plane001', 'Object002'] };

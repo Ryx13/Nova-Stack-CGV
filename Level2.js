@@ -3,14 +3,14 @@
 // The player pursues a girl carrying a critical substance through an
 // abandoned town toward a distant port. She moves at the player's walk
 // speed, so the edge is route choice and power-ups — catch her (occupy
-// her position + E) before she reaches the pier and teleports away.
+// her position + E) before she reaches her boat at the pier and gets away.
 //
 // Design brief, zone map, and the implementation catalog live in
 // level2.md. This file is everything the level owns, in order: level
 // config + startLevel(), scene dressing builders (port set piece,
 // street blockage, collapse zone, vending machines, coins), the girl
 // NPC + route, purchases, adrenaline, the mission system (win/lose,
-// teleport cinematic, zombie escalation), and the reference HUD.
+// getaway cinematic, zombie escalation), and the reference HUD.
 
 import './Level2Config.js';  // MUST be first — sets skip flags before heavy modules
 import * as THREE from 'three';
@@ -23,10 +23,11 @@ import { createToxicMaterial } from './shaders.js';
 import { bootLevel, registerLevelTick, levelKeyHooks } from './Actions.js';
 import { VendingMachine, makeIcon } from './VendingMachine.js';
 import { finishRun } from './account.js';
-import { instantiateCharacter, loadGLB, fitClip, clipsFor } from './roster.js';
+import { instantiateCharacter, loadGLB, fitClip, clipsFor, boneByName } from './roster.js';
 import { holdForIntro, playIntro, updateIntro } from './Level2Intro.js';
 import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
 import { buildStreetDressing } from './streetDressing.js';
+import { buildSurroundings } from './Level2Surroundings.js';
 
 const LEVEL_CONFIG = {
   id: 2,
@@ -52,7 +53,7 @@ export function startLevel(mode) {
   });
   // Level 2 dressing layer on top of the loaded base world (port,
   // blockage, collapse nest, machines, coins). Handles returned for the
-  // logic phase — machines (purchase wiring) + teleportPoint (lose).
+  // logic phase — machines (purchase wiring) + escapePoint (lose).
   const sceneryStart = scene.children.length;
   const sceneHandles = buildLevel2Scene();
   markStaticSince(scene, sceneryStart);
@@ -62,9 +63,11 @@ export function startLevel(mode) {
   console.log(`[mergeStatic] ${mergeStats.meshesBefore} meshes -> ${mergeStats.meshesAfter}`);
   // Trees, rubble, litter, stains, cables — instanced, so added after the merge
   buildStreetDressing();
+  // Scrubland, mountains and the open sea around it all (custom haze shader)
+  registerLevelTick(buildSurroundings());
   lv2Scene = sceneHandles;
   // Reference-style HUD (objectives, distances, inventory panel).
-  lv2HUD = buildLevel2HUD(sceneHandles.teleportPoint);
+  lv2HUD = buildLevel2HUD(sceneHandles.escapePoint);
   // The chase itself: the girl NPC and her per-frame tick.
   spawnGirl();
   // The fly-through briefing: gameplay holds from here until it ends
@@ -76,7 +79,7 @@ export function startLevel(mode) {
     { kind: 'radar', machine: sceneHandles.machines.radar, price: RADAR_PRICE },
     { kind: 'adrenaline', machine: sceneHandles.machines.adrenaline, price: ADRENALINE_PRICE },
   ];
-  lv2TeleportPoint = sceneHandles.teleportPoint;
+  lv2EscapePoint = sceneHandles.escapePoint;
   adrenalineStock = ADRENALINE_START_STOCK;
   registerLevelTick(updateVendingInteraction);
   levelKeyHooks.KeyE = handleKeyE;
@@ -93,13 +96,13 @@ export function startLevel(mode) {
   registerLevelTick(updateMission);
 }
 
-// Handles for the logic phase: { machines, teleportPoint } from the
+// Handles for the logic phase: { machines, escapePoint } from the
 // scene build, plus lv2HUD (live HUD setters — setGirlDistance etc.).
 export let lv2HUD = null;
 export let lv2Scene = null;
 // Purchase-system runtime refs, filled in startLevel().
 let lv2Machines = null;   // [{ kind, machine, price }]
-let lv2TeleportPoint = null;
+let lv2EscapePoint = null;
 let adrenalineStock = 0;  // remaining in the adrenaline machine
 // End-screen refs, created by buildLevel2EndScreens (mission section).
 let lv2Win = null, lv2WinStats = null;
@@ -423,8 +426,8 @@ function placeCoinCluster(x, z, n) {
 /** THE PORT — the chase's destination and the level's signature image.
     Quay slab over the street end, dark teal water beyond the south
     world bound, gantry cranes, container yard, warehouses, ship
-    silhouettes, and the pier with the teleport beacon (the girl's
-    escape point). Returns the teleportPoint handle. */
+    silhouettes, and the pier with her getaway boat moored at its end.
+    Returns the escapePoint and boat handles. */
 function buildPort() {
   // Quay — concrete cap over the street end. No collider (18 cm step,
   // same convention as the base scene's curbs).
@@ -436,19 +439,7 @@ function buildPort() {
   quay.receiveShadow = true;
   scene.add(quay);
 
-  // Water — dark teal, faint emissive so it isn't pitch black at night.
-  // Sits above the asphalt plane (which runs under everything) but below
-  // the quay top. Past the south bound wall it's pure backdrop.
-  const water = new THREE.Mesh(
-    new THREE.PlaneGeometry(260, 58),
-    new THREE.MeshStandardMaterial({
-      color: 0x0c2a26, roughness: 0.38, metalness: 0.55,
-      emissive: 0x04120f, emissiveIntensity: 0.4,
-    })
-  );
-  water.rotation.x = -Math.PI / 2;
-  water.position.set(0, 0.05, -236); // z -207 → -265
-  scene.add(water);
+  // The water itself is the open sea in Level2Surroundings.js
 
   // Bollards along the quay edge.
   const bollardMat = new THREE.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.6, metalness: 0.5 });
@@ -496,10 +487,10 @@ function buildPort() {
   wash.position.set(0, 8, -196);
   addLight(scene, wash);
 
-  // The pier — walkway over the water to the teleport beacon. The south
-  // bound wall stops the player around z ≈ -208; the pier visual extends
-  // past it so the beacon sits just out of reach. The girl (no physics
-  // body) walks it in the logic phase — reaching it means she's gone.
+  // The pier — walkway over the water to her boat. The south bound wall
+  // stops the player around z ≈ -208; the pier visual extends past it so
+  // the boat sits just out of reach. The girl (no physics body) walks it
+  // in the logic phase — reaching the boat means she's gone.
   const g = new THREE.Group();
   const plankMat = new THREE.MeshStandardMaterial({ map: concreteTex, color: 0x6a6f72, roughness: 0.9 });
   const postMat = new THREE.MeshStandardMaterial({ map: rustTex, color: 0x3a3f45, roughness: 0.7, metalness: 0.4 });
@@ -517,21 +508,69 @@ function buildPort() {
     rail.position.set(rx, 0.95, -207.4);
     g.add(rail);
   });
-  // Teleport beacon: pulsing ring + light column, both unfogged — THE
-  // landmark visible from the level start.
-  const ring = new THREE.Mesh(new THREE.RingGeometry(1.05, 1.45, 40), createToxicMaterial(TEAL));
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.set(0, 0.49, -208.6);
-  g.add(ring);
-  const beam = new THREE.Mesh(new THREE.BoxGeometry(0.4, 11, 0.4), createToxicMaterial(TEAL));
-  beam.position.set(0, 6, -208.6);
-  g.add(beam);
-  const beaconLight = new THREE.PointLight(TEAL_LIGHT, 2.6, 20, 2);
-  beaconLight.position.set(0, 2.6, -208.4);
-  addLight(g, beaconLight);
   scene.add(g);
 
-  return { teleportPoint: new THREE.Vector3(0, 0, -208.6) };
+  return { escapePoint: new THREE.Vector3(0, 0, -208.6), boat: buildBoat() };
+}
+
+/** THE GETAWAY BOAT — a motorboat moored alongside the end of the pier,
+    bow out to sea, bobbing. assets/boat.glb (art/models/boat.glb run
+    through tools/optimize_model.py); the model's long axis is x with the
+    outboard at +x, so it's turned to put the bow at -z. Loads on its own;
+    the handle's group exists at once so the cinematic can always move it.
+    Returns { group, wake, seat } — seat is where she stands, boat-local. */
+const BOAT_LENGTH = 6.5;
+const BOAT_DRAFT = 0.55;           // hull bottom below the waterline
+const BOAT_MOOR = new THREE.Vector3(3.9, 0.05, -209.6);
+function buildBoat() {
+  const group = new THREE.Group();
+  group.position.copy(BOAT_MOOR);
+  scene.add(group);
+  new GLTFLoader().load('assets/boat.glb', (gltf) => {
+    const obj = gltf.scene;
+    obj.rotation.y = -Math.PI / 2;
+    obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    let box = new THREE.Box3().setFromObject(obj);
+    obj.scale.setScalar(BOAT_LENGTH / box.getSize(new THREE.Vector3()).z);
+    box = new THREE.Box3().setFromObject(obj);
+    const c = box.getCenter(new THREE.Vector3());
+    obj.position.set(-c.x, -BOAT_DRAFT - box.min.y, -c.z);
+    group.add(obj);
+  }, undefined, (err) => console.error('Boat model failed to load:', err));
+  // Wake: a white V trailing the stern, faded in with speed by the cinematic
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 256;
+  const ctx = c.getContext('2d');
+  for (let i = 0; i < 2; i++) {
+    const side = i ? 1 : -1;
+    const grad = ctx.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, 'rgba(255,255,255,0.9)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 14;
+    ctx.beginPath(); ctx.moveTo(64, 0); ctx.lineTo(64 + side * 58, 256); ctx.stroke();
+  }
+  const foam = ctx.createRadialGradient(64, 0, 0, 64, 0, 70);
+  foam.addColorStop(0, 'rgba(255,255,255,0.85)');
+  foam.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = foam; ctx.fillRect(0, 0, 128, 90);
+  const wakeTex = new THREE.CanvasTexture(c);
+  const wake = new THREE.Mesh(
+    new THREE.PlaneGeometry(7, 16),
+    new THREE.MeshBasicMaterial({ map: wakeTex, transparent: true, opacity: 0, depthWrite: false })
+  );
+  wake.rotation.x = -Math.PI / 2;
+  wake.position.set(0, 0.03, BOAT_LENGTH / 2 + 8); // starts at the stern, trails astern (+z)
+  group.add(wake);
+  return { group, wake, seat: new THREE.Vector3(0, -0.15, 0.9), departing: false };
+}
+
+// Moored: a gentle bob and roll
+function updateBoatBob(boat, t) {
+  if (boat.departing) return;
+  boat.group.position.y = BOAT_MOOR.y + Math.sin(t * 1.3) * 0.05;
+  boat.group.rotation.z = Math.sin(t * 0.9) * 0.025;
+  boat.group.rotation.x = Math.sin(t * 1.1 + 1) * 0.012;
 }
 
 /** MAIN-STREET BLOCKAGE (z ≈ -57) — the wreck-pile squeeze. Two wrecks
@@ -613,7 +652,7 @@ function buildZoneDressing() {
 
 /** Builds the full Level 2 dressing layer. Called once from startLevel(),
     after bootLevel(). Returns handles for the logic phase: the two
-    machines (purchase wiring) and the teleport point (lose condition
+    machines (purchase wiring) and the escape point (lose condition
     anchor). */
 function buildLevel2Scene() {
   const port = buildPort();
@@ -647,7 +686,7 @@ function buildLevel2Scene() {
   placeCoinCluster(5, -195, 3);    // Port edge
   placeCoinCluster(-5, -200, 3);   // Port edge
 
-  return { machines, teleportPoint: port.teleportPoint };
+  return { machines, escapePoint: port.escapePoint, boat: port.boat };
 }
 
 
@@ -670,7 +709,7 @@ const GIRL_SIGHT_RANGE = 25;
 // straight down the street past the first barrier chicane → through the
 // blockage's east-curb gap (z -57) → weaving the collapse-zone street
 // wrecks → threading the final-approach gauntlet → across the quay →
-// down the pier to the teleport beacon. y values step onto the quay
+// down the pier to her boat. y values step onto the quay
 // (0.18) and pier (0.47) slabs. Waypoints keep ~5 m clearance from every
 // placed wreck/container so she never visibly clips through one (the
 // spawn leg runs the street mid-lane at x 1.5; barrier 0 sits 3.9 m off
@@ -692,7 +731,7 @@ const GIRL_WAYPOINTS = [
   { x: 0,   y: 0,    z: -194 },
   { x: 0,   y: 0.18, z: -197 },  // onto the quay
   { x: 0,   y: 0.47, z: -203 },  // onto the pier
-  { x: 0,   y: 0.47, z: -208.6 },// the beacon — she's gone (lose)
+  { x: 1.6, y: 0.47, z: -209.6 },// the pier edge beside her boat — she's gone (lose)
 ];
 
 let girl = null; // { group, mixer, wpIndex, mats, glint }
@@ -730,6 +769,7 @@ function spawnGirl() {
     const idleClip = (await clipsFor(obj)).idle;
     const idle = idleClip ? mixer.clipAction(idleClip) : null;
     if (idle) { idle.play(); runAction.stop(); }
+    attachAntidote(obj);
     girl = { group, mixer, wpIndex: 1, idle, run: runAction };
     state.girlPos = group.position; // live reference — see section header
     // "Head start" announcement moved to updateGirl's first LIVE frame —
@@ -750,6 +790,46 @@ function spawnGirl() {
   });
 }
 
+/* ANTIDOTE — the vial she runs with, in her right hand: green liquid in
+   clear glass under a steel cap. Deliberately unlit (no emissive, no
+   light) — it's what she carries, not a beacon. Built ~1.3x life size
+   so it still reads in her hand at chase distance. */
+const ANTIDOTE_GRIP = { pos: [0, 0.065, -0.024], rot: [0, 0, -Math.PI / 2] }; // in the hand bone's frame, metres: upright in the palm
+function makeAntidoteVial() {
+  const g = new THREE.Group();
+  const glass = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.021, 0.021, 0.095, 16),
+    new THREE.MeshStandardMaterial({ color: 0xdfeee8, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.35, depthWrite: false })
+  );
+  const liquid = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.0175, 0.0175, 0.068, 16),
+    new THREE.MeshStandardMaterial({ color: 0x4fd65a, roughness: 0.25, metalness: 0 })
+  );
+  liquid.position.y = -0.011;
+  const cap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.023, 0.023, 0.024, 16),
+    new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.35, metalness: 0.85 })
+  );
+  cap.position.y = 0.0595;
+  liquid.renderOrder = 0; glass.renderOrder = 1; // liquid first, glass over it
+  g.add(liquid, glass, cap);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+function attachAntidote(charRoot) {
+  const hand = boneByName(charRoot, 'RightHand');
+  if (!hand) return;
+  const vial = makeAntidoteVial();
+  // The rig's bones carry its cm->m and fit-to-height scaling; undo it so
+  // the vial's own sizes stay metres
+  charRoot.updateMatrixWorld(true);
+  const s = hand.getWorldScale(new THREE.Vector3()).x;
+  vial.scale.setScalar(1 / s);
+  vial.position.set(...ANTIDOTE_GRIP.pos).multiplyScalar(1 / s);
+  vial.rotation.set(...ANTIDOTE_GRIP.rot);
+  hand.add(vial);
+}
+
 /* INTRO — once the loading screen clears, the Level2Intro fly-through
    briefs the player (girl, port, machines) before the chase starts. It
    waits up to INTRO_GIRL_WAIT s for her model, so the close-up isn't of
@@ -768,26 +848,21 @@ function tickIntro(dt) {
     if (!girl && introWait < INTRO_GIRL_WAIT) return;
     introStarted = true;
     const wp = GIRL_WAYPOINTS[0], next = GIRL_WAYPOINTS[1];
-    const radar = lv2Scene.machines.radar.root.position, adrenaline = lv2Scene.machines.adrenaline.root.position;
     playIntro({
       girlPos: new THREE.Vector3(wp.x, wp.y, wp.z),
       girlFacing: new THREE.Vector3(next.x - wp.x, 0, next.z - wp.z).normalize(),
-      portPos: lv2TeleportPoint,
+      portPos: lv2EscapePoint,
       playerPos: playerVis.group.position.clone(),
-      markers: [
-        { pos: playerVis.group.position.clone(), label: 'You', color: '#f4ece0' },
-        { pos: new THREE.Vector3(wp.x, 0, wp.z), label: 'Girl', color: '#ff9a3c' },
-        { pos: radar.clone(), label: `Radar · $${RADAR_PRICE}`, color: '#7cff3a' },
-        { pos: adrenaline.clone(), label: `Adrenaline · $${ADRENALINE_PRICE}`, color: '#ff4fd8' },
-        { pos: lv2TeleportPoint.clone(), label: 'Port', color: '#17d5b0' },
-      ],
     });
     return;
   }
   updateIntro(dt);
 }
 
+let boatTime = 0;
 function updateGirl(dt) {
+  boatTime += dt;
+  if (lv2Scene && lv2Scene.boat) updateBoatBob(lv2Scene.boat, boatTime);
   // Loading-screen gate: state.readyShown flips exactly when the HUD is
   // revealed (maybeReady), so nothing about the chase — her movement,
   // the announce beat, the escalation clock — runs behind the overlay.
@@ -933,7 +1008,7 @@ function updateVendingInteraction() {
   // override stays current as she moves without resetting it per frame.
   state.compassOverride = state.hasRadarUpgrade && state.girlPos
     ? { pos: state.girlPos, label: 'GIRL' }
-    : { pos: lv2TeleportPoint, label: 'PORT' };
+    : { pos: lv2EscapePoint, label: 'PORT' };
   if (state.hasRadarUpgrade && state.girlPos && lv2HUD && playerVis) {
     lv2HUD.setGirlDistance(playerVis.group.position.distanceTo(state.girlPos));
   }
@@ -1005,8 +1080,8 @@ let missionStartTime = 0;  // armed on the first live frame in updateMission
 let escalationTimer = ESCALATE_START;
 // One-shot killfeed progress beats (see the TODO catalog's beat list).
 let beatClosingIn = false, beatNearingPort = false, beatFinalStretch = false;
-// Active lose cinematic: { phase: 'approach'|'teleport', t, camGoal,
-// lookAt, flash, flashLight }. Null outside the ~4 s sequence.
+// Active lose cinematic: { phase: 'board'|'depart', t, camGoal, lookAt,
+// from, speed }. Null outside the ~4.5 s sequence.
 let loseCinematic = null;
 
 /** The two Level 2 end screens, mirroring the stock .end-screen pattern
@@ -1066,88 +1141,79 @@ function catchGirl() {
   finishRun('win', lv2Win);
 }
 
-/** LOSE trigger — she made the pier beacon. Hands the next ~4 s to the
-    cinematic: camera swings to a pier vantage framing her at the
-    beacon, the teleport flash takes her, then the lose screen. */
+/** LOSE trigger — she made her boat. Hands the next ~4.5 s to the
+    cinematic: the camera swings to a quay vantage, she vaults the rail
+    into the boat, and it opens up and runs for the open sea; then the
+    lose screen. */
 function startLoseCinematic() {
   state.isDead = true;             // freeze gameplay incl. the stock camera
   state.adrenalineActive = false;
   sfx.setEngine(0, false);
   document.exitPointerLock();
   dom.prompt.classList.add('hidden');
-  pushKillFeed('She reached the port —');
-  // Vantage past the quay's container stacks, framing her on the pier
-  // with the beacon beam and open water behind her.
-  const gp = state.girlPos;
+  pushKillFeed('She reached her boat —');
+  const boat = lv2Scene.boat;
+  boat.departing = true;
   loseCinematic = {
-    phase: 'approach',
+    phase: 'board',
     t: 0,
-    camGoal: new THREE.Vector3(6.5, 3.4, -196.5),
-    lookAt: new THREE.Vector3(gp.x, 1.2, gp.z),
-    flash: null,
-    flashLight: null,
+    // Over the yard's clear mid-lane (|x| < 4), above the container stacks
+    camGoal: new THREE.Vector3(2.5, 5.5, -199),
+    lookAt: boat.group.position.clone().setY(1),
+    from: state.girlPos.clone(),
+    speed: 0,
   };
+  // Off the run and into a stance for the ride
+  if (girl && girl.idle && girl.run) { girl.idle.reset().play(); girl.run.crossFadeTo(girl.idle, 0.3, false); }
 }
 
 /** The cinematic itself — this tick owns the camera while the gameplay
-    gate is frozen. approach (~2.2 s): swing to the vantage, watching her
-    wait at the beacon. teleport (~1.5 s): expanding teal flash + light
-    spike, she fades and is drawn up into the beam, then the screen. */
+    gate is frozen. board (~0.7 s): she vaults from the pier into the
+    boat. depart (~3.6 s): the boat opens up out to sea, bow lifting,
+    wake building, the camera tracking it from the quay; then the screen. */
 function updateLoseCinematic(dt) {
   const c = loseCinematic;
+  const boat = lv2Scene.boat;
   c.t += dt;
   camera.position.lerp(c.camGoal, Math.min(1, dt * 1.8));
+  c.lookAt.lerp(boat.group.position.clone().setY(1), Math.min(1, dt * 3));
   camera.lookAt(c.lookAt);
 
-  if (c.phase === 'approach') {
-    if (c.t >= 2.2) {
-      c.phase = 'teleport';
-      c.t = 0;
-      // The beacon takes her: unfogged additive flash + light spike.
-      const p = state.girlPos.clone();
-      const flash = new THREE.Mesh(
-        new THREE.SphereGeometry(0.6, 24, 16),
-        new THREE.MeshBasicMaterial({
-          color: TEAL, transparent: true, opacity: 0.85,
-          blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
-        })
-      );
-      flash.position.copy(p); flash.position.y += 1;
-      scene.add(flash);
-      const light = new THREE.PointLight(TEAL_LIGHT, 0, 26, 2);
-      light.position.copy(p); light.position.y += 1.4;
-      addLight(scene, light);
-      c.flash = flash;
-      c.flashLight = light;
-      sfx.burst('sawtooth', 720, 1.1, 0.3);
-      pushKillFeed('— and teleported away.');
+  if (c.phase === 'board') {
+    const k = Math.min(1, c.t / 0.7);
+    if (girl) {
+      const to = boat.group.localToWorld(boat.seat.clone());
+      const g = girl.group;
+      g.position.lerpVectors(c.from, to, k);
+      g.position.y += Math.sin(Math.PI * k) * 1.2; // up over the rail
+      g.rotation.y = Math.atan2(to.x - c.from.x, to.z - c.from.z) + GIRL_RIG_YAW_OFFSET;
+      if (k >= 1) {
+        boat.group.attach(g);
+        g.position.copy(boat.seat);
+        g.rotation.set(0, Math.PI + GIRL_RIG_YAW_OFFSET, 0); // facing the bow
+      }
     }
+    if (k >= 1) { c.phase = 'depart'; c.t = 0; sfx.burst('sawtooth', 90, 1.4, 0.18); pushKillFeed('— and she\'s away.'); }
     return;
   }
 
-  // Teleport phase — flash expands & fades, girl dissolves into it.
-  const k = Math.min(1, c.t / 1.5);
-  if (c.flash) {
-    c.flash.scale.setScalar(1 + k * 9);
-    c.flash.material.opacity = 0.85 * (1 - k);
-  }
-  if (c.flashLight) c.flashLight.intensity = 9 * Math.sin(k * Math.PI);
-  if (girl) {
-    girl.group.traverse((o) => {
-      if (!o.isMesh) return;
-      o.material.transparent = true;
-      o.material.opacity = 1 - k;
-    });
-    girl.group.position.y += dt * 1.6; // drawn up into the beam
-  }
-  if (k >= 1) {
-    if (girl) { scene.remove(girl.group); girl = null; }
-    if (c.flash) {
-      scene.remove(c.flash);
-      c.flash.geometry.dispose();
-      c.flash.material.dispose();
-    }
-    if (c.flashLight) scene.remove(c.flashLight);
+  // Depart: throttle up to ~17 m/s, bow lifting as it gets on the plane,
+  // curving west to run out between the moored ships (one lies dead
+  // ahead, another east of it; heading is radians off -z, + = east)
+  const k = Math.min(1, c.t / 2.2);
+  c.speed = 17 * k * k;
+  const heading = -Math.min(0.5, Math.max(0, c.t - 0.3) * 0.4);
+  boat.group.position.x += Math.sin(heading) * c.speed * dt;
+  boat.group.position.z -= Math.cos(heading) * c.speed * dt;
+  boat.group.rotation.y = -heading;
+  boat.group.rotation.x = 0.07 * Math.sin(Math.min(1, c.t / 1.4) * Math.PI * 0.5) - 0.03 * Math.max(0, c.t - 1.6);
+  boat.group.rotation.z = Math.sin(c.t * 2.1) * 0.02;
+  boat.group.position.y = BOAT_MOOR.y + Math.sin(c.t * 5) * 0.04;
+  boat.wake.material.opacity = Math.min(0.85, c.speed / 10);
+  boat.wake.scale.y = 0.6 + Math.min(1.4, c.speed / 12);
+  boat.wake.position.z = BOAT_LENGTH / 2 + 8 * boat.wake.scale.y;
+  if (girl && girl.mixer) girl.mixer.update(dt);
+  if (c.t >= 3.6) {
     state.girlPos = null;
     loseCinematic = null;
     lv2LoseStats.textContent =
@@ -1187,7 +1253,7 @@ function updateMission(dt) {
     beatClosingIn = true;
     pushKillFeed('Closing in — keep the pressure on');
   }
-  const girlDist = state.girlPos.distanceTo(lv2TeleportPoint);
+  const girlDist = state.girlPos.distanceTo(lv2EscapePoint);
   if (!beatNearingPort && girlDist < 50) {
     beatNearingPort = true;
     pushKillFeed("She's nearing the port!");

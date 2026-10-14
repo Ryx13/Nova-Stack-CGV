@@ -1,10 +1,10 @@
 /* ======================================================================
    Level2Intro.js — THE ~9 s FLY-THROUGH BEFORE THE CHASE
 
-   Briefs the player and shows off the street in four camera moves:
-   push in on the girl → arc down the street to the port → rise to a
-   top-down map with a marker on everything that matters → swoop back
-   down behind the player, GO.
+   Briefs the player and shows off the street in three camera moves:
+   push in on the girl → arc down the street to the port → arc back to
+   behind the player, where the vending machines are only mentioned
+   (finding them is part of the hunt) → GO.
 
    While it plays state.cinematic freezes the gameplay gate in Actions.js
    (no movement, zombies, spawns or run clock) and Level 2's own ticks
@@ -21,7 +21,6 @@ import { state } from './state.js';
 function buildShots({ girlPos, girlFacing, portPos, playerPose }) {
   const girlEye = girlPos.clone().add(new THREE.Vector3(0, 1.25, 0));
   const girlCam = girlPos.clone().addScaledVector(girlFacing, 3.1).add(new THREE.Vector3(0.9, 1.5, 0));
-  const mapCentre = new THREE.Vector3(0, 0, (playerPose.pos.z + portPos.z) / 2);
   return [
     {
       pos: girlCam, look: girlEye, move: 1.2, hold: 1.5,
@@ -30,14 +29,13 @@ function buildShots({ girlPos, girlFacing, portPos, playerPose }) {
     {
       pos: portPos.clone().add(new THREE.Vector3(9, 7, 13)), look: portPos.clone().add(new THREE.Vector3(0, 1.5, 0)),
       move: 1.5, hold: 1.4, lift: 0.12,
-      title: 'This is the port', sub: "She's running for it. If she reaches it, she's gone.",
+      title: 'This is the port', sub: "Her boat is waiting at the pier. If she reaches it, she's gone.",
     },
     {
-      pos: mapCentre.clone().setY(205), look: mapCentre, up: new THREE.Vector3(0, 0, -1),
-      move: 1.3, hold: 1.7, map: true,
-      title: 'Vending machines', sub: 'Spend your coins: radar to track her, adrenaline to outrun her.',
+      pos: playerPose.pos, look: playerPose.look, move: 1.6, hold: 1.9, lift: 0.12,
+      title: 'Supplies', sub: 'Vending machines along the way sell a radar to track her and adrenaline to outrun her. Find them.',
     },
-    { pos: playerPose.pos, look: playerPose.look, move: 1.0, hold: 0, title: 'GO' },
+    { pos: playerPose.pos, look: playerPose.look, move: 0.01, hold: 0.6, title: 'GO' },
   ];
 }
 
@@ -65,9 +63,8 @@ export function holdForIntro() {
   document.body.classList.add('lv2-intro');
 }
 
-/** Starts the fly-through. `markers`: [{ pos, label, kind }] pinned on the
-    map shot; `onDone` runs once, when it ends or is skipped. */
-export function playIntro({ girlPos, girlFacing, portPos, playerPos, markers, onDone }) {
+/** Starts the fly-through. `onDone` runs once, when it ends or is skipped. */
+export function playIntro({ girlPos, girlFacing, portPos, playerPos, onDone }) {
   const playerPose = playerCameraPose(playerPos);
   const shots = buildShots({ girlPos, girlFacing, portPos, playerPose });
   // Opening frame: wide behind and above the player, looking at her
@@ -75,11 +72,11 @@ export function playIntro({ girlPos, girlFacing, portPos, playerPos, markers, on
   let t = 0;
   const keys = [];
   for (const s of shots) {
-    keys.push({ ...s, t0: t, t1: t + s.move, t2: t + s.move + s.hold, quat: poseQuat(s.pos, s.look, s.up) });
+    keys.push({ ...s, t0: t, t1: t + s.move, t2: t + s.move + s.hold, quat: poseQuat(s.pos, s.look) });
     t += s.move + s.hold;
   }
-  const el = buildOverlay(markers);
-  intro = { t: 0, keys, from: { pos: start.pos, quat: poseQuat(start.pos, start.look) }, el, markers, shown: -1, onDone };
+  const el = buildOverlay();
+  intro = { t: 0, keys, from: { pos: start.pos, quat: poseQuat(start.pos, start.look) }, el, shown: -1, onDone };
   camera.position.copy(start.pos);
   camera.quaternion.copy(intro.from.quat);
   const skip = (e) => {
@@ -110,8 +107,7 @@ export function updateIntro(dt) {
     intro.shown = showing;
     setCaption(intro.el, keys[showing]);
   }
-  placeMarkers(intro, keys[i].map && u > 0.85);
-  if (intro.t >= keys[keys.length - 1].t1 + 0.35) endIntro();
+  if (intro.t >= keys[keys.length - 1].t2) endIntro();
 }
 
 function endIntro() {
@@ -126,8 +122,8 @@ function endIntro() {
   if (done) done();
 }
 
-/* --- Overlay: letterbox, caption, skip hint, map markers -------------- */
-function buildOverlay(markers) {
+/* --- Overlay: letterbox, caption, skip hint --------------------------- */
+function buildOverlay() {
   if (!document.getElementById('lv2-intro-style')) {
     const style = document.createElement('style');
     style.id = 'lv2-intro-style';
@@ -145,13 +141,6 @@ function buildOverlay(markers) {
       #lv2-intro .caption.go h2{font-size:clamp(44px,8vw,84px);color:#ffd08a;}
       #lv2-intro .skip{position:absolute;right:16px;bottom:calc(9vh + 12px);font-size:12px;letter-spacing:.14em;
         text-transform:uppercase;color:rgba(255,255,255,.55);}
-      #lv2-intro .mark{position:absolute;transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center;
-        opacity:0;transition:opacity .25s;white-space:nowrap;}
-      #lv2-intro .mark.on{opacity:1;}
-      #lv2-intro .mark span{padding:3px 8px;border-radius:3px;background:rgba(10,10,10,.78);color:#fff;font-size:13px;
-        letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--c);}
-      #lv2-intro .mark i{width:2px;height:18px;background:var(--c);}
-      #lv2-intro .mark b{width:10px;height:10px;border-radius:50%;background:var(--c);box-shadow:0 0 10px var(--c);}
     `;
     document.head.appendChild(style);
   }
@@ -160,16 +149,8 @@ function buildOverlay(markers) {
   root.innerHTML = `<div class="bar top"></div><div class="bar bottom"></div>
     <div class="caption"><h2></h2><p></p></div>
     <div class="skip">Press any key to skip</div>`;
-  const marks = markers.map((m) => {
-    const d = document.createElement('div');
-    d.className = 'mark';
-    d.style.setProperty('--c', m.color);
-    d.innerHTML = `<span>${m.label}</span><i></i><b></b>`;
-    root.appendChild(d);
-    return d;
-  });
   document.body.appendChild(root);
-  return { root, caption: root.querySelector('.caption'), marks };
+  return { root, caption: root.querySelector('.caption') };
 }
 
 function setCaption(el, shot) {
@@ -180,16 +161,4 @@ function setCaption(el, shot) {
   c.querySelector('p').textContent = shot.sub || '';
   void c.offsetWidth; // restart the fade-in
   c.classList.add('on');
-}
-
-const _v = new THREE.Vector3();
-function placeMarkers({ el, markers }, on) {
-  markers.forEach((m, i) => {
-    const d = el.marks[i];
-    d.classList.toggle('on', on);
-    if (!on) return;
-    _v.copy(m.pos).project(camera);
-    d.style.left = `${(_v.x * 0.5 + 0.5) * 100}%`;
-    d.style.top = `${(-_v.y * 0.5 + 0.5) * 100}%`;
-  });
 }
