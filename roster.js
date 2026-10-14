@@ -19,11 +19,13 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 
 // showcase: the clip played when picked on the select screen (default 'dance').
+// armSpread: degrees to swing the upper arms out from the body in every
+//   clip — for bulky bodies whose arms otherwise sink into their chest.
 export const ROSTER = [
   { id: 'viper',    name: 'Viper',    role: 'Commando',       blurb: 'Jungle-born, never misses a flank.' },
-  { id: 'breacher', name: 'Breacher', role: 'SWAT Pointman',  blurb: 'First through every door.', showcase: 'shoot' },
+  { id: 'breacher', name: 'Breacher', role: 'SWAT Pointman',  blurb: 'First through every door.', showcase: 'shoot', armSpread: 10 },
   { id: 'cipher',   name: 'Cipher',   role: 'Netrunner',      blurb: 'Hacks the grid while it burns.' },
-  { id: 'ironhand', name: 'Ironhand', role: 'Veteran',        blurb: 'Lost an arm. Kept the grudge.', showcase: 'shoot' },
+  { id: 'ironhand', name: 'Ironhand', role: 'Veteran',        blurb: 'Lost an arm. Kept the grudge.', showcase: 'shoot', armSpread: 10 },
   { id: 'ember',    name: 'Ember',    role: 'Gunslinger',     blurb: 'Twin holsters, short fuse.' },
 ];
 export const DEFAULT_CHARACTER = 'viper';
@@ -58,6 +60,7 @@ export function loadGLB(path) {
 export async function instantiateCharacter(id) {
   const gltf = await loadGLB(characterFile(id));
   const root = skeletonClone(gltf.scene);
+  root.userData.armSpread = ROSTER.find((c) => c.id === id)?.armSpread || 0;
   root.traverse((o) => {
     if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; }
   });
@@ -137,6 +140,7 @@ export function fitClip(clip, animRoot, charRoot) {
   charRoot.traverse((o) => names.add(o.name));
   const fitted = clip.clone();
   fitted.tracks = fitted.tracks.filter((t) => names.has(t.name.slice(0, t.name.lastIndexOf('.'))));
+  spreadArms(fitted, charRoot);
   const hipsTrack = fitted.tracks.find((t) => t.name === `${HIPS}.position`);
   if (!hipsTrack) return fitted;
   const v = hipsTrack.values;
@@ -147,6 +151,43 @@ export function fitClip(clip, animRoot, charRoot) {
   const j = ['x', 'y', 'z'].indexOf(ax);
   for (let i = j; i < v.length; i += 3) v[i] += shift;
   return fitted;
+}
+
+// Swings each upper arm out from the body by the character's armSpread,
+// in its shoulder's space so "out" follows the torso as it bends. The
+// axis is the body's forward line through the shoulder at rest; its sign
+// is whichever way lifts the elbow, i.e. away from the ribs.
+function spreadArms(clip, charRoot) {
+  const deg = charRoot.userData.armSpread;
+  if (!deg) return;
+  const l = charRoot.getObjectByName('mixamorigLeftArm');
+  const r = charRoot.getObjectByName('mixamorigRightArm');
+  if (!l || !r) return;
+  charRoot.updateMatrixWorld(true);
+  const lp = l.getWorldPosition(new THREE.Vector3());
+  const lateral = r.getWorldPosition(new THREE.Vector3()).sub(lp);
+  const forward = new THREE.Vector3().crossVectors(lateral, new THREE.Vector3(0, 1, 0)).normalize();
+  for (const arm of [l, r]) {
+    const track = clip.tracks.find((t) => t.name === `${arm.name}.quaternion`);
+    const elbow = arm.children.find((o) => o.isBone);
+    if (!track || !elbow) continue;
+    const parentQ = arm.parent.getWorldQuaternion(new THREE.Quaternion());
+    const axis = forward.clone().applyQuaternion(parentQ.clone().invert());
+    // Try the swing on the rest pose: keep the sign that raises the elbow
+    const restQ = arm.quaternion.clone();
+    const y0 = elbow.getWorldPosition(new THREE.Vector3()).y;
+    arm.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, 0.1));
+    arm.updateMatrixWorld(true);
+    const sign = elbow.getWorldPosition(new THREE.Vector3()).y > y0 ? 1 : -1;
+    arm.quaternion.copy(restQ);
+    arm.updateMatrixWorld(true);
+    const swing = new THREE.Quaternion().setFromAxisAngle(axis, sign * THREE.MathUtils.degToRad(deg));
+    const q = new THREE.Quaternion();
+    const v = track.values;
+    for (let i = 0; i < v.length; i += 4) {
+      q.fromArray(v, i).premultiply(swing).toArray(v, i);
+    }
+  }
 }
 
 // All clips fitted to one character, keyed by clip name.

@@ -31,8 +31,19 @@ state.clearDay = true;
 // and the two blocks flanking the collapse zone (z -120 → -165) came down:
 // the east one over the zone's own rubble piles, the west one opposite —
 // see RUINED CITY in characters.js. Both spill onto the pavement only.
+// The west block ahead-left of the spawn (z ~12) came down too: it stood
+// between the start and the low sun. It keeps its rubble on its own lot
+// (the radar machine stands on the pavement in front of it) and has its
+// own seed so it doesn't reshuffle every later building's damage.
 state.ruinedCity = true;
 state.collapsedBlocks = [
   { side: 'east', z0: -140, z1: -152 },
   { side: 'west', z0: -136, z1: -148 },
+  { side: 'west', z0: 18, z1: 7, spill: false, seed: 0x5EED_5C1 },
 ];
+// The first burning roadside wreck (10 m ahead of the spawn) is a real
+// car model rather than boxes: up close the box car read as a black lump
+// in the sun. Streams in with the other deferred assets (lightBoot).
+// `strip`: node-name prefixes to drop — this export's 4 m ground card,
+// and its glass, which wouldn't survive the fire.
+state.burningCarModel = { url: 'assets/old_rusty_car_2.glb', length: 4.4, strip: ['Plane001', 'Object002'] };

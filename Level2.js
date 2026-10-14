@@ -17,13 +17,14 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { scene, camera, addStaticBox, pushKillFeed, dom, sfx, KILL_TARGET, STREET_HALF_W, addLight, sunlightOnly } from './Scene.js';
 import { state } from './state.js';
-import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis, spawnZombie, loadDeferredAssets } from './characters.js';
+import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis, playerBody, spawnZombie, loadDeferredAssets } from './characters.js';
 import { spawnCoin } from './PowerUps.js';
 import { createToxicMaterial } from './shaders.js';
 import { bootLevel, registerLevelTick, levelKeyHooks } from './Actions.js';
 import { VendingMachine, makeIcon } from './VendingMachine.js';
 import { finishRun } from './account.js';
-import { instantiateCharacter, loadGLB, fitClip } from './roster.js';
+import { instantiateCharacter, loadGLB, fitClip, clipsFor } from './roster.js';
+import { holdForIntro, playIntro, updateIntro } from './Level2Intro.js';
 import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
 import { buildStreetDressing } from './streetDressing.js';
 
@@ -66,6 +67,9 @@ export function startLevel(mode) {
   lv2HUD = buildLevel2HUD(sceneHandles.teleportPoint);
   // The chase itself: the girl NPC and her per-frame tick.
   spawnGirl();
+  // The fly-through briefing: gameplay holds from here until it ends
+  holdForIntro();
+  registerLevelTick(tickIntro);
   registerLevelTick(updateGirl);
   // Purchases: machine interaction tick + the E key.
   lv2Machines = [
@@ -391,7 +395,9 @@ function placeVendingMachine(x, z, ry, catalog, glow = RADAR_GLOW) {
     x, VendingMachine.HEIGHT / 2, z, ry
   );
   // Ground ring — the stand-here spot. Offset clears the (now bigger)
-  // cabinet's footprint while staying inside the 2.6 m buy range.
+  // cabinet's footprint while staying inside the 2.6 m buy range. Not by
+  // day: a glowing ring on a sunlit street reads as a lamp left on.
+  if (sunlightOnly()) return machine;
   const marker = new THREE.Mesh(new THREE.RingGeometry(1.3, 1.7, 36), createToxicMaterial(glow));
   marker.rotation.x = -Math.PI / 2;
   // Local +Z is the cabinet front — drop the marker in front of it.
@@ -655,14 +661,8 @@ const GIRL_RUN_GLB = 'assets/Injured Run.glb';
 const GIRL_SPEED = 3.7;          // = player walk speed — the locked design
 const GIRL_TARGET_HEIGHT = 1.65;
 const GIRL_RIG_YAW_OFFSET = 0;   // flip to Math.PI if she runs backwards
-// Sight radius: within it she GLOWS pink (emissive pulse + her glint
-// light turns pink) so she reads instantly as THE target against the
-// dark, dull-green zombies; beyond it she's the subtle teal runner.
-// Deliberately the same 25 m that fires the "Girl spotted" beat — one
-// number, one meaning: in sight. Pink reuses the adrenaline beacon's
-// hot pink so the level keeps a single pink in its palette.
+// Within this range of the player the "Girl spotted" beat fires
 const GIRL_SIGHT_RANGE = 25;
-const GIRL_SIGHT_GLOW = 0xff4fd8;
 
 // Her route: 10 m head start at spawn (z +20, directly in front of the
 // player start at (1.5, z 30) — dead-center in view when the loading
@@ -700,10 +700,10 @@ let girlSpotted = false;
 let girlAnnounced = false; // "head start" beat — fired on the first live frame
 
 function spawnGirl() {
-  Promise.all([instantiateCharacter(GIRL_CHARACTER), loadGLB(GIRL_RUN_GLB)]).then(([obj, run]) => {
-    const girlMats = [];
+  Promise.all([instantiateCharacter(GIRL_CHARACTER), loadGLB(GIRL_RUN_GLB)]).then(async ([obj, run]) => {
     const mixer = new THREE.AnimationMixer(obj);
-    if (run.animations.length) mixer.clipAction(fitClip(run.animations[0], run.scene, obj)).play();
+    const runAction = run.animations.length ? mixer.clipAction(fitClip(run.animations[0], run.scene, obj)) : null;
+    if (runAction) runAction.play();
     // Ground-snap + scale to target height — the loadDecorCar pattern.
     // A fresh clone has never had its world matrices computed; measuring
     // before this reads the Armature's cm->m 0.01 scale as identity.
@@ -714,30 +714,23 @@ function spawnGirl() {
     const box2 = new THREE.Box3().setFromObject(obj);
     const center = new THREE.Vector3(); box2.getCenter(center);
     obj.position.set(-center.x, -box2.min.y, -center.z);
-    // Distinct cool tint + raised emissive: readable through night fog
-    // without glowing like a beacon. The emissive is masked by her own
-    // texture, so the in-sight pink glow tints her rather than flooding
-    // her into a flat silhouette.
-    obj.traverse((o) => {
-      if (!o.isMesh) return;
-      o.material = o.material.clone();
-      o.material.color.multiply(new THREE.Color(0.75, 1.15, 1.05));
-      o.material.emissive = new THREE.Color(0x1f5a4d);
-      o.material.emissiveMap = o.material.map;
-      girlMats.push(o.material);
-    });
+    // No tint, glow or light of her own: lit like everything else, she
+    // has to be spotted, not followed (the radar machine sells tracking).
+    // Own material copies so the lose cinematic can fade her alone.
+    obj.traverse((o) => { if (o.isMesh) o.material = o.material.clone(); });
     const group = new THREE.Group();
     group.add(obj);
-    // A glint light travelling with her — teal while out of sight, hot
-    // pink within the 25 m sight radius (updateGirlSightGlow owns the
-    // swap, so it also washes the ground under her when she's seen).
-    const glint = new THREE.PointLight(TEAL_LIGHT, 1.4, 7, 2);
-    glint.position.set(0, 1.3, 0);
-    addLight(group, glint);
     const wp = GIRL_WAYPOINTS[0];
     group.position.set(wp.x, wp.y, wp.z);
+    // Facing her route from the start, so the intro's close-up sees her face
+    const next = GIRL_WAYPOINTS[1];
+    group.rotation.y = Math.atan2(next.x - wp.x, next.z - wp.z) + GIRL_RIG_YAW_OFFSET;
     scene.add(group);
-    girl = { group, mixer, wpIndex: 1, mats: girlMats, glint };
+    // Standing idle through the intro; updateGirl crossfades to the run
+    const idleClip = (await clipsFor(obj)).idle;
+    const idle = idleClip ? mixer.clipAction(idleClip) : null;
+    if (idle) { idle.play(); runAction.stop(); }
+    girl = { group, mixer, wpIndex: 1, idle, run: runAction };
     state.girlPos = group.position; // live reference — see section header
     // "Head start" announcement moved to updateGirl's first LIVE frame —
     // pushed here it would fire behind the loading overlay and fade
@@ -751,52 +744,47 @@ function spawnGirl() {
     const group = new THREE.Group();
     const wp = GIRL_WAYPOINTS[0];
     group.position.set(wp.x, wp.y, wp.z);
-    // Same travelling glint as the visible girl — with the model failed,
-    // the pink in-sight glow below still marks her position, so even the
-    // fallback chase stays readable.
-    const glint = new THREE.PointLight(TEAL_LIGHT, 1.4, 7, 2);
-    glint.position.set(0, 1.3, 0);
-    addLight(group, glint);
     scene.add(group);
-    girl = { group, mixer: null, wpIndex: 1, mats: [], glint };
+    girl = { group, mixer: null, wpIndex: 1 };
     state.girlPos = group.position;
   });
 }
 
-/* SIGHT GLOW — the girl is the level's target, so within GIRL_SIGHT_RANGE
-   she must be unmissable: her materials' emissive pulses hot pink and the
-   glint light travelling with her turns pink, washing her and the ground
-   under her in it — zero confusion with the dull green-gray zombies even
-   in night fog, from any chase angle. Beyond the radius both revert to
-   the subtle teal runner: sight is limited, which is the mechanic (the
-   radar machine sells tracking beyond it). The invisible fallback girl
-   (model failed to load) keeps the glint, so she still glows pink in
-   range — the chase stays readable no matter what. */
-let girlGlowPhase = 0;
-function updateGirlSightGlow(dist, dt) {
-  if (!girl || !girl.glint) return;
-  girlGlowPhase += dt;
-  if (dist < GIRL_SIGHT_RANGE) {
-    // Gentle pulse (~0.9 Hz) between 0.75 and 1.3 — alive, not strobing.
-    const pulse = 0.75 + 0.55 * (0.5 + 0.5 * Math.sin(girlGlowPhase * 5.5));
-    for (const m of girl.mats) {
-      if (!m.emissive) continue; // MeshBasicMaterial has no emissive
-      m.emissive.setHex(GIRL_SIGHT_GLOW);
-      m.emissiveIntensity = pulse;
-    }
-    girl.glint.color.setHex(GIRL_SIGHT_GLOW);
-    girl.glint.intensity = 3.4;
-    girl.glint.distance = 10;
-  } else {
-    for (const m of girl.mats) {
-      if (!m.emissive) continue;
-      m.emissive.setHex(0x1f5a4d);
-      m.emissiveIntensity = 1;
-    }
-    girl.glint.color.setHex(TEAL_LIGHT);
-    girl.glint.intensity = 1.4;
-    girl.glint.distance = 7;
+/* INTRO — once the loading screen clears, the Level2Intro fly-through
+   briefs the player (girl, port, machines) before the chase starts. It
+   waits up to INTRO_GIRL_WAIT s for her model, so the close-up isn't of
+   an empty street. */
+const INTRO_GIRL_WAIT = 4;
+let introWait = 0;
+let introStarted = false;
+function tickIntro(dt) {
+  if (!state.readyShown || !state.cinematic) return;
+  // Gameplay (which syncs the player model to its body) is frozen: stand
+  // the model on its spawn and keep its idle breathing meanwhile
+  playerVis.group.position.set(playerBody.position.x, 0, playerBody.position.z);
+  if (playerVis.mixer) playerVis.mixer.update(dt);
+  if (!introStarted) {
+    introWait += dt;
+    if (!girl && introWait < INTRO_GIRL_WAIT) return;
+    introStarted = true;
+    const wp = GIRL_WAYPOINTS[0], next = GIRL_WAYPOINTS[1];
+    const radar = lv2Scene.machines.radar.root.position, adrenaline = lv2Scene.machines.adrenaline.root.position;
+    playIntro({
+      girlPos: new THREE.Vector3(wp.x, wp.y, wp.z),
+      girlFacing: new THREE.Vector3(next.x - wp.x, 0, next.z - wp.z).normalize(),
+      portPos: lv2TeleportPoint,
+      playerPos: playerVis.group.position.clone(),
+      markers: [
+        { pos: playerVis.group.position.clone(), label: 'You', color: '#f4ece0' },
+        { pos: new THREE.Vector3(wp.x, 0, wp.z), label: 'Girl', color: '#ff9a3c' },
+        { pos: radar.clone(), label: `Radar · $${RADAR_PRICE}`, color: '#7cff3a' },
+        { pos: adrenaline.clone(), label: `Adrenaline · $${ADRENALINE_PRICE}`, color: '#ff4fd8' },
+        { pos: lv2TeleportPoint.clone(), label: 'Port', color: '#17d5b0' },
+      ],
+    });
+    return;
   }
+  updateIntro(dt);
 }
 
 function updateGirl(dt) {
@@ -806,8 +794,11 @@ function updateGirl(dt) {
   // Without this she burns her head start while the progress bar is up.
   if (!state.readyShown) return;
   if (!girl || state.paused || state.girlCaught) return;
+  if (state.cinematic) { if (girl.mixer) girl.mixer.update(dt); return; } // idling through the intro
   if (!girlAnnounced) {
     girlAnnounced = true;
+    // Off the intro's idle and away
+    if (girl.idle && girl.run) { girl.run.reset().play(); girl.idle.crossFadeTo(girl.run, 0.3, false); }
     pushKillFeed('She has a head start — move!');
   }
   // After the lose trigger the cinematic (mission phase) owns her; while
@@ -832,15 +823,10 @@ function updateGirl(dt) {
     }
   }
   if (girl.mixer) girl.mixer.update(dt);
-  // First-sight killfeed + the sight glow — the one-shot atmosphere beat
-  // and the always-on visibility mechanic share the 25 m sight radius.
-  if (playerVis) {
-    const distToPlayer = playerVis.group.position.distanceTo(g.position);
-    if (!girlSpotted && distToPlayer < GIRL_SIGHT_RANGE) {
-      girlSpotted = true;
-      pushKillFeed('Girl spotted — heading for the port!');
-    }
-    updateGirlSightGlow(distToPlayer, dt);
+  // First-sight killfeed beat
+  if (playerVis && !girlSpotted && playerVis.group.position.distanceTo(g.position) < GIRL_SIGHT_RANGE) {
+    girlSpotted = true;
+    pushKillFeed('Girl spotted — heading for the port!');
   }
 }
 
@@ -941,7 +927,7 @@ function handleKeyE() {
     girl once the radar is bought — the locked design) and the live
     girl-distance row fed through lv2HUD.setGirlDistance. */
 function updateVendingInteraction() {
-  if (!lv2Machines || state.isDead || state.paused || state.girlCaught) return;
+  if (!lv2Machines || state.isDead || state.paused || state.girlCaught || state.cinematic) return;
   // Compass retarget: PORT is the visible goal from the start; GIRL only
   // after the radar purchase. girlPos is a live Vector3 reference, so the
   // override stays current as she moves without resetting it per frame.
@@ -1177,7 +1163,7 @@ function updateMission(dt) {
   // Same loading gate as updateGirl — and the chase clock arms HERE,
   // on the first live frame, so loading-screen seconds never count
   // toward the win-screen time stat.
-  if (!state.readyShown) return;
+  if (!state.readyShown || state.cinematic) return;
   if (!missionStartTime) missionStartTime = performance.now();
   if (state.paused) return;
   if (loseCinematic) { updateLoseCinematic(dt); return; }

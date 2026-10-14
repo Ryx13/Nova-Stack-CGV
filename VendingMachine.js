@@ -12,7 +12,7 @@
        rotationY: -Math.PI / 2,                   // cabinet front faces local +Z
        catalog: saferoomSupplyCatalog,             // omit for a blank machine, no stock
        glowColor: 0x33ff55,                       // optional: colour of the light it throws
-       frontLight: true,                          // optional: false = no real light (sunlit scenes)
+       frontLight: true,                          // optional: false = no light or floor glow (sunlit scenes)
      });
 
      vending.update(dt);   // once per frame from the host's own loop
@@ -740,15 +740,16 @@ export class VendingMachine {
   // sides and back are never lit. No shadows — a shadow map per machine
   // is the expensive part of a spotlight.
   _buildFrontLight(color, withLight) {
-    if (withLight) {
-      const spot = new THREE.SpotLight(color, 9, 8, 0.85, 0.75, 2);
-      spot.position.set(-0.05, 1.9, 0.42);
-      const target = new THREE.Object3D();
-      target.position.set(-0.05, 0, 1.6);
-      this.root.add(spot, target);
-      spot.target = target;
-      this._frontLight = spot;
-    }
+    // Sunlit scenes get neither the light nor its floor pool: in daylight
+    // the cabinet's own screen glow is all that shows
+    if (!withLight) return;
+    const spot = new THREE.SpotLight(color, 9, 8, 0.85, 0.75, 2);
+    spot.position.set(-0.05, 1.9, 0.42);
+    const target = new THREE.Object3D();
+    target.position.set(-0.05, 0, 1.6);
+    this.root.add(spot, target);
+    spot.target = target;
+    this._frontLight = spot;
 
     // Floor pool: a painted radial glow, so the ground in front reads as
     // lit at any distance for the cost of one transparent quad

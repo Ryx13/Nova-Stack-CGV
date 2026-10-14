@@ -913,7 +913,8 @@ function startAnimationLoop() {
     state.hurtGrace = Math.max(0, state.hurtGrace - dt);
     sky.position.copy(camera.position);
     updateWeatherFX(dt);
-    if (!state.isDead && !state.paused && dom.hud && !dom.hud.classList.contains('hidden')) {
+    // state.cinematic: a level's intro owns the camera (Level2Intro.js)
+    if (!state.isDead && !state.paused && !state.cinematic && dom.hud && !dom.hud.classList.contains('hidden')) {
       state.runTime += dt;
       stepAccumulator += dt;
       while (stepAccumulator >= FIXED_STEP) {

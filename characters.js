@@ -730,7 +730,7 @@ export function loadStreetSurface() {
    their own seeded RNG so the shared world rnd() sequence — wreck and
    prop placement — is exactly what it was before.
 --------------------------------------------------------------------- */
-const ruinRnd = mulberry32(0x5EED_2B1);
+let ruinRnd = mulberry32(0x5EED_2B1);
 const STOREY = 3.2;
 const NIGHT_TILE = 4;           // the night window texture's old 4 m repeat
 let storefrontTex = null;
@@ -1145,11 +1145,20 @@ export function makeBuilding(x, z, w, h, d, opts = {}) {
   return g;
 }
 
-// state.collapsedBlocks (set by a level's config): [{ side, z0, z1 }] —
-// the street-row building whose centre falls in a range is a collapsed
-// ruin instead of a standing block
+// state.collapsedBlocks (set by a level's config): [{ side, z0, z1,
+// spill?, seed? }] — the street-row building whose centre falls in a
+// range is a collapsed ruin instead of a standing block. spill: false
+// keeps its rubble off the pavement; seed builds it from its own RNG
+// instead of ruinRnd, so adding it leaves every later ruin unchanged.
 function collapsesAt(side, z) {
-  return (state.collapsedBlocks || []).some((c) => c.side === side && z <= c.z0 && z >= c.z1);
+  return (state.collapsedBlocks || []).find((c) => c.side === side && z <= c.z0 && z >= c.z1);
+}
+function buildRuin(c, x, z, w, d, h, sx) {
+  const spillTo = c.spill === false ? -sx * rowX : -sx * (STREET_HALF_W + 0.6);
+  if (c.seed === undefined) return makeCollapsedBuilding(x, z, w, d, h, sx, spillTo);
+  const shared = ruinRnd;
+  ruinRnd = mulberry32(c.seed);
+  try { return makeCollapsedBuilding(x, z, w, d, h, sx, spillTo); } finally { ruinRnd = shared; }
 }
 
 export function loadBuildings() {
@@ -1159,14 +1168,14 @@ export function loadBuildings() {
     const d = 11 + rnd() * 7;
     if (Math.abs(z - DEPOT_POS.z) > 16) {
       const ruin = collapsesAt('east', z);
-      makeBuilding(rowX + w / 2, z, w, h, d, { consumeOnly: ruin });
-      if (ruin) makeCollapsedBuilding(rowX + w / 2, z, w, d, h * 0.6, -1, STREET_HALF_W + 0.6);
+      makeBuilding(rowX + w / 2, z, w, h, d, { consumeOnly: !!ruin });
+      if (ruin) buildRuin(ruin, rowX + w / 2, z, w, d, h * 0.6, -1);
     }
     if (Math.abs((z + 5) - WEST_POCKET_Z) > 14) {
       const ww = w * (0.85 + rnd() * 0.3), hh = h * (0.7 + rnd() * 0.4);
       const ruin = collapsesAt('west', z + 5);
-      makeBuilding(-rowX - w / 2, z + 5, ww, hh, d, { consumeOnly: ruin });
-      if (ruin) makeCollapsedBuilding(-rowX - w / 2, z + 5, ww, d, hh * 0.6, 1, -STREET_HALF_W - 0.6);
+      makeBuilding(-rowX - w / 2, z + 5, ww, hh, d, { consumeOnly: !!ruin });
+      if (ruin) buildRuin(ruin, -rowX - w / 2, z + 5, ww, d, hh * 0.6, 1);
     }
   }
   buildWestPocket();
@@ -1201,7 +1210,11 @@ export function loadBuildings() {
 /* ---------------------------------------------------------------------
    WRECKED CARS, DECOR CARS, BARRIERS, STREETLIGHTS
 --------------------------------------------------------------------- */
-export function makeWreck(x, z, ry, burning) {
+// opts.model: { url, length, strip } — draw this wreck with a GLB instead.
+// The box car is still built (same rnd() draws, so everything after it
+// lands where it did) and stays as the camera's occluder, but is never
+// shown; the model takes its place once loaded (see showWreckModel).
+export function makeWreck(x, z, ry, burning, opts = {}) {
   const g = new THREE.Group();
   const col = burning ? 0x2a2320 : [0x4a3a32, 0x3d4550, 0x5c4030, 0x2f3340, 0x8a1f1f, 0x1f3a52][Math.floor(rnd() * 6)];
   const bodyMat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.75, metalness: 0.35 });
@@ -1252,7 +1265,11 @@ export function makeWreck(x, z, ry, burning) {
   g.position.set(x, 0, z);
   g.rotation.y = ry;
   if (crushed || rnd() > 0.6) g.rotation.z = (rnd() - 0.5) * (crushed ? 0.35 : 0.18);
-  scene.add(g);
+  if (opts.model) {
+    g.updateMatrixWorld(true); // never added, so its occluders need a world matrix now
+    const spot = { ...opts.model, x, z, rotation: g.rotation.clone() };
+    if (state.lightBoot) pendingWreckModels.push(spot); else showWreckModel(spot);
+  } else scene.add(g);
   g.traverse((o) => { if (o.isMesh) state.occluders.push(o); });
   addStaticBox(1.05, 0.7, 2.15, x, 0.7, z, ry);
   if (burning) {
@@ -1263,6 +1280,31 @@ export function makeWreck(x, z, ry, burning) {
     spawnFlameBillboards(new THREE.Vector3(x, 0.45, z), 1.3);
   }
   return g;
+}
+
+const pendingWreckModels = [];
+function showWreckModel({ url, length, strip = [], x, z, rotation }) {
+  new GLTFLoader().load(url, (gltf) => {
+    const obj = gltf.scene;
+    const drop = [];
+    obj.traverse((o) => { if (strip.some((n) => o.name.startsWith(n))) drop.push(o); });
+    drop.forEach((o) => o.parent?.remove(o));
+    obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    // Long axis along local z like the box car's, sized to its length,
+    // centred on the spot and sat on the ground
+    let box = new THREE.Box3().setFromObject(obj);
+    let size = box.getSize(new THREE.Vector3());
+    if (size.x > size.z) { obj.rotation.y = Math.PI / 2; box = new THREE.Box3().setFromObject(obj); size = box.getSize(new THREE.Vector3()); }
+    obj.scale.setScalar(length / size.z);
+    box = new THREE.Box3().setFromObject(obj);
+    const c = box.getCenter(new THREE.Vector3());
+    obj.position.set(-c.x, -box.min.y, -c.z);
+    const wrap = new THREE.Group();
+    wrap.add(obj);
+    wrap.position.set(x, 0, z);
+    wrap.rotation.copy(rotation);
+    scene.add(wrap);
+  }, undefined, (err) => console.error(`Wreck model ${url} failed to load:`, err));
 }
 
 export function loadDecorCar(url, x, z, ry, targetLength) {
@@ -1388,10 +1430,17 @@ export function makeStreetlight(x, z) {
 }
 
 export function loadObstacles() {
+  let modelUsed = false;
   for (let z = 20; z > -STREET_LENGTH + 20; z -= (18 + rnd() * 16)) {
     const side = rnd() < 0.5 ? -1 : 1;
     const x = side * (STREET_HALF_W - 1.7 - rnd() * 2);
-    makeWreck(x, z, (rnd() - 0.5) * 1.1 + (side < 0 ? Math.PI / 2 : -Math.PI / 2), rnd() < 0.32);
+    const ry = (rnd() - 0.5) * 1.1 + (side < 0 ? Math.PI / 2 : -Math.PI / 2);
+    const burning = rnd() < 0.32;
+    // The level's burning-car model goes to the first burning wreck: the
+    // one nearest the spawn
+    const model = burning && !modelUsed ? state.burningCarModel : null;
+    if (model) modelUsed = true;
+    makeWreck(x, z, ry, burning, { model });
   }
   if (state.lightBoot) {
     // Light boot (Level 2): the two rusty-car decor GLB fetches (7.7 MB)
@@ -2499,6 +2548,7 @@ export function loadDeferredAssets() {
   loadZombieTemplate('assets/model-rigged.glb', { runs: true });
   loadPistolModel();
   loadCorpses();
+  pendingWreckModels.splice(0).forEach(showWreckModel);
 }
 
 export class Zombie {
