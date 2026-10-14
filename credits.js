@@ -212,6 +212,7 @@ export const TEAM_MADE = [
   'Every sound effect — synthesised live with the Web Audio API, no audio files',
   'Procedural city: buildings, road and sidewalk canvas textures, street props',
   'Procedural dead-city daylight: painted smoky sky, weathered daylight facades, smoke columns',
+  'Procedural ruins: battle-damaged rooflines, blown-out corners with exposed floors, collapsed blocks, rubble mounds, shopfront ground floors',
   'Vending machine and supply catalogue system, procedural item icons',
 ];
 

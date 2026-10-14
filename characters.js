@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as CANNON from 'cannon-es';
 import { state } from './state.js';
 import {
@@ -716,9 +717,309 @@ export function loadStreetSurface() {
 }
 
 /* ---------------------------------------------------------------------
+   RUINED CITY (state.ruinedCity — Level 2) — the street after the
+   outbreak: shopfront ground floors with shutters and smashed glass,
+   stepped broken rooflines where whole storeys came down, blown-out
+   street corners exposing floor slabs and rebar, and fully collapsed
+   blocks slumped into rubble mounds (makeCollapsedBuilding).
+
+   Facade UVs are planar in building-local metres (one texture tile =
+   FACADE tile size), so windows stay aligned across every piece of a
+   ruin and textures never stretch with a building's size — which also
+   lets every building share the same few textures. Ruin decisions use
+   their own seeded RNG so the shared world rnd() sequence — wreck and
+   prop placement — is exactly what it was before.
+--------------------------------------------------------------------- */
+const ruinRnd = mulberry32(0x5EED_2B1);
+const STOREY = 3.2;
+const NIGHT_TILE = 4;           // the night window texture's old 4 m repeat
+let storefrontTex = null;
+let concreteRuinMat = null;
+let interiorMat = null;
+let rebarMat = null;
+
+function ruinMaterials() {
+  if (!concreteRuinMat) {
+    concreteRuinMat = new THREE.MeshStandardMaterial({ map: concreteTex, color: 0x9a948c, roughness: 0.96 });
+    interiorMat = new THREE.MeshStandardMaterial({ color: 0x1c1915, roughness: 1 });
+    rebarMat = new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.7, metalness: 0.4 });
+  }
+  return { concrete: concreteRuinMat, interior: interiorMat, rebar: rebarMat };
+}
+
+// World-scale planar UVs: side faces map (along-face, height) / tile,
+// tops map (x, z). Works on any box — cut, jagged or translated.
+function planarFacadeUVs(geo, tileW, tileH) {
+  const pos = geo.attributes.position, nrm = geo.attributes.normal, uv = geo.attributes.uv;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const nx = nrm.getX(i), ny = nrm.getY(i), nz = nrm.getZ(i);
+    if (Math.abs(ny) > 0.5) uv.setXY(i, x / tileW, z / tileW);
+    else if (Math.abs(nx) > Math.abs(nz)) uv.setXY(i, (nx > 0 ? -z : z) / tileW, y / tileH);
+    else uv.setXY(i, (nz > 0 ? x : -x) / tileW, y / tileH);
+  }
+  uv.needsUpdate = true;
+}
+
+// A box standing on y = y0 whose top is broken: the top grid drops by
+// whole storeys (plus a ragged fraction) column by column. `dropAt`
+// maps a top vertex (x, z) to how much it loses; keyed by position so
+// faces sharing an edge agree and the shell stays closed.
+function brokenBox(w, h, d, y0, dropAt) {
+  const geo = new THREE.BoxGeometry(w, h, d, Math.max(2, Math.round(w / 2.4)), 1, Math.max(2, Math.round(d / 2.4)));
+  geo.translate(0, y0 + h / 2, 0);
+  const pos = geo.attributes.position;
+  const drops = new Map();
+  const top = y0 + h - 0.001;
+  for (let i = 0; i < pos.count; i++) {
+    if (pos.getY(i) < top) continue;
+    const k = `${pos.getX(i).toFixed(2)},${pos.getZ(i).toFixed(2)}`;
+    if (!drops.has(k)) drops.set(k, Math.min(h - 0.5, dropAt(pos.getX(i), pos.getZ(i))));
+    pos.setY(i, y0 + h - drops.get(k));
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+// Damage comes off in sections, not per vertex: the top is cut into 4-8 m
+// cells that each lose 0..maxStoreys whole storeys, so it reads as broken
+// plateaus stepping down (one 2.4 m slope between cells) rather than spikes
+const raggedStoreys = (maxStoreys) => {
+  const seg = 4 + ruinRnd() * 4;
+  const cells = new Map();
+  return (x, z) => {
+    const k = `${Math.floor(x / seg)},${Math.floor(z / seg)}`;
+    if (!cells.has(k)) cells.set(k, ruinRnd() < 0.35 ? 0 : (1 + Math.floor(ruinRnd() * maxStoreys)) * STOREY);
+    return cells.get(k) + ruinRnd() * 0.5;
+  };
+};
+
+// Rolled-down shutters, smashed shop windows, boarded bays and graffiti —
+// one 10 m x 3.2 m tile wrapping every building's ground floor
+function storefrontTexture() {
+  if (storefrontTex) return storefrontTex;
+  storefrontTex = new THREE.CanvasTexture(makeCanvas(512, 160, (ctx, w, h) => {
+    ctx.fillStyle = '#4a4540'; ctx.fillRect(0, 0, w, h);
+    const bays = 3, bw = w / bays;
+    for (let b = 0; b < bays; b++) {
+      const x = b * bw + 10, y = 26, ww = bw - 20, hh = h - 30;
+      const kind = Math.random();
+      if (kind < 0.45) {
+        // corrugated roller shutter, rust and dents
+        ctx.fillStyle = '#6d6862'; ctx.fillRect(x, y, ww, hh);
+        for (let s = y; s < y + hh; s += 5) { ctx.fillStyle = 'rgba(20,18,16,0.35)'; ctx.fillRect(x, s, ww, 1.5); }
+        for (let r = 0; r < 18; r++) { ctx.fillStyle = `rgba(120,62,28,${(Math.random() * 0.35).toFixed(2)})`; ctx.fillRect(x + Math.random() * ww, y + Math.random() * hh, 4 + Math.random() * 14, 2 + Math.random() * 20); }
+        if (Math.random() < 0.5) { ctx.fillStyle = '#0c0b0a'; ctx.fillRect(x, y + hh * 0.75, ww * (0.3 + Math.random() * 0.5), hh * 0.25); } // pried up
+      } else if (kind < 0.8) {
+        // smashed shop window: dark interior, shards in the frame
+        ctx.fillStyle = '#121110'; ctx.fillRect(x, y, ww, hh);
+        ctx.fillStyle = 'rgba(160,170,175,0.35)';
+        for (let s = 0; s < 6; s++) {
+          ctx.beginPath(); const sx = x + Math.random() * ww; ctx.moveTo(sx, y); ctx.lineTo(sx + 10 + Math.random() * 30, y); ctx.lineTo(sx + Math.random() * 20, y + 10 + Math.random() * 40); ctx.fill();
+        }
+        ctx.strokeStyle = '#2a2622'; ctx.lineWidth = 4; ctx.strokeRect(x, y, ww, hh);
+      } else {
+        // boarded
+        ctx.fillStyle = '#5b4732'; ctx.fillRect(x, y, ww, hh);
+        for (let p = 0; p < 7; p++) { ctx.fillStyle = `rgba(${p % 2 ? '35,26,16' : '110,86,58'},0.4)`; ctx.fillRect(x + (ww * p) / 7, y, 2, hh); }
+      }
+      // sign fascia above each bay, faded
+      ctx.fillStyle = `hsl(${(Math.random() * 360) | 0},18%,${22 + Math.random() * 12}%)`; ctx.fillRect(x - 4, 4, ww + 8, 18);
+    }
+    // graffiti scrawls
+    for (let gI = 0; gI < 5; gI++) {
+      ctx.strokeStyle = ['#b33a2e', '#2e6fb3', '#d8d0c0', '#1d1d1d', '#3f9a4a'][gI % 5]; ctx.lineWidth = 3 + Math.random() * 3; ctx.globalAlpha = 0.6;
+      ctx.beginPath(); let gx = Math.random() * w, gy = 60 + Math.random() * 80; ctx.moveTo(gx, gy);
+      for (let k = 0; k < 8; k++) { gx += 8 + Math.random() * 14; gy += (Math.random() - 0.5) * 30; ctx.lineTo(gx, gy); }
+      ctx.stroke(); ctx.globalAlpha = 1;
+    }
+    // grime rising from the pavement
+    const g = ctx.createLinearGradient(0, h, 0, h * 0.4);
+    g.addColorStop(0, 'rgba(30,25,20,0.55)'); g.addColorStop(1, 'rgba(30,25,20,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  }));
+  storefrontTex.wrapS = storefrontTex.wrapT = THREE.RepeatWrapping;
+  storefrontTex.colorSpace = THREE.SRGBColorSpace;
+  return storefrontTex;
+}
+
+// Body of a ruined building into group g. Returns 'intact' | 'broken' |
+// 'corner' so the caller knows whether a roof slab / rooftop kit fits.
+function addRuinedBody(g, w, h, d, mats, tileW, tileH, streetSide) {
+  const roll = ruinRnd();
+  const add = (geo, mat, shadow = true) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = shadow; m.receiveShadow = true;
+    g.add(m);
+    return m;
+  };
+  if (roll < 0.25 && h > 12) {
+    // Blown-out upper corner on the street face, at one end of the block
+    const { concrete, interior, rebar } = ruinMaterials();
+    const cutH = Math.max(2, Math.floor(h * (0.3 + ruinRnd() * 0.25) / STOREY)) * STOREY;
+    const nw = w * (0.38 + ruinRnd() * 0.15), nd = d * (0.35 + ruinRnd() * 0.15);
+    const end = ruinRnd() < 0.5 ? -1 : 1;              // which z end loses its corner
+    const sx = streetSide;                              // street face is at x = sx * w / 2
+    const upH = h - cutH;
+    const lower = new THREE.BoxGeometry(w, cutH, d); lower.translate(0, cutH / 2, 0);
+    // A: the far (non-street) slice, full depth; B: the street slice, minus the notch
+    const aW = w - nw, bD = d - nd;
+    const geoA = brokenBox(aW, upH, d, cutH, raggedStoreys(1));
+    geoA.translate(-sx * nw / 2, 0, 0);
+    const geoB = brokenBox(nw, upH, bD, cutH, raggedStoreys(2));
+    geoB.translate(sx * (w - nw) / 2, 0, -end * nd / 2);
+    for (const geo of [lower, geoA, geoB]) { planarFacadeUVs(geo, tileW, tileH); add(geo, mats); }
+    // Exposed floors in the notch: slabs at every storey, some snapped
+    // short and sagging, rebar poking out of the broken edges
+    const nx = sx * (w / 2 - nw / 2), nz = end * (d / 2 - nd / 2);
+    for (let y = cutH; y < h - 1; y += STOREY) {
+      const frac = ruinRnd() < 0.35 ? 0.35 + ruinRnd() * 0.4 : 1;
+      const slab = new THREE.BoxGeometry(nw * frac, 0.28, nd * (frac < 1 ? 1 : 0.98));
+      const m = add(slab, concrete);
+      m.position.set(nx - sx * nw * (1 - frac) / 2, y, nz);
+      if (frac < 1) m.rotation.z = sx * (0.06 + ruinRnd() * 0.1);
+      for (let r = 0; r < 3; r++) {
+        const bar = add(new THREE.BoxGeometry(0.05, 0.05, 0.6 + ruinRnd() * 0.8), rebar, false);
+        bar.position.set(nx + sx * (nw * frac - nw / 2), y + 0.05, nz + (ruinRnd() - 0.5) * nd * 0.8);
+        bar.rotation.set(ruinRnd() * 0.6 - 0.3, Math.PI / 2, ruinRnd() * 0.5 - 0.25);
+      }
+    }
+    // Dark interior walls behind the notch (instead of facade windows facing inward)
+    const back = add(new THREE.PlaneGeometry(nd, upH), interior, false);
+    back.position.set(nx - sx * nw / 2 + sx * 0.02, cutH + upH / 2, nz);
+    back.rotation.y = sx > 0 ? Math.PI / 2 : -Math.PI / 2;
+    const side = add(new THREE.PlaneGeometry(nw, upH), interior, false);
+    side.position.set(nx, cutH + upH / 2, nz - end * nd / 2 + end * 0.02);
+    side.rotation.y = end > 0 ? 0 : Math.PI;
+    return 'corner';
+  }
+  if (roll < 0.7) {
+    const geo = brokenBox(w, h, d, 0, raggedStoreys(h > 20 ? 3 : 2));
+    planarFacadeUVs(geo, tileW, tileH);
+    add(geo, mats);
+    return 'broken';
+  }
+  const geo = new THREE.BoxGeometry(w, h, d);
+  geo.translate(0, h / 2, 0);
+  planarFacadeUVs(geo, tileW, tileH);
+  add(geo, mats);
+  return 'intact';
+}
+
+/* Rubble mound — a lumpy dome of broken concrete with chunks and slabs
+   bedded in it, all merged into one mesh per material. `w` x `d`
+   footprint, `peak` metres high. Visual only — callers add colliders. */
+export function makeRubbleMound(w, d, peak) {
+  const { concrete, rebar } = ruinMaterials();
+  const g = new THREE.Group();
+  const mound = new THREE.PlaneGeometry(w, d, 14, 14);
+  mound.rotateX(-Math.PI / 2);
+  const pos = mound.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i) / (w / 2), z = pos.getZ(i) / (d / 2);
+    const r = Math.min(1, Math.sqrt(x * x + z * z));
+    const dome = Math.cos(r * Math.PI / 2);
+    pos.setY(i, Math.max(0, peak * dome * dome * (0.75 + ruinRnd() * 0.5)));
+  }
+  mound.computeVertexNormals();
+  const chunks = [];
+  const n = Math.round((w * d) / 6);
+  for (let i = 0; i < n; i++) {
+    const s = 0.3 + ruinRnd() * 1.1;
+    const c = new THREE.BoxGeometry(s, s * (0.3 + ruinRnd() * 0.5), s * (0.6 + ruinRnd() * 0.8));
+    const px = (ruinRnd() - 0.5) * w * 0.9, pz = (ruinRnd() - 0.5) * d * 0.9;
+    const rr = Math.min(1, Math.hypot(px / (w / 2), pz / (d / 2)));
+    c.rotateX(ruinRnd() * 0.8); c.rotateY(ruinRnd() * Math.PI); c.rotateZ(ruinRnd() * 0.8);
+    c.translate(px, peak * Math.cos(rr * Math.PI / 2) ** 2 * 0.9, pz);
+    chunks.push(c);
+  }
+  // a couple of big broken floor slabs leaning out of the pile
+  for (let i = 0; i < 2; i++) {
+    const s = new THREE.BoxGeometry(2.5 + ruinRnd() * 2.5, 0.25, 1.8 + ruinRnd() * 1.6);
+    s.rotateZ(0.3 + ruinRnd() * 0.5); s.rotateY(ruinRnd() * Math.PI);
+    s.translate((ruinRnd() - 0.5) * w * 0.5, peak * 0.55, (ruinRnd() - 0.5) * d * 0.5);
+    chunks.push(s);
+  }
+  const bars = [];
+  for (let i = 0; i < 8; i++) {
+    const b = new THREE.BoxGeometry(0.05, 0.05, 1 + ruinRnd() * 1.5);
+    b.rotateX(ruinRnd() - 0.5); b.rotateY(ruinRnd() * Math.PI);
+    b.translate((ruinRnd() - 0.5) * w * 0.6, peak * (0.4 + ruinRnd() * 0.5), (ruinRnd() - 0.5) * d * 0.6);
+    bars.push(b);
+  }
+  const rock = new THREE.Mesh(mergeGeometries([mound, ...chunks.map((c) => c.toNonIndexed())].map((x) => (x.index ? x.toNonIndexed() : x))), concrete);
+  rock.castShadow = rock.receiveShadow = true;
+  g.add(rock);
+  g.add(new THREE.Mesh(mergeGeometries(bars.map((b) => b.toNonIndexed())), rebar));
+  return g;
+}
+
+/* Collapsed block — stub walls with ragged tops sloping down toward the
+   street, floors pancaked down inside, and a rubble mound filling the
+   footprint and spilling across the pavement (never the road: `spillTo`
+   is the x the spill may reach). Colliders: the footprint, low; the
+   spill, lower. */
+export function makeCollapsedBuilding(x, z, w, d, h, streetSide, spillTo) {
+  const g = new THREE.Group();
+  const clearDay = state.timeOfDay === 'day' && state.clearDay;
+  const tex = clearDay ? dayFacades()[(ruinRnd() * 4) | 0] : windowTexVariants[0];
+  const tileW = clearDay ? FACADE_TILE_W : NIGHT_TILE, tileH = clearDay ? FACADE_TILE_H : NIGHT_TILE;
+  const wallMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, color: new THREE.Color().setHSL(0.07, 0.14, clearDay ? 0.55 : 0.4) });
+  const { concrete, interior } = ruinMaterials();
+  const T = 0.45;
+  const sx = streetSide;
+  const add = (geo, mat, shadow = true) => {
+    const m = new THREE.Mesh(geo, mat); m.castShadow = shadow; m.receiveShadow = true; g.add(m); return m;
+  };
+  // ragged top that falls away toward the street side
+  const slope = (fromX) => (vx) => {
+    const t = (sx * (vx + fromX) + w / 2) / w; // 0 far side .. 1 street side
+    return h * (0.15 + 0.75 * Math.max(0, Math.min(1, t))) + ruinRnd() * 1.6;
+  };
+  // far wall
+  const far = brokenBox(T, h, d, 0, () => h * 0.1 + ruinRnd() * STOREY * 1.5);
+  far.translate(-sx * (w / 2 - T / 2), 0, 0);
+  // side walls, sloping down toward the street
+  const sideA = brokenBox(w, h, T, 0, slope(0)); sideA.translate(0, 0, d / 2 - T / 2);
+  const sideB = brokenBox(w, h, T, 0, slope(0)); sideB.translate(0, 0, -d / 2 + T / 2);
+  // street wall: knee-high stubs with gaps
+  const stubs = [];
+  for (let zz = -d / 2 + 1; zz < d / 2 - 1; zz += 2.2 + ruinRnd() * 2) {
+    if (ruinRnd() < 0.35) continue;
+    const sh = 0.8 + ruinRnd() * 2.6;
+    const s = brokenBox(T, sh, 1.6 + ruinRnd() * 1.4, 0, () => ruinRnd() * sh * 0.5);
+    s.translate(sx * (w / 2 - T / 2), 0, zz);
+    stubs.push(s);
+  }
+  for (const geo of [far, sideA, sideB, ...stubs]) { planarFacadeUVs(geo, tileW, tileH); add(geo, wallMat); }
+  // dark floor of the gutted interior
+  const floor = add(new THREE.PlaneGeometry(w - T * 2, d - T * 2), interior, false);
+  floor.rotation.x = -Math.PI / 2; floor.position.y = 0.04;
+  // pancaked floors hanging from the far wall down toward the street
+  for (let i = 0; i < 3; i++) {
+    const y = STOREY * (1 + i) + ruinRnd();
+    if (y > h * 0.8) break;
+    const sl = add(new THREE.BoxGeometry(w * (0.55 + ruinRnd() * 0.3), 0.3, d * (0.5 + ruinRnd() * 0.35)), concrete);
+    sl.position.set(-sx * w * 0.18, y * 0.7, (ruinRnd() - 0.5) * d * 0.3);
+    sl.rotation.z = sx * -(0.35 + ruinRnd() * 0.35);
+    sl.rotation.x = (ruinRnd() - 0.5) * 0.3;
+  }
+  // rubble filling the footprint and spilling across the pavement
+  const spill = Math.max(0, Math.abs(spillTo - x) - w / 2);
+  const mound = makeRubbleMound(w + spill, d * 1.05, Math.min(h * 0.35, 5));
+  mound.position.set(sx * spill / 2, 0, 0);
+  g.add(mound);
+  g.position.set(x, 0, z);
+  scene.add(g);
+  g.traverse((o) => { if (o.isMesh) state.occluders.push(o); });
+  addStaticBox(w / 2, h * 0.3, d / 2, x, h * 0.3, z);
+  if (spill > 0.5) addStaticBox(spill / 2, 0.6, d * 0.45, x + sx * (w / 2 + spill / 2), 0.6, z);
+  return g;
+}
+
+/* ---------------------------------------------------------------------
    BUILDINGS
 --------------------------------------------------------------------- */
-export function makeBuilding(x, z, w, h, d) {
+export function makeBuilding(x, z, w, h, d, opts = {}) {
   const g = new THREE.Group();
   const night = state.timeOfDay === 'night';
   const clearDay = state.timeOfDay === 'day' && state.clearDay;
@@ -727,19 +1028,26 @@ export function makeBuilding(x, z, w, h, d) {
   const variant = rnd();
   const lightness = rnd();
   let mat;
+  const ruined = state.ruinedCity;
   if (clearDay) {
     const set = dayFacades();
-    const tex = set[Math.floor(variant * set.length)].clone();
-    tex.needsUpdate = true;
-    tex.repeat.set(Math.max(1, Math.round(w / FACADE_TILE_W)), Math.max(1, Math.round(h / FACADE_TILE_H)));
+    let tex = set[Math.floor(variant * set.length)];
+    if (!ruined) {
+      tex = tex.clone();
+      tex.needsUpdate = true;
+      tex.repeat.set(Math.max(1, Math.round(w / FACADE_TILE_W)), Math.max(1, Math.round(h / FACADE_TILE_H)));
+    }
     // Varied weathered plaster/concrete/brick-ish tints
     const tint = new THREE.Color().setHSL(0.06 + variant * 0.05, 0.12 + lightness * 0.12, 0.5 + lightness * 0.18);
     mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, color: tint });
   } else {
-    const tex = windowTexVariants[Math.floor(variant * windowTexVariants.length)].clone();
-    tex.needsUpdate = true;
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(Math.max(2, Math.round(w / 4)), Math.max(3, Math.round(h / 4)));
+    let tex = windowTexVariants[Math.floor(variant * windowTexVariants.length)];
+    if (!ruined) {
+      tex = tex.clone();
+      tex.needsUpdate = true;
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(Math.max(2, Math.round(w / 4)), Math.max(3, Math.round(h / 4)));
+    }
     const tint = new THREE.Color().setHSL(0.08, 0.08, 0.38 + lightness * 0.12);
     // Lit windows glow: the facade texture doubles as the emissive map —
     // dark walls contribute ~nothing, lit patches emit. Full strength at
@@ -750,31 +1058,47 @@ export function makeBuilding(x, z, w, h, d) {
       emissive: 0xffb066, emissiveMap: tex, emissiveIntensity: night ? 0.9 : 0.22,
     });
   }
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  mesh.position.y = h / 2;
-  mesh.castShadow = true; mesh.receiveShadow = true;
-  g.add(mesh);
-  const band = new THREE.Mesh(
-    new THREE.BoxGeometry(w + 0.08, 3.2, d + 0.08),
-    new THREE.MeshStandardMaterial({ color: 0x2b2724, roughness: 0.9 })
-  );
-  band.position.y = 1.6;
-  g.add(band);
-  const door = new THREE.Mesh(
-    new THREE.BoxGeometry(1.2, 2.4, 0.12),
-    new THREE.MeshStandardMaterial({ color: 0x1a1512, roughness: 0.8 })
-  );
-  const face = x > 0 ? -1 : 1;
-  door.position.set(face * (w / 2 - 1.4) * 0.15, 1.2, (x > 0 ? -1 : 1) * (d / 2 + 0.05));
-  if (x > 0) door.position.z = -d / 2 - 0.06;
-  else door.position.z = d / 2 + 0.06;
-  g.add(door);
-  const roof = new THREE.Mesh(
-    new THREE.BoxGeometry(w * 0.92, 0.4, d * 0.92),
-    new THREE.MeshStandardMaterial({ map: roofTex, roughness: 1 })
-  );
-  roof.position.y = h + 0.15;
-  g.add(roof);
+  const roofMat = new THREE.MeshStandardMaterial({ map: roofTex, roughness: 1 });
+  let shape = 'intact';
+  if (ruined) {
+    // Box faces in order +x -x +y -y +z -z: facade on the sides, broken
+    // concrete roof material on top
+    const mats = [mat, mat, roofMat, roofMat, mat, mat];
+    const tileW = clearDay ? FACADE_TILE_W : NIGHT_TILE, tileH = clearDay ? FACADE_TILE_H : NIGHT_TILE;
+    shape = addRuinedBody(g, w, h, d, mats, tileW, tileH, x > 0 ? -1 : 1);
+    const bandGeo = new THREE.BoxGeometry(w + 0.08, 3.2, d + 0.08);
+    bandGeo.translate(0, 1.6, 0);
+    planarFacadeUVs(bandGeo, 10, 3.2);
+    const band = new THREE.Mesh(bandGeo, new THREE.MeshStandardMaterial({ map: storefrontTexture(), roughness: 0.9 }));
+    band.receiveShadow = true;
+    g.add(band);
+  } else {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    mesh.position.y = h / 2;
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    g.add(mesh);
+    const band = new THREE.Mesh(
+      new THREE.BoxGeometry(w + 0.08, 3.2, d + 0.08),
+      new THREE.MeshStandardMaterial({ color: 0x2b2724, roughness: 0.9 })
+    );
+    band.position.y = 1.6;
+    g.add(band);
+    const door = new THREE.Mesh(
+      new THREE.BoxGeometry(1.2, 2.4, 0.12),
+      new THREE.MeshStandardMaterial({ color: 0x1a1512, roughness: 0.8 })
+    );
+    const face = x > 0 ? -1 : 1;
+    door.position.set(face * (w / 2 - 1.4) * 0.15, 1.2, (x > 0 ? -1 : 1) * (d / 2 + 0.05));
+    if (x > 0) door.position.z = -d / 2 - 0.06;
+    else door.position.z = d / 2 + 0.06;
+    g.add(door);
+  }
+  // A roof slab and rooftop kit only fit an intact top
+  if (shape === 'intact') {
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(w * 0.92, 0.4, d * 0.92), roofMat);
+    roof.position.y = h + 0.15;
+    g.add(roof);
+  }
   // Roughly a third of the street-facing facades carry a neon sign
   // (streetSide: east row faces -x, west row faces +x toward the road).
   if (rnd() < 0.35) addNeonSign(g, w, d, x > 0 ? -1 : 1, night, clearDay);
@@ -785,7 +1109,7 @@ export function makeBuilding(x, z, w, h, d) {
     );
     ac.position.set((rnd() - 0.5) * w * 0.4, h + 0.7, (rnd() - 0.5) * d * 0.3);
     ac.castShadow = true;
-    g.add(ac);
+    if (shape === 'intact') g.add(ac);
   }
   if (h > 18 && rnd() > 0.45) {
     const railMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.6, roughness: 0.4 });
@@ -809,12 +1133,23 @@ export function makeBuilding(x, z, w, h, d) {
     );
     tierRoof.position.set(tier.position.x, h + tierH + 0.15, tier.position.z);
     g.add(tierRoof);
+    if (shape !== 'intact') { g.remove(tier); g.remove(tierRoof); }
   }
   g.position.set(x, 0, z);
+  // A collapsed ruin takes this lot: the block was only built so its
+  // rnd() draws happen and everything placed after it lands where it did
+  if (opts.consumeOnly) return g;
   scene.add(g);
   g.traverse((o) => { if (o.isMesh) state.occluders.push(o); });
   addStaticBox(w / 2, h / 2, d / 2, x, h / 2, z);
   return g;
+}
+
+// state.collapsedBlocks (set by a level's config): [{ side, z0, z1 }] —
+// the street-row building whose centre falls in a range is a collapsed
+// ruin instead of a standing block
+function collapsesAt(side, z) {
+  return (state.collapsedBlocks || []).some((c) => c.side === side && z <= c.z0 && z >= c.z1);
 }
 
 export function loadBuildings() {
@@ -822,9 +1157,16 @@ export function loadBuildings() {
     const h = 16 + rnd() * 28;
     const w = 11 + rnd() * 7;
     const d = 11 + rnd() * 7;
-    if (Math.abs(z - DEPOT_POS.z) > 16) makeBuilding(rowX + w / 2, z, w, h, d);
+    if (Math.abs(z - DEPOT_POS.z) > 16) {
+      const ruin = collapsesAt('east', z);
+      makeBuilding(rowX + w / 2, z, w, h, d, { consumeOnly: ruin });
+      if (ruin) makeCollapsedBuilding(rowX + w / 2, z, w, d, h * 0.6, -1, STREET_HALF_W + 0.6);
+    }
     if (Math.abs((z + 5) - WEST_POCKET_Z) > 14) {
-      makeBuilding(-rowX - w / 2, z + 5, w * (0.85 + rnd() * 0.3), h * (0.7 + rnd() * 0.4), d);
+      const ww = w * (0.85 + rnd() * 0.3), hh = h * (0.7 + rnd() * 0.4);
+      const ruin = collapsesAt('west', z + 5);
+      makeBuilding(-rowX - w / 2, z + 5, ww, hh, d, { consumeOnly: ruin });
+      if (ruin) makeCollapsedBuilding(-rowX - w / 2, z + 5, ww, d, hh * 0.6, 1, -STREET_HALF_W - 0.6);
     }
   }
   buildWestPocket();

@@ -27,3 +27,12 @@ state.lightBoot = true;
 // stay, still), and the streetlights are off — see applyTimeOfDay in
 // Scene.js and makeStreetlight in characters.js.
 state.clearDay = true;
+// The street is battle-damaged (broken tops, blown corners, shopfronts),
+// and the two blocks flanking the collapse zone (z -120 → -165) came down:
+// the east one over the zone's own rubble piles, the west one opposite —
+// see RUINED CITY in characters.js. Both spill onto the pavement only.
+state.ruinedCity = true;
+state.collapsedBlocks = [
+  { side: 'east', z0: -140, z1: -152 },
+  { side: 'west', z0: -136, z1: -148 },
+];

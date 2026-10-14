@@ -33,6 +33,12 @@ export const state = {
   // Set by a level's config (Level2Config.js) to swap Day mode's overcast
   // drizzle for a clear sunlit day — see applyTimeOfDay in Scene.js.
   clearDay: false,
+  // Set by a level's config (Level2Config.js): street-row buildings are
+  // battle-damaged (broken tops, blown corners, shopfronts) and the
+  // blocks named in collapsedBlocks [{ side, z0, z1 }] lie in ruins —
+  // see RUINED CITY in characters.js.
+  ruinedCity: false,
+  collapsedBlocks: null,
 
   // Run tracking (account.js / cloud.js): which level is running, how
   // long it has been actively played (paused/dead time excluded), and
