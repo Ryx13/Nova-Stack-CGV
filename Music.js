@@ -118,6 +118,16 @@ function armUnlock() {
 export function initMusic() {
   try { muted = localStorage.getItem(LS_KEY) === '1'; } catch { /* private mode */ }
   armUnlock();
+  // Pause the music while the tab is backgrounded (the sound keeps
+  // playing otherwise, which reads as a bug when the player tabs away)
+  // and bring the current context back, mid-track, on return.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      for (const [, d] of decks) if (!d.paused) fadeTo(d, 0, 0.25, () => d.pause());
+    } else {
+      applyContext(); // respects the mute state on its own
+    }
+  });
 }
 
 /* ---------------------------------------------------------------------
