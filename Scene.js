@@ -945,6 +945,7 @@ export function maybeReady() {
     setTimeout(() => {
       dom.loading.classList.add('hidden');
       dom.hud.classList.remove('hidden');
+      document.body.classList.add('in-level'); // drops the sound chip below the radar (#sound-btn rule in index.html)
       if (readyCallback) readyCallback();
     }, 200);
   }
