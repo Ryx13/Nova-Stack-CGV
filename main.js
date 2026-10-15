@@ -20,7 +20,7 @@ import { playStoryboard, playLevelTransition } from './Intro.js';
 import { initAccountUI, sessionReady, showAuth, takeResumeRequest } from './account.js';
 import { getSession } from './cloud.js';
 import { showCharacterSelect, hideCharacterSelect, disposeCharacterSelect } from './characterSelect.js';
-import { initMusic, setMusicContext } from './Music.js';
+import { initMusic, setMusicContext, isMuted, toggleMuted, onSoundChange } from './Music.js';
 
 const introScreen = document.getElementById('start-screen');
 // The splash art lives on its own layer (#splash-bg) so it can carry the
@@ -197,8 +197,27 @@ function boot() {
   initIntroScreen();
   initLevelSelect();
   initModeSelect();
+  initSoundButton();
   startEmberDrift();
   handleResume();
+}
+
+/* ---------------------------------------------------------------------
+   SOUND BUTTON — repaints the fixed chip from Music.js's state and
+   toggles the master switch on click. Lives in main.js so the chip
+   exists on every screen, gameplay included.
+--------------------------------------------------------------------- */
+function initSoundButton() {
+  const btn = document.getElementById('sound-btn');
+  const paint = (m) => {
+    if (!btn) return;
+    btn.classList.toggle('muted', m);
+    btn.setAttribute('aria-pressed', String(m));
+    btn.title = m ? 'Unmute (M)' : 'Mute (M)';
+  };
+  paint(isMuted());
+  onSoundChange(paint);
+  if (btn) btn.addEventListener('click', () => toggleMuted());
 }
 
 /* ---------------------------------------------------------------------
