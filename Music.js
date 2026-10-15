@@ -36,6 +36,37 @@ let currentKey = null;   // the context we want playing right now
 let unlocked = false;    // has a user gesture let audio start yet?
 let unlockArmed = false;
 
+/* Volume fades — switching a level should never hard-cut the music. One
+   shared 40ms ticker services every active fade and parks itself once
+   the last one finishes. */
+const FADE_SECONDS = 1.2;
+const fades = new Map(); // deck -> { from, to, start, dur, onDone }
+let fadeTimer = null;
+
+function fadeTo(deck, to, seconds, onDone) {
+  const from = deck.volume;
+  if (!fades.has(deck) && Math.abs(from - to) < 0.001) {
+    deck.volume = to;
+    if (onDone) onDone();
+    return;
+  }
+  fades.set(deck, { from, to, start: performance.now(), dur: Math.max(seconds, 0.05) * 1000, onDone });
+  if (!fadeTimer) fadeTimer = setInterval(tickFades, 40);
+}
+
+function tickFades() {
+  const now = performance.now();
+  for (const [deck, f] of fades) {
+    const t = Math.min((now - f.start) / f.dur, 1);
+    deck.volume = f.from + (f.to - f.from) * t;
+    if (t >= 1) {
+      fades.delete(deck);
+      if (f.onDone) f.onDone();
+    }
+  }
+  if (!fades.size) { clearInterval(fadeTimer); fadeTimer = null; }
+}
+
 function deckFor(key) {
   let d = decks.get(key);
   if (!d) {
@@ -54,13 +85,16 @@ function targetVolume(key) { return TRACKS[key].volume; }
 
 function applyContext() {
   if (!unlocked || !currentKey) return;
+  // Fade every other deck out (and park it once silent, so a stacked
+  // context change can never leave two tracks quietly playing together).
   for (const [k, d] of decks) {
-    if (k !== currentKey && !d.paused) d.pause();
+    if (k === currentKey || d.paused) continue;
+    fadeTo(d, 0, FADE_SECONDS, () => d.pause());
   }
   const d = deckFor(currentKey);
-  d.volume = targetVolume(currentKey);
-  const p = d.play();
+  const p = d.play(); // resumes mid-track where it was last faded out
   if (p) p.catch(() => {}); // still blocked — the unlock listener retries
+  fadeTo(d, targetVolume(currentKey), FADE_SECONDS);
 }
 
 function armUnlock() {
