@@ -554,6 +554,8 @@ playtest it and report anything that looks off, especially:
 - `PowerUps.js`, `VendingMachine.js`, `saferoomSupplyCatalog.js` — pickups,
   purchases, per-level supply tables
 - `shaders.js` — shield, ground fog, rain, fire, puddle, toxic-wound shaders
+- `Music.js` — background-music director: per-context decks, crossfades,
+  persisted mute, autoplay unlock, sound-button state
 - `state.js` — shared game state
 - `Level1.js` / `Level2.js` + `Level2Config.js` / `Level3.js` +
   `Level3Config.js` — level entry points and per-level tuning (see
@@ -564,4 +566,5 @@ playtest it and report anything that looks off, especially:
 - `game.js` — the original single-file build, kept for reference
 - `assets/characters/` — roster characters + shared `animations.glb`;
   `assets/*.glb` — rigged models (zombies, vehicles, props);
+  `assets/music/` — the three CC-BY soundtrack loops;
   `assets/splash1.jpg` — title-screen concept art
