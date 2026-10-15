@@ -282,7 +282,7 @@ const NEXT_LEVEL = { 1: 2, 2: 3 };
 export function playNextLevel() {
   const next = NEXT_LEVEL[state.levelId];
   if (!next) return;
-  try { sessionStorage.setItem(RESUME_KEY, JSON.stringify({ level: next, mode: state.timeOfDay || 'night' })); } catch { /* ignore */ }
+  try { sessionStorage.setItem(RESUME_KEY, JSON.stringify({ level: next, mode: state.timeOfDay || 'night', transitionFrom: state.levelId })); } catch { /* ignore */ }
   location.reload();
 }
 export function toMainMenu() {

@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { state } from './state.js';
+import { createStreetAtmosphere } from './StreetAtmosphere.js';
+import { updateLocomotion } from './Movement.mjs';
 import {
   scene, world, camera, renderer, dom, sfx, sky,
   pushKillFeed, doDeath, doWin, checkExtraction, updateExtractRing,
@@ -145,6 +147,7 @@ function setWeaponVisualsVisible() {
   if (knifeViewModel) knifeViewModel.visible = !showGun;
 }
 export function switchWeapon(weapon) {
+  if (state.narrativeBlocked) return;
   if (weapon === 'gun' && !hasAnyAmmo()) {
     pushKillFeed('No ammo left — knife only');
     weapon = 'knife';
@@ -167,6 +170,7 @@ function enforceAmmoWeaponRule() {
 }
 
 export function togglePause() {
+  if (state.narrativeBlocked) return;
   if (state.isDead) return; // don't let pause interfere with the death/win screens
   if (!dom.hud || dom.hud.classList.contains('hidden')) return; // no pausing before the level has even started
   state.paused = !state.paused;
@@ -184,7 +188,7 @@ export function togglePause() {
     // instead of requiring an extra click just to get mouse-look back —
     // browsers allow this since the Tab press / button click that got us
     // here counts as the required direct user gesture.
-    dom.canvas.requestPointerLock();
+    dom.canvas.requestPointerLock()?.catch(() => {});
   }
 }
 
@@ -194,6 +198,7 @@ export function showHitmarker() {
 }
 
 export function tryShoot() {
+  if (state.narrativeBlocked) return;
   if (state.currentWeapon !== 'gun') { tryKnife(); return; }
   if (state.inVehicle || state.isDead || state.reloading || state.fireCooldown > 0) return;
   if (state.ammoMag <= 0) { startReload(); return; }
@@ -243,6 +248,7 @@ function triggerShootAnimSafe() {
 }
 
 export function tryMelee() {
+  if (state.narrativeBlocked) return;
   if (state.inVehicle || state.isDead || state.meleeTimer > 0) return;
   state.meleeTimer = 0.38;
   sfx.melee();
@@ -267,6 +273,7 @@ export function tryMelee() {
 // fight over meleeTimer in confusing ways, though they share the same
 // cooldown field since only one melee action makes sense at a time.
 export function tryKnife() {
+  if (state.narrativeBlocked) return;
   if (state.inVehicle || state.isDead || state.meleeTimer > 0) return;
   state.meleeTimer = 0.32;
   sfx.melee();
@@ -285,6 +292,7 @@ export function tryKnife() {
   if (hitAny) showHitmarker();
 }
 export function startReload() {
+  if (state.narrativeBlocked) return;
   if (state.currentWeapon !== 'gun') return;
   if (state.reloading || state.ammoMag === MAG_SIZE || state.ammoReserve <= 0 || state.inVehicle) {
     enforceAmmoWeaponRule();
@@ -298,6 +306,7 @@ export function startReload() {
    PLAYER DAMAGE / DEATH
 --------------------------------------------------------------------- */
 export function damagePlayer(dmg) {
+  if (state.narrativeBlocked) return;
   if (state.isDead) return;
   if (state.shieldActive) return; // shield blocks all attacks outright
   // Brief grace after any hit. Without it, every zombie swings on its
@@ -357,6 +366,7 @@ export function updateLowHealthFX(dt) {
    VEHICLE ENTER / EXIT
 --------------------------------------------------------------------- */
 export function toggleVehicle() {
+  if (state.narrativeBlocked) return;
   if (state.isDead || state.skipCar || !carVis) return;
   if (!state.inVehicle) {
     const dist = playerVis.group.position.distanceTo(carVis.group.position);
@@ -524,17 +534,9 @@ export function updatePlayerMovement(dt) {
   // Crouch: no collider change, just a slower, quieter stance — camera
   // drops to match in updateCameraOnFoot. Can't sprint while crouched.
   state.crouching = !!(state.keys['ControlLeft'] || state.keys['ControlRight'] || state.keys['KeyC']);
-  // Hysteresis: once stamina bottoms out the player is "exhausted" and
-  // can't sprint again until it recovers past STAMINA_RECOVER. Without
-  // this, a single threshold made sprint flicker on/off every few frames
-  // at ~0 stamina (8.4 <-> 3.7 m/s), which felt like lag and let zombies
-  // close the gap.
-  const STAMINA_RECOVER = 25;
-  if (state.playerStamina <= 0.5) state.staminaExhausted = true;
-  else if (state.playerStamina >= STAMINA_RECOVER) state.staminaExhausted = false;
-  const sprinting = !state.crouching && !state.staminaExhausted && (state.sprintToggle || state.keys['ShiftLeft'] || state.keys['ShiftRight']) && forwardInput > 0 && state.playerStamina > 2;
-  state.isSprinting = sprinting;
-  const speed = (sprinting ? 8.4 : (state.crouching ? 2.1 : 3.7)) * (state.adrenalineActive ? 1.45 : 1);
+  updateLocomotion(state, dt, forwardInput);
+  const sprinting = state.isSprinting;
+  const speed = state.currentSpeed;
   const fwd = forwardFromYaw(state.yaw);
   const right = rightFromYaw(state.yaw);
   const move = new THREE.Vector3()
@@ -551,7 +553,7 @@ export function updatePlayerMovement(dt) {
   // before normalizing below — atan2 only cares about direction, not
   // magnitude, so this doesn't need its own separate vector.
   state.playerMoving = forwardInput !== 0 || strafeInput !== 0;
-  if (state.playerMoving) state.playerFacingAngle = Math.atan2(-move.x, -move.z);
+  if (state.playerMoving) state.playerFacingAngle = state.levelId === 3 ? state.yaw : Math.atan2(-move.x, -move.z);
   if (move.lengthSq() > 0) move.normalize().multiplyScalar(speed);
   // Direct assignment, not eased/lerped toward the previous velocity — a
   // self-referential lerp can get stuck at NaN forever if the body's
@@ -584,12 +586,10 @@ export function updatePlayerMovement(dt) {
       state.playerActionLock = (jumpKey === 'jumpBack' ? playerVis.jumpBackDuration : playerVis.jumpDuration) || 0.5;
     }
   }
-  // Drain slowed / regen sped up so a sustained sprint doesn't read as
-  // "sprint stopped working."
-  if (sprinting) state.playerStamina = Math.max(0, state.playerStamina - dt * 11);
-  else state.playerStamina = Math.min(100, state.playerStamina + dt * 22);
   dom.staminaFill.style.width = state.playerStamina + '%';
-  dom.staminaFill.style.opacity = state.staminaExhausted ? '0.45' : '1'; // dim while exhausted
+  dom.staminaFill.style.opacity = state.staminaExhausted ? '0.45' : '1';
+  dom.staminaStatus?.classList.toggle('visible', state.staminaExhausted);
+  dom.staminaStatus?.setAttribute('aria-hidden', String(!state.staminaExhausted));
   playerVis.group.position.set(playerBody.position.x, playerBody.position.y - playerHeight / 2, playerBody.position.z);
   const moving = move.lengthSq() > 0.01;
   if (playerVis.rigged && playerVis.mixer && playerVis.actions) {
@@ -623,7 +623,7 @@ export function updatePlayerMovement(dt) {
   if (dom.debugReadout) {
     const rawShift = (state.keys['ShiftLeft'] ? 'L' : '') + (state.keys['ShiftRight'] ? 'R' : '') || 'none';
     dom.debugReadout.textContent =
-      `Shift held: ${rawShift} | Toggle: ${state.sprintToggle} | Sprinting: ${sprinting} | Exhausted: ${state.staminaExhausted} | Stamina: ${state.playerStamina.toFixed(0)}\n` +
+      `Shift held: ${rawShift} | Sprinting: ${sprinting} | Exhausted: ${state.staminaExhausted} | Stamina: ${state.playerStamina.toFixed(0)}\n` +
       `Rigged model: ${playerVis.rigged} | Anim state: ${playerVis.currentActionName || 'n/a'}\n` +
       `Player height: ${state.playerCurrentHeight.toFixed(2)}m (zombies are ${ZOMBIE_TARGET_HEIGHT}m) [ / ] to adjust\n` +
       `Grip preset: ${state.gunGripIndex} (U to cycle) | Weapon: ${state.currentWeapon} | Coins: ${state.coins} | Fuel: ${state.carFuel != null ? state.carFuel.toFixed(0) : 'n/a'}`;
@@ -721,19 +721,13 @@ export function updateVehicleControls(dt) {
    INPUT WIRING
 --------------------------------------------------------------------- */
 function initInputHandlers() {
+  const clearInput = () => { state.keys = {}; state.firePressed = false; state.isSprinting = false; };
+  window.addEventListener('blur', clearInput);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) clearInput(); });
+
   window.addEventListener('keydown', (e) => {
+    if (state.narrativeBlocked) return;
     state.keys[e.code] = true;
-    // Double-tap W toggles sprint on/off — independent of Shift detection,
-    // as a guaranteed fallback in case a held modifier key is getting
-    // swallowed by the browser/OS.
-    if (e.code === 'KeyW' && !e.repeat) {
-      const now = performance.now();
-      if (now - state.lastWTapTime < 300) {
-        state.sprintToggle = !state.sprintToggle;
-        pushKillFeed(state.sprintToggle ? 'Sprint toggle ON (double-tap W)' : 'Sprint toggle OFF');
-      }
-      state.lastWTapTime = now;
-    }
     // Live player-scale tuning — dropped during the Actions.js/characters.js
     // split (it used to live inline in the old game.js keydown handler);
     // adjustPlayerScale() itself survived the split fine, it just had no
@@ -753,7 +747,7 @@ function initInputHandlers() {
   });
   window.addEventListener('keyup', (e) => { state.keys[e.code] = false; });
   dom.canvas.addEventListener('mousemove', (e) => {
-    if (!state.pointerLocked) return;
+    if (!state.pointerLocked || state.narrativeBlocked) return;
     state.yaw -= e.movementX * 0.002;
     state.pitch -= e.movementY * 0.002;
     state.pitch = THREE.MathUtils.clamp(state.pitch, -1.05, 0.72);
@@ -761,19 +755,20 @@ function initInputHandlers() {
   dom.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   document.addEventListener('pointerlockchange', () => {
     state.pointerLocked = document.pointerLockElement === dom.canvas;
+    if (!state.pointerLocked) clearInput();
   });
   dom.canvas.addEventListener('click', () => {
     const gameActive = !dom.hud.classList.contains('hidden') && dom.death.classList.contains('hidden') && dom.win.classList.contains('hidden');
-    if (gameActive && !state.pointerLocked) {
+    if (gameActive && !state.narrativeBlocked && !state.pointerLocked) {
       sfx.init();
       // A retry relaunches without a fresh click, so the audio context may
       // have been created suspended — this click is the gesture to wake it.
       if (sfx.ctx && sfx.ctx.state === 'suspended') sfx.ctx.resume();
-      dom.canvas.requestPointerLock();
+      dom.canvas.requestPointerLock()?.catch(() => {});
     }
   });
   window.addEventListener('mousedown', (e) => {
-    if (!state.pointerLocked) return;
+    if (!state.pointerLocked || state.narrativeBlocked) return;
     if (e.button === 0) { state.firePressed = true; tryShoot(); }
     if (e.button === 2) tryMelee();
   });
@@ -781,6 +776,7 @@ function initInputHandlers() {
     if (e.button === 0) state.firePressed = false;
   });
   window.addEventListener('keydown', (e) => {
+    if (state.narrativeBlocked) return;
     if (e.code === 'KeyR') startReload();
     if (e.code === 'KeyF') toggleVehicle();
     if (e.code === 'KeyV' && !state.inVehicle) state.firstPerson = !state.firstPerson;
@@ -806,6 +802,7 @@ function initInputHandlers() {
    to diverge later without touching this shared logic.
 --------------------------------------------------------------------- */
 let missionTracker = null;
+let streetAtmosphere = null;
 
 export function bootLevel(levelConfig = {}) {
   // Day/Night was picked on the mode-select screen (main.js), right after
@@ -829,7 +826,7 @@ export function bootLevel(levelConfig = {}) {
     // click) is long stale, so this attempt may be silently ignored —
     // that's fine, the canvas click handler wired below is the fallback
     // the player uses to lock in.
-    dom.canvas.requestPointerLock();
+    dom.canvas.requestPointerLock()?.catch(() => {});
     if (!state.skipCar) spawnDepotGuards();
     updateObjectiveHUD();
     updateWeaponHUD();
@@ -844,6 +841,7 @@ export function bootLevel(levelConfig = {}) {
   const { depotYard } = loadBuildings();
   loadObstacles();
   loadTrashCans();
+  streetAtmosphere = createStreetAtmosphere(scene);
   if (!state.skipCar) loadCars();
   loadMainCharacter();
   loadZombies();
@@ -873,12 +871,15 @@ function startAnimationLoop() {
   function animate() {
     requestAnimationFrame(animate);
     const dt = Math.min(clock.getDelta(), 0.05);
+    if (!state.narrativeBlocked) {
     state.shake = Math.max(0, state.shake - dt * 1.8);
     state.meleeTimer = Math.max(0, state.meleeTimer - dt);
     state.hurtGrace = Math.max(0, state.hurtGrace - dt);
+    }
     sky.position.copy(camera.position);
     updateWeatherFX(dt);
-    if (!state.isDead && !state.paused && dom.hud && !dom.hud.classList.contains('hidden')) {
+    streetAtmosphere?.update(dt, state, sfx, camera);
+    if (!state.isDead && !state.paused && !state.narrativeBlocked && dom.hud && !dom.hud.classList.contains('hidden')) {
       state.runTime += dt;
       stepAccumulator += dt;
       while (stepAccumulator >= FIXED_STEP) {

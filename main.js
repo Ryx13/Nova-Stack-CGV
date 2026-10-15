@@ -1,3 +1,4 @@
+import { playStoryboard, playLevelTransition } from './Intro.js';
 // main.js — ENTRY POINT
 //
 // Runs before any of Scene/characters/Actions/PowerUps are ever loaded,
@@ -35,7 +36,20 @@ function initIntroScreen() {
   const enterBtn = document.getElementById('enter-btn');
   const levelSelect = document.getElementById('level-select');
   if (!enterBtn || !introScreen || !levelSelect) return;
-  const goToLevelSelect = () => {
+  let entering = false;
+  const goToLevelSelect = async () => {
+    if (entering) return;
+    entering = true;
+    introScreen.classList.add('hidden');
+    let seen = false;
+    try { seen = localStorage.getItem('deadway.intro.v2') === 'done'; } catch {}
+    if (!seen) {
+      await playStoryboard();
+      const { startSafeRoomTutorial } = await import('./IntroTutorial.js');
+      await new Promise(resolve => startSafeRoomTutorial({ onComplete: resolve }));
+      try { localStorage.setItem('deadway.intro.v2', 'done'); } catch {}
+    }
+    entering = false;
     introScreen.classList.add('hidden');
     levelSelect.classList.remove('hidden');
   };
@@ -45,6 +59,13 @@ function initIntroScreen() {
     if (getSession().user) goToLevelSelect();
     else showAuth(goToLevelSelect);
   });
+  const replay = document.createElement('button'); replay.textContent = 'Replay story & training';
+  replay.addEventListener('click', async () => {
+    levelSelect.classList.add('hidden'); await playStoryboard();
+    const { startSafeRoomTutorial } = await import('./IntroTutorial.js');
+    startSafeRoomTutorial({ onComplete: () => levelSelect.classList.remove('hidden') });
+  });
+  levelSelect.appendChild(replay);
   const backBtn = document.getElementById('level-back');
   if (backBtn) backBtn.addEventListener('click', () => {
     levelSelect.classList.add('hidden');
@@ -128,6 +149,7 @@ async function handleResume() {
   await sessionReady;
   if (!getSession().user) return; // signed out in between — normal flow
   introScreen.classList.add('hidden');
+  if (req.transitionFrom) await playLevelTransition(req.transitionFrom);
   await launchLevel(String(req.level), req.mode || 'night');
 }
 

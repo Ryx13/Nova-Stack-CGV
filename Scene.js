@@ -39,6 +39,7 @@ export const dom = {
   canvas: document.getElementById('game-canvas'),
   healthFill: document.getElementById('health-fill'),
   staminaFill: document.getElementById('stamina-fill'),
+  staminaStatus: document.getElementById('stamina-status'),
   ammo: document.getElementById('ammo'),
   reloadText: document.getElementById('reload-text'),
   prompt: document.getElementById('prompt'),

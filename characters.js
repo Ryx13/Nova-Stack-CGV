@@ -319,6 +319,7 @@ function addNeonSign(g, w, d, streetSide, night) {
     panel.position.set(streetSide * (w / 2 + 0.09), 4.4 + rnd() * 1.6, (rnd() - 0.5) * d * 0.55);
     panel.rotation.y = streetSide > 0 ? Math.PI / 2 : -Math.PI / 2;
   }
+  panel.userData.neonSign = true;
   g.add(panel);
   const halo = new THREE.Sprite(new THREE.SpriteMaterial({
     map: neonGlowTex, transparent: true, depthWrite: false, fog: false,
@@ -327,6 +328,7 @@ function addNeonSign(g, w, d, streetSide, night) {
   halo.material.color.set(color);
   halo.position.copy(panel.position);
   halo.scale.set(blade ? 4.2 : 6.8, blade ? 8 : 3.1, 1);
+  halo.userData.neonSign = true;
   g.add(halo);
 }
 
@@ -699,6 +701,7 @@ export function makeBuilding(x, z, w, h, d) {
     g.add(tierRoof);
   }
   g.position.set(x, 0, z);
+  g.userData.streetBuilding = true; g.userData.shell = mesh;
   scene.add(g);
   g.traverse((o) => { if (o.isMesh) state.occluders.push(o); });
   addStaticBox(w / 2, h / 2, d / 2, x, h / 2, z);
@@ -1457,6 +1460,10 @@ export function loadMainCharacter() {
       pushKillFeed('Anim clips: ' + Object.entries(found).map(([k, v]) => `${k}${v ? '✓' : '✗'}`).join(' '));
       playerVis.actions = {};
       if (walkClip) playerVis.actions.walk = playerVis.mixer.clipAction(walkClip);
+      for (const [key, name] of Object.entries({walkBack:'Walk_Backwards',strafeL:'Strafe_left',strafeR:'Strafe_right'})) {
+        const clip = findClip(name);
+        if (clip && state.levelId === 3) playerVis.actions[key] = playerVis.mixer.clipAction(clip);
+      }
       if (runClip) playerVis.actions.sprint = playerVis.mixer.clipAction(runClip);
       if (idleClip) playerVis.actions.idle = playerVis.mixer.clipAction(idleClip);
       if (jumpClip) {

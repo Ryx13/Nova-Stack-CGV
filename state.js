@@ -58,6 +58,7 @@ export const state = {
   staminaExhausted: false, // set when stamina hits 0; cleared once it recovers past STAMINA_RECOVER
   isDead: false,
   paused: false,
+  narrativeBlocked: false,
   walkCycle: 0,
   footTimer: 0,
   crouching: false,
@@ -67,8 +68,7 @@ export const state = {
   playerActionLock: 0,
   meleeTimer: 0,
   bobPhase: 0,
-  sprintToggle: false,
-  lastWTapTime: 0,
+  currentSpeed: 3.7,
   playerScaleOverride: 0.5, // was 0.55 — measured "a little too big" now that
                             // ground-clamping actually works (previously this
                             // number was being judged against a floating,

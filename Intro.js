@@ -1,0 +1,44 @@
+import { createStoryAudio } from './StoryAudio.js';
+
+const OPENING=[
+ {scene:'delivery',tag:'01 / THE DELIVERY',title:'One last delivery.',text:'You were delivering a package to the science lab. You were almost at the door when the ground began to move.',note:'MANIFEST 047 / RESEARCH ANNEX / SIGNATURE REQUIRED'},
+ {scene:'quake',tag:'02 / SEISMIC EVENT',title:'Then the city broke.',text:'The earthquake broke the chemical tanks under the lab. The power went out. Dangerous gas spread into the streets.',note:'SEISMIC ALERT / CONTAINMENT OFFLINE'},
+ {scene:'breach',tag:'03 / CONTAINMENT FAILURE',title:'The air changed them.',text:'The gas turned people outside into zombies. Dr. James saw you and pulled you into the safe room. He could not reach the others.',note:'CAM 03 / SIGNAL DEGRADED / EVACUATION FAILED'},
+ {scene:'rescue',tag:'04 / A SECOND CHANCE',title:'They can still come home.',text:'Dr. James is making a cure. Clear the street, find the missing ingredient, and turn on the tower to spread the cure across the city.',note:'SAFE ROOM / SEALED / TWO SURVIVORS'}
+];
+export function playStoryboard(slides=OPENING,finalLabel='Enter safe room'){
+ const audio=createStoryAudio(),reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+ const root=document.createElement('section');root.id='opening-story';root.setAttribute('aria-label','Opening story');
+ root.innerHTML=`<style>
+ #opening-story{position:fixed;inset:0;background:#070b0d;z-index:90;overflow:hidden;color:#eee8dc}#opening-story canvas{position:absolute;inset:0;width:100%;height:100%}#opening-story:after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(0deg,#05080d 0%,#05080dd9 17%,transparent 70%),repeating-linear-gradient(0deg,#ffffff03 0 1px,transparent 1px 4px)}
+ .opening-top{position:absolute;top:30px;left:5vw;right:5vw;display:flex;justify-content:space-between;z-index:2;border-top:1px solid #e0a83c77;padding-top:18px}.opening-copy{position:absolute;z-index:2;bottom:6vh;left:7vw;width:min(820px,85vw)}.opening-copy h1{font:600 clamp(36px,6vw,76px)/1.05 'Oswald',sans-serif;letter-spacing:-1px;margin:16px 0}.opening-copy p{font:500 clamp(19px,2.1vw,27px)/1.5 'Rajdhani',sans-serif;max-width:730px;min-height:3em;color:#d5d3c8}.opening-progress{display:flex;gap:7px;margin-top:28px}.opening-progress span{height:3px;width:65px;background:#343d40}.opening-progress span.active{background:#e0a83c}.opening-note{position:absolute;right:6vw;top:23%;font:13px monospace;letter-spacing:2px;color:#e0a83c;writing-mode:vertical-rl;z-index:2}.opening-copy.enter{animation:opening-enter .65s both}@keyframes opening-enter{from{opacity:0;transform:translateY(25px)}to{opacity:1;transform:none}}@media(prefers-reduced-motion:reduce){.opening-copy.enter{animation:none}}@media(max-height:600px){.opening-top{top:12px}.opening-copy{bottom:20px}.opening-copy h1{font-size:36px}.opening-copy p{font-size:18px}.opening-progress{margin-top:10px}}
+ </style><canvas aria-hidden="true"></canvas><div class="opening-top"><span class="dw-eyebrow">NOVA STACK / DEADWAY CITY</span><button class="dw-button quiet" data-skip>Skip briefing</button></div><div class="opening-note"></div><article class="opening-copy"><div class="dw-eyebrow" data-tag></div><h1></h1><p></p><div class="dw-actions"><button class="dw-button primary" data-next>Continue</button></div><div class="opening-progress"></div></article>`;
+ document.body.append(root);
+ const canvas=root.querySelector('canvas'),ctx=canvas.getContext('2d');canvas.width=1600;canvas.height=900;
+ const next=root.querySelector('[data-next]'),copy=root.querySelector('p');let index=0,time=0,start=performance.now(),raf,finished=false,full='';
+ return new Promise(resolve=>{
+  function render(){const s=slides[index];full=s.text;start=performance.now();root.dataset.scene=s.scene;root.querySelector('[data-tag]').textContent=s.tag;root.querySelector('h1').textContent=s.title;root.querySelector('.opening-note').textContent=s.note;next.textContent=index===slides.length-1?finalLabel:'Continue';root.querySelector('.opening-progress').innerHTML=slides.map((_,i)=>`<span class="${i<=index?'active':''}"></span>`).join('');const article=root.querySelector('article');article.classList.remove('enter');void article.offsetWidth;article.classList.add('enter');audio.cue(s.scene==='quake'?'rumble':'radio');next.focus();}
+  function finish(){if(finished)return;finished=true;cancelAnimationFrame(raf);audio.dispose();root.remove();resolve();}
+  next.onclick=()=>{if(copy.textContent!==full){start=performance.now()-full.length*20-100;copy.textContent=full;return;}if(index===slides.length-1)finish();else{index++;render();}};
+  root.querySelector('[data-skip]').onclick=finish;
+  function frame(now){time=reduced?5:(now-start)/1000;copy.textContent=reduced?full:full.slice(0,Math.floor(time*50));drawScene(ctx,slides[index].scene,time,reduced);raf=requestAnimationFrame(frame);}
+  render();raf=requestAnimationFrame(frame);
+ });
+}
+function drawScene(c,kind,t,reduced){
+ const w=1600,h=900;c.clearRect(0,0,w,h);const sky=c.createLinearGradient(0,0,0,h);sky.addColorStop(0,kind==='breach'?'#243c30':'#16242c');sky.addColorStop(1,'#080c10');c.fillStyle=sky;c.fillRect(0,0,w,h);
+ c.save();if(kind==='quake'&&!reduced&&t<2)c.translate(Math.sin(t*55)*9*(1-t/2),Math.cos(t*43)*6*(1-t/2));
+ // Layered skyline uses a fixed layout, keeping animation allocation-free.
+ for(let layer=0;layer<3;layer++)for(let i=0;i<16;i++){const x=i*125-90+layer*40,y=230+((i*73+layer*47)%220);c.fillStyle=['#253337','#1b252b','#10181d'][layer];c.fillRect(x,y,105,600-y+layer*60);c.fillStyle=kind==='quake'&&Math.sin(t*9+i)>0?'#412825':'#a17c3e';for(let row=0;row<5;row++)for(let col=0;col<3;col++)if((row+col+i)%3)c.fillRect(x+16+col*26,y+20+row*32,9,13);}
+ c.fillStyle='#10161a';c.fillRect(460,280,660,270);c.strokeStyle='#e0a83c';c.lineWidth=3;c.strokeRect(460,280,660,270);c.fillStyle='#c4ba9f';c.font='28px monospace';c.fillText('NOVA / RESEARCH ANNEX',505,330);
+ if(kind==='delivery'){c.save();c.translate(1130,130);c.rotate(.06);c.fillStyle='#c5b79a';c.fillRect(0,0,290,190);c.fillStyle='#26292a';c.font='17px monospace';c.fillText('COURIER / 047',20,40);for(let i=0;i<40;i++)c.fillRect(20+i*6,75,(i%3)+1,55);c.fillText('FRAGILE · BIOLOGICAL',20,165);c.restore();}
+ if(kind==='quake'){c.strokeStyle='#e76c43';c.lineWidth=4;for(let i=0;i<6;i++){c.beginPath();c.moveTo(i*300,0);c.lineTo(i*300+70,170);c.lineTo(i*300+30,290);c.lineTo(i*300+160,610);c.stroke();}c.fillStyle='#c81e1e';c.fillRect(480,360,240,8);}
+ if(kind==='breach'){for(let i=0;i<7;i++){const x=(i*270+t*12)%1900-150,g=c.createRadialGradient(x,400,0,x,400,240);g.addColorStop(0,'#91ad4270');g.addColorStop(1,'#91ad4200');c.fillStyle=g;c.fillRect(x-240,160,480,480);}c.strokeStyle='#e0a83c66';c.strokeRect(100,85,1400,510);c.fillStyle='#d0553d';c.font='20px monospace';c.fillText('● REC   CAM_03   /   NO UPLINK',135,125);if(!reduced&&t%3<.12){c.fillStyle='#b9cebd33';c.fillRect(100,200,1400,35);}}
+ if(kind==='rescue'){const aperture=reduced?.16:Math.max(.16,1-t*.55);c.fillStyle='#263237';c.fillRect(0,0,800*(1-aperture),900);c.fillRect(800+800*aperture,0,800,900);c.strokeStyle='#e0a83c';for(let i=0;i<12;i++){c.beginPath();c.moveTo(40+i*135,0);c.lineTo(i*135,160);c.stroke();}c.fillStyle='#8fe0ff';c.fillRect(790,145,20,100);}
+ if(kind==='port'||kind==='tower'){c.fillStyle='#081015ed';c.fillRect(160,100,1280,470);c.strokeStyle='#e0a83c33';for(let i=0;i<20;i++){c.beginPath();c.moveTo(160+i*68,100);c.lineTo(160+i*68,570);c.stroke();}const points=kind==='port'?[[300,450],[600,300],[1050,210],[1300,420]]:[[350,430],[700,220],[1050,430],[1250,180]];c.strokeStyle='#e0a83c';c.lineWidth=4;c.setLineDash([12,12]);c.lineDashOffset=-t*18;c.beginPath();points.forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));c.stroke();c.setLineDash([]);points.forEach(([x,y],i)=>{c.fillStyle=i===3?'#8fe0ff':'#e0a83c';c.beginPath();c.arc(x,y,10,0,7);c.fill();c.font='17px monospace';c.fillText((kind==='port'?['STREET','SIGNAL','INTERCEPT','PORT']:['GENERATOR','COOLING','UPLINK','BROADCAST'])[i],x-50,y+40);});}
+ c.restore();if(!reduced){c.fillStyle='#cab79466';for(let i=0;i<45;i++)c.fillRect((i*137+t*(i%4+1)*7)%1600,(i*97+t*17)%900,2,2);}
+}
+export function playLevelTransition(from){
+ const card=from===1?{scene:'port',tag:'ACT II / INTERCEPT',title:'A signal from the port.',text:'The route is clear. Someone has the final antidote component, and they are running. Follow the signal. Reach them before the port.',note:'DR. JAMES / SIGNAL ACQUIRED'}:{scene:'tower',tag:'ACT III / THE LAST BROADCAST',title:'Give the city a tomorrow.',text:'Component secured. The cure is ready. Restore the generator, cooling and uplink at the broadcast tower. Then we bring them home.',note:'CURE SYNTHESIS / COMPLETE'};
+ return playStoryboard([card],'Deploy');
+}
