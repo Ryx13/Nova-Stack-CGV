@@ -2,3 +2,6 @@
 # local leftovers from the update script
 _removed_assets/
 *.updated
+
+# test-only no-store dev server used for browser verification runs
+_nocache_test_server.js
