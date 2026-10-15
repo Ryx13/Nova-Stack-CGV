@@ -46,7 +46,8 @@ const listeners = new Set(); // notified whenever the mute state changes
 /* Volume fades — switching a level should never hard-cut the music. One
    shared 40ms ticker services every active fade and parks itself once
    the last one finishes. */
-const FADE_SECONDS = 1.2;
+const FADE_SECONDS = 1.2; // crossfade between contexts (e.g. a level switch)
+const START_FADE_SECONDS = 0.5; // quicker swell when a track starts from silence
 const fades = new Map(); // deck -> { from, to, start, dur, onDone }
 let fadeTimer = null;
 
@@ -101,11 +102,13 @@ function applyContext() {
   const d = deckFor(currentKey); // exists from boot, so the track preloads early
   if (muted) return; // context remembered, but silenced until unmuted
   if (document.hidden) return; // never start audio in a background tab
+  const wasPaused = d.paused;
   const p = d.play(); // resumes mid-track where it was last faded out
   // Blocked by the autoplay policy? Keep the unlock listeners armed —
   // the next gesture retries this call. Only a real success disarms them.
   if (p && p.then) p.then(disarmUnlock).catch(() => {});
-  fadeTo(d, targetVolume(currentKey), FADE_SECONDS);
+  // A track starting from silence swells in faster than a level crossfade.
+  fadeTo(d, targetVolume(currentKey), wasPaused ? START_FADE_SECONDS : FADE_SECONDS);
 }
 
 function armUnlock() {
