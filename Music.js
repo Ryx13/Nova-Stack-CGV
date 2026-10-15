@@ -207,6 +207,9 @@ function applyMute() {
       if (!d.paused) fadeTo(d, 0, 0.3, () => d.pause());
     }
   } else {
+    // The unmuting click/keypress is itself a gesture, so it is safe to
+    // clear a silent pre-roll mute here before fading back in.
+    for (const [, d] of decks) if (d.muted) { d.muted = false; d.volume = 0; }
     applyContext(); // fade the current context back in
   }
 }
