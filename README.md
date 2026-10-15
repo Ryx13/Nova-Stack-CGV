@@ -24,7 +24,29 @@
 - **Rebuild** (Blender 5.2):
   `& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b -P tools\build_characters.py`
 
-## New in this pass (presentation pass: HUD, title screen, Level 1 polish)
+## New in this pass (sound & music)
+- **Three licensed soundtracks** (`Music.js`, files in `assets/music/`):
+  Levels 1–2 share Iwan 'qubodup' Gabovitch's *Dark Ambience Loop*; Level 3
+  gets Scrabbit's *Demon Lord* (a boss-battle theme for the broadcast
+  tower); everything else — title screen, auth, character select,
+  level/mode select, story sequences — loops *GFZ Hell level* from Emma M.
+  Andersson's *Unreleased Zombie soundtrack*. All three are CC-BY; the
+  credits screen carries the full attribution. (The GFZ track is the
+  author's deliberately non-looped export, so its loop seam is audible —
+  kept exactly as shipped on OpenGameArt.)
+- **One sound button** — a fixed speaker chip in the top-right toggles all
+  game audio (music, the synthesized weapon/engine sfx, story cue tones)
+  from any screen, gameplay included; **M** does the same from the keyboard
+  (ignored while typing into account fields). The choice persists across
+  reloads (`deadway.sound.muted`).
+- **How the music behaves**: switching levels crossfades over 1.2 s rather
+  than cutting; a faded-out track resumes where it left off; music pauses
+  while the tab is backgrounded; playback waits for the browser's
+  first-gesture autoplay unlock and retries by itself if a `play()` call is
+  rejected. In-level the chip slides below the radar (`body.in-level`) so it
+  never covers the HUD.
+
+## Previous pass (presentation: HUD, title screen, Level 1 polish)
 - **Title screen atmosphere** — the splash art now sits on its own layer with a
   slow Ken Burns zoom/pan; a canvas layer drifts ember/ash particles upward;
   a scanline + vignette overlay gives it a film feel; a three-stage campaign
