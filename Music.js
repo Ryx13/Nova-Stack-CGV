@@ -38,6 +38,7 @@ let unlockArmed = false;
 let muted = false;       // persisted master switch for music + sfx
 
 const LS_KEY = 'deadway.sound.muted'; // shared with the sound button in main.js
+const listeners = new Set(); // notified whenever the mute state changes
 
 /* Volume fades — switching a level should never hard-cut the music. One
    shared 40ms ticker services every active fade and parks itself once
@@ -132,9 +133,23 @@ export function setMuted(v) {
   muted = v;
   try { localStorage.setItem(LS_KEY, v ? '1' : '0'); } catch { /* ignore */ }
   applyMute();
+  notify();
 }
 
 export function toggleMuted() { setMuted(!muted); return muted; }
+
+/* Subscribe to mute changes (used by main.js to repaint the sound button
+   and by Scene.js to zero the sfx master gain). Returns an unsubscribe. */
+export function onSoundChange(cb) {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+
+function notify() {
+  for (const cb of listeners) {
+    try { cb(muted); } catch { /* a broken listener must not break audio */ }
+  }
+}
 
 function applyMute() {
   if (!unlocked) return;
