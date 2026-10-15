@@ -39,17 +39,26 @@
   from any screen, gameplay included; **M** does the same from the keyboard
   (ignored while typing into account fields). The choice persists across
   reloads (`deadway.sound.muted`).
-- **How the music behaves**: switching levels crossfades over 1.2 s rather
-  than cutting; a faded-out track resumes where it left off; music pauses
-  while the tab is backgrounded; playback waits for the browser's
-  first-gesture autoplay unlock and retries by itself if a `play()` call is
-  rejected. In-level the chip slides below the radar (`body.in-level`) so it
+- **How the music behaves**: the menu track is requested the moment the
+  page loads — if the browser allows autoplay for you (Chrome does once
+  you've engaged with the site) the title screen has music with no click at
+  all, and otherwise the first click or keypress starts it instantly, since
+  the track is already preloading. Switching levels crossfades over 1.2 s;
+  a cold start swells in over 0.5 s; a faded-out track resumes where it
+  left off; music pauses while the tab is backgrounded; and a blocked
+  `play()` is retried on every later gesture until the browser lets it
+  through. In-level the chip slides below the radar (`body.in-level`) so it
   never covers the HUD.
 - **Verified end-to-end in-browser** — menu → Level 1 → Level 3 track
   switching (crossfades confirmed via the audio elements' play state),
   button + M toggling with the synthesized-sfx master gain following, mute
   persistence across a reload, and the credits' Music section: all 12 checks
   passed, zero console errors.
+- **Title-screen start, verified** — on a load where the browser permits
+  autoplay the menu track is already playing with zero interaction; a
+  no-click reload keeps it going; the start → character-select transition
+  keeps one continuous deck; the mute round-trip is unchanged — zero
+  console errors.
 
 ## Previous pass (presentation: HUD, title screen, Level 1 polish)
 - **Title screen atmosphere** — the splash art now sits on its own layer with a
