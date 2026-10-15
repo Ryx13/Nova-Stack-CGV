@@ -37,16 +37,20 @@
 - **One sound button** — a fixed speaker chip in the top-right toggles all
   game audio (music, the synthesized weapon/engine sfx, story cue tones)
   from any screen, gameplay included; **M** does the same from the keyboard
-  (ignored while typing into account fields). The choice persists across
-  reloads (`deadway.sound.muted`).
+  (ignored while typing into account fields). While the browser is holding
+  the music back at load, the chip honestly reads as muted — and the first
+  press on it (or M, or anywhere else) switches the sound on mid-track;
+  only a later press mutes. The choice persists across reloads
+  (`deadway.sound.muted`).
 - **How the music behaves**: the menu track is requested the moment the
   page loads. Where the browser allows autoplay the title screen has music
   with no click at all; where it refuses (the usual first visit in Chrome —
   engagement alone can't be relied on), the track doesn't sit waiting: it
   pre-rolls *silently* from that same moment (muted playback is always
   allowed), decoded, buffered and mid-track, and the first click or
-  keypress simply unmutes it — music appears instantly, already underway,
-  swelling in over 0.5 s with no download wait. Switching levels crossfades
+  keypress — on the chip, M, or anywhere else — switches it on: music
+  appears instantly, already underway, swelling in over 0.5 s with no
+  download wait. Switching levels crossfades
   over 1.2 s; a faded-out track resumes where it left off; music pauses
   while the tab is backgrounded; and a blocked `play()` is retried on every
   later gesture (or via the sound button / M) until the browser lets it
@@ -69,10 +73,13 @@
 - **Blocked-autoplay start, verified** — the refusal reproduced with a
   stubbed `play()` (the game's Chrome allows autoplay, so the refusal path
   needs emulation): the boot attempt is rejected, the track pre-rolls
-  silently mid-track, and the first gesture unmutes it inside the gesture —
-  volume swells to 0.5 while the track keeps its position; later gestures
-  add no extra `play()` calls (the unlock listeners disarm after audible
-  success); zero console errors.
+  silently mid-track with the chip reading muted, and the first gesture
+  switches it on inside the gesture — volume swells to 0.5 while the track
+  keeps its position. In particular a first press on the chip switches the
+  music on and persists nothing (it used to toggle to muted and make every
+  reload start muted); later gestures add no extra `play()` calls (the
+  unlock listeners disarm after audible success); a reload starts clean.
+  Zero console errors.
 
 ## Previous pass (presentation: HUD, title screen, Level 1 polish)
 - **Title screen atmosphere** — the splash art now sits on its own layer with a
