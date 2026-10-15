@@ -16,9 +16,10 @@
    than hard-cutting.
 
    Autoplay policy: browsers block audio until the first user gesture,
-   so nothing plays until a pointerdown/keydown anywhere; a one-shot
-   unlock listener then starts whatever context has been requested. If a
-   play() call is rejected anyway, the same listener is re-armed.
+   so nothing plays until a pointerdown/keydown anywhere. The unlock
+   listeners stay armed until a play() call actually succeeds, so a
+   blocked attempt is retried by the next gesture instead of leaving
+   the game silent for the rest of the session.
 
    All three tracks are CC-BY licensed — credits.js carries the full
    attribution.
@@ -98,21 +99,29 @@ function applyContext() {
   if (muted) return; // context remembered, but silenced until unmuted
   const d = deckFor(currentKey);
   const p = d.play(); // resumes mid-track where it was last faded out
-  if (p) p.catch(() => {}); // still blocked — the unlock listener retries
+  // Blocked by the autoplay policy? Keep the unlock listeners armed —
+  // the next gesture retries this call. Only a real success disarms them.
+  if (p && p.then) p.then(disarmUnlock).catch(() => {});
   fadeTo(d, targetVolume(currentKey), FADE_SECONDS);
 }
 
 function armUnlock() {
   if (unlockArmed) return;
   unlockArmed = true;
-  const onFirstGesture = () => {
-    document.removeEventListener('pointerdown', onFirstGesture, true);
-    document.removeEventListener('keydown', onFirstGesture, true);
-    unlocked = true;
-    applyContext();
-  };
   document.addEventListener('pointerdown', onFirstGesture, true);
   document.addEventListener('keydown', onFirstGesture, true);
+}
+
+function onFirstGesture() {
+  unlocked = true;
+  applyContext(); // retried on every gesture until a play() succeeds
+}
+
+function disarmUnlock() {
+  if (!unlockArmed) return;
+  unlockArmed = false;
+  document.removeEventListener('pointerdown', onFirstGesture, true);
+  document.removeEventListener('keydown', onFirstGesture, true);
 }
 
 export function initMusic() {
