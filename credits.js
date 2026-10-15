@@ -133,7 +133,7 @@ export const CREDITS = [
       },
       {
         name: 'Getaway motorboat',
-        what: 'The girl's boat at the Level 2 pier (assets/boat.glb). Design, scaling and triangle reduction in Blender by Nova Stack (627k down to 25k triangles: AI-generated meshes are far too heavy to render as they come); base mesh generated with Mesh.ai.',
+        what: "The girl's boat at the Level 2 pier (assets/boat.glb). Design, scaling and triangle reduction in Blender by Nova Stack (627k down to 25k triangles: AI-generated meshes are far too heavy to render as they come); base mesh generated with Mesh.ai.",
         author: 'Nova Stack',
         source: 'Finished in Blender from a Mesh.ai base mesh',
         licence: 'Project-owned (Mesh.ai base mesh used in line with its terms of service)',
