@@ -189,6 +189,15 @@ if (document.readyState === 'loading') {
   boot();
 }
 
+/* M toggles the master sound switch from anywhere — gameplay, menus, end
+   screens — except while typing into an account text field. */
+document.addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyM' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  toggleMuted();
+});
+
 function boot() {
   if (new URLSearchParams(location.search).has('debug')) document.body.classList.add('debug');
   initMusic();
