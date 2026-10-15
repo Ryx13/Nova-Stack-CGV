@@ -15,11 +15,14 @@
    switching contexts fades the old track out and the new one in rather
    than hard-cutting.
 
-   Autoplay policy: browsers block audio until the first user gesture,
-   so nothing plays until a pointerdown/keydown anywhere. The unlock
-   listeners stay armed until a play() call actually succeeds, so a
-   blocked attempt is retried by the next gesture instead of leaving
-   the game silent for the rest of the session.
+   Autoplay policy: playback is attempted as soon as the page loads —
+   wherever the browser allows it (Chrome does for visitors who have
+   engaged with the site, e.g. after previous play sessions) the menu
+   music starts on the title screen itself. Everywhere else the first
+   pointerdown/keydown unlocks audio; the deck is created and preloading
+   from boot either way, so a click starts the music instantly. The
+   unlock listeners stay armed until a play() call actually succeeds, so
+   a blocked attempt is retried by the next gesture.
 
    All three tracks are CC-BY licensed — credits.js carries the full
    attribution.
@@ -34,7 +37,6 @@ export const TRACKS = {
 
 const decks = new Map(); // context key -> HTMLAudioElement (created on first use)
 let currentKey = null;   // the context we want playing right now
-let unlocked = false;    // has a user gesture let audio start yet?
 let unlockArmed = false;
 let muted = false;       // persisted master switch for music + sfx
 
@@ -89,15 +91,16 @@ function deckFor(key) {
 function targetVolume(key) { return TRACKS[key].volume; }
 
 function applyContext() {
-  if (!unlocked || !currentKey) return;
+  if (!currentKey) return;
   // Fade every other deck out (and park it once silent, so a stacked
   // context change can never leave two tracks quietly playing together).
   for (const [k, d] of decks) {
     if (k === currentKey || d.paused) continue;
     fadeTo(d, 0, FADE_SECONDS, () => d.pause());
   }
+  const d = deckFor(currentKey); // exists from boot, so the track preloads early
   if (muted) return; // context remembered, but silenced until unmuted
-  const d = deckFor(currentKey);
+  if (document.hidden) return; // never start audio in a background tab
   const p = d.play(); // resumes mid-track where it was last faded out
   // Blocked by the autoplay policy? Keep the unlock listeners armed —
   // the next gesture retries this call. Only a real success disarms them.
@@ -113,7 +116,6 @@ function armUnlock() {
 }
 
 function onFirstGesture() {
-  unlocked = true;
   applyContext(); // retried on every gesture until a play() succeeds
 }
 
@@ -171,7 +173,6 @@ function notify() {
 }
 
 function applyMute() {
-  if (!unlocked) return;
   if (muted) {
     for (const [, d] of decks) {
       if (!d.paused) fadeTo(d, 0, 0.3, () => d.pause());
