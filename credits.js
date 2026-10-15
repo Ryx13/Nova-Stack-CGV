@@ -132,6 +132,14 @@ export const CREDITS = [
         licence: 'Project-owned (Mesh.ai base meshes used in line with its terms of service)',
       },
       {
+        name: 'Getaway motorboat',
+        what: 'The girl's boat at the Level 2 pier (assets/boat.glb), reduced from 627k to 25k triangles with tools/optimize_model.py.',
+        author: 'AI-generated — generator to confirm',
+        source: 'Team to fill in',
+        licence: 'AI-generated asset — used in line with the generator's terms',
+        confirm: true,
+      },
+      {
         name: 'Walker zombie (model-rigged.glb) and zombie variant (zombie_variant_b.glb)',
         what: 'Main street zombie with walk_relaxed clip; second variant used as set dressing.',
         author: 'Generated with Ludo.ai (AI 3D asset generator)',
@@ -195,14 +203,14 @@ export const CREDITS = [
       },
       {
         name: 'Claude Code (AI coding assistant)',
-        what: 'Character roster pipeline and select screen, clip fitting and pistol grip, vending machine lighting, Level 2 clear-day atmosphere (painted sky lighting, following sun shadows, smoke, daylight facades), ruined buildings, street dressing and scenery merging, with debugging and documentation.',
+        what: 'Character roster pipeline and select screen, clip fitting and pistol grip, vending machine lighting, Level 2 clear-day atmosphere (painted sky lighting, following sun shadows, smoke, daylight facades), ruined buildings, street dressing and scenery merging; Level 2 intro fly-through, the mountains, sea and back city around it, the getaway boat and its cinematic, the moonlit dead-grid night (lit windows and light shafts, flickering firelight), the opening zombie ambush, and the infection monitor and overrun death scene, with debugging and documentation.',
         author: 'Anthropic',
         source: 'https://claude.com/claude-code',
         licence: '—',
       },
       {
         name: 'Blender',
-        what: 'Converting/retargeting FBX animation files to .glb; reducing the roster characters to 30k triangles and building assets/characters/ (tools/build_characters.py).',
+        what: 'Converting/retargeting FBX animation files to .glb; reducing the roster characters to 30k triangles and building assets/characters/ (tools/build_characters.py); cutting the getaway boat from 627k to 25k triangles (tools/optimize_model.py).',
         author: 'Blender Foundation',
         source: 'https://www.blender.org',
         licence: 'GPL (tool only — output files are ours)',
