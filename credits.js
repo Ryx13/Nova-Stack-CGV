@@ -256,7 +256,8 @@ export const CREDITS = [
 export const TEAM_MADE = [
   'All game code, level design and mission logic for Levels 1–3',
   'Custom GLSL shaders: shield, fog, rain, fire, puddles, toxic sludge',
-  'Every sound effect — synthesised live with the Web Audio API, no audio files',
+  'Every sound effect — synthesised live with the Web Audio API (no sound samples; the licensed music tracks are credited below)',
+  'Background-music director: per-context looping soundtracks with crossfades, persisted mute and a single sound switch (Music.js)',
   'Procedural city: buildings, road and sidewalk canvas textures, street props',
   'Procedural dead-city daylight: painted smoky sky, weathered daylight facades, smoke columns',
   'Procedural ruins: battle-damaged rooflines, blown-out corners with exposed floors, collapsed blocks, rubble mounds, shopfront ground floors',
