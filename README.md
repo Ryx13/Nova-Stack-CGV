@@ -38,10 +38,11 @@
   game audio (music, the synthesized weapon/engine sfx, story cue tones)
   from any screen, gameplay included; **M** does the same from the keyboard
   (ignored while typing into account fields). While the browser is holding
-  the music back at load, the chip honestly reads as muted — and the first
-  press on it (or M, or anywhere else) switches the sound on mid-track;
-  only a later press mutes. The choice persists across reloads
-  (`deadway.sound.muted`).
+  the music back at load the chip keeps its normal look — the first press
+  on it (or M, or anywhere else) switches the sound on mid-track; only a
+  later press mutes. Muting lasts for the current visit only: a reload
+  always starts with sound available (a stored mute from an older build is
+  cleared at boot), so the game can never boot — or look — muted.
 - **How the music behaves**: the menu track is requested the moment the
   page loads. Where the browser allows autoplay the title screen has music
   with no click at all; where it refuses (the usual first visit in Chrome —
@@ -62,9 +63,9 @@
   required*; the title screen then plays with nothing clicked at all.
 - **Verified end-to-end in-browser** — menu → Level 1 → Level 3 track
   switching (crossfades confirmed via the audio elements' play state),
-  button + M toggling with the synthesized-sfx master gain following, mute
-  persistence across a reload, and the credits' Music section: all 12 checks
-  passed, zero console errors.
+  button + M toggling with the synthesized-sfx master gain following, the
+  session-only mute round-trip (every reload starts unmuted), and the
+  credits' Music section: all 12 checks passed, zero console errors.
 - **Title-screen start, verified** — on a load where the browser permits
   autoplay the menu track is already playing with zero interaction; a
   no-click reload keeps it going; the start → character-select transition
@@ -72,14 +73,15 @@
   console errors.
 - **Blocked-autoplay start, verified** — the refusal reproduced with a
   stubbed `play()` (the game's Chrome allows autoplay, so the refusal path
-  needs emulation): the boot attempt is rejected, the track pre-rolls
-  silently mid-track with the chip reading muted, and the first gesture
-  switches it on inside the gesture — volume swells to 0.5 while the track
-  keeps its position. In particular a first press on the chip switches the
-  music on and persists nothing (it used to toggle to muted and make every
-  reload start muted); later gestures add no extra `play()` calls (the
-  unlock listeners disarm after audible success); a reload starts clean.
-  Zero console errors.
+  needs emulation) and a stale stored mute seeded on purpose: the boot
+  attempt is rejected, the track pre-rolls silently mid-track, the stale
+  mute is cleared and the chip keeps its normal look, and the first gesture
+  switches the music on inside the gesture — volume swells to 0.5 while the
+  track keeps its position. A first press on the chip switches the music on
+  (it used to toggle to muted and make every reload start muted); a second
+  press mutes for the session only; reloads always start unmuted; later
+  gestures add no extra `play()` calls (the unlock listeners disarm after
+  audible success). Zero console errors.
 
 ## Previous pass (presentation: HUD, title screen, Level 1 polish)
 - **Title screen atmosphere** — the splash art now sits on its own layer with a
