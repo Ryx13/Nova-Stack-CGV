@@ -40,15 +40,22 @@
   (ignored while typing into account fields). The choice persists across
   reloads (`deadway.sound.muted`).
 - **How the music behaves**: the menu track is requested the moment the
-  page loads — if the browser allows autoplay for you (Chrome does once
-  you've engaged with the site) the title screen has music with no click at
-  all, and otherwise the first click or keypress starts it instantly, since
-  the track is already preloading. Switching levels crossfades over 1.2 s;
-  a cold start swells in over 0.5 s; a faded-out track resumes where it
-  left off; music pauses while the tab is backgrounded; and a blocked
-  `play()` is retried on every later gesture until the browser lets it
+  page loads. Where the browser allows autoplay the title screen has music
+  with no click at all; where it refuses (the usual first visit in Chrome —
+  engagement alone can't be relied on), the track doesn't sit waiting: it
+  pre-rolls *silently* from that same moment (muted playback is always
+  allowed), decoded, buffered and mid-track, and the first click or
+  keypress simply unmutes it — music appears instantly, already underway,
+  swelling in over 0.5 s with no download wait. Switching levels crossfades
+  over 1.2 s; a faded-out track resumes where it left off; music pauses
+  while the tab is backgrounded; and a blocked `play()` is retried on every
+  later gesture (or via the sound button / M) until the browser lets it
   through. In-level the chip slides below the radar (`body.in-level`) so it
   never covers the HUD.
+- **Sound-on-load for demos** — for truly hands-free music (e.g. a demo
+  machine), launch Chrome with `--autoplay-policy=no-user-gesture-required`
+  or set `chrome://flags/#autoplay-policy` to *No user gesture is
+  required*; the title screen then plays with nothing clicked at all.
 - **Verified end-to-end in-browser** — menu → Level 1 → Level 3 track
   switching (crossfades confirmed via the audio elements' play state),
   button + M toggling with the synthesized-sfx master gain following, mute
@@ -59,6 +66,13 @@
   no-click reload keeps it going; the start → character-select transition
   keeps one continuous deck; the mute round-trip is unchanged — zero
   console errors.
+- **Blocked-autoplay start, verified** — the refusal reproduced with a
+  stubbed `play()` (the game's Chrome allows autoplay, so the refusal path
+  needs emulation): the boot attempt is rejected, the track pre-rolls
+  silently mid-track, and the first gesture unmutes it inside the gesture —
+  volume swells to 0.5 while the track keeps its position; later gestures
+  add no extra `play()` calls (the unlock listeners disarm after audible
+  success); zero console errors.
 
 ## Previous pass (presentation: HUD, title screen, Level 1 polish)
 - **Title screen atmosphere** — the splash art now sits on its own layer with a
