@@ -20,6 +20,7 @@ import { playStoryboard, playLevelTransition } from './Intro.js';
 import { initAccountUI, sessionReady, showAuth, takeResumeRequest } from './account.js';
 import { getSession } from './cloud.js';
 import { showCharacterSelect, hideCharacterSelect, disposeCharacterSelect } from './characterSelect.js';
+import { initMusic, setMusicContext } from './Music.js';
 
 const introScreen = document.getElementById('start-screen');
 // The splash art lives on its own layer (#splash-bg) so it can carry the
@@ -188,6 +189,8 @@ if (document.readyState === 'loading') {
 
 function boot() {
   if (new URLSearchParams(location.search).has('debug')) document.body.classList.add('debug');
+  initMusic();
+  setMusicContext('menu'); // everything outside the three levels shares one track
   initAccountUI();
   initIntroScreen();
   initLevelSelect();
