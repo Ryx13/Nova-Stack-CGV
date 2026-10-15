@@ -6,8 +6,9 @@ import { playStoryboard, playLevelTransition } from './Intro.js';
 // setting the intro screen's splash background — Scene.js used to do
 // this at its own top level, but Scene.js now only loads once a level
 // is picked, well after the intro screen has already been shown — and
-// (2) advancing from the intro screen to the level-select screen, then
-// the level-select screen to the new mode-select screen (Day/Night).
+// (2) advancing from the intro screen to the character-select screen
+// (characterSelect.js), then level-select, then the mode-select screen
+// (Day/Night).
 // Level selection itself dynamically imports only the chosen level's
 // module, rather than eagerly loading all three (and therefore all of
 // Scene/characters/Actions/PowerUps/shaders) up front. It also drives
@@ -18,6 +19,7 @@ import { playStoryboard, playLevelTransition } from './Intro.js';
 
 import { initAccountUI, sessionReady, showAuth, takeResumeRequest } from './account.js';
 import { getSession } from './cloud.js';
+import { showCharacterSelect, hideCharacterSelect, disposeCharacterSelect } from './characterSelect.js';
 
 const introScreen = document.getElementById('start-screen');
 // The splash art lives on its own layer (#splash-bg) so it can carry the
@@ -51,7 +53,22 @@ function initIntroScreen() {
     }
     entering = false;
     introScreen.classList.add('hidden');
-    levelSelect.classList.remove('hidden');
+    goToCharacterSelect();
+  };
+  // Intro -> character select -> level select. Back walks the same path.
+  const goToCharacterSelect = () => {
+    introScreen.classList.add('hidden');
+    levelSelect.classList.add('hidden');
+    showCharacterSelect({
+      onConfirm: () => {
+        hideCharacterSelect();
+        levelSelect.classList.remove('hidden');
+      },
+      onBack: () => {
+        hideCharacterSelect();
+        introScreen.classList.remove('hidden');
+      },
+    });
   };
   enterBtn.addEventListener('click', async () => {
     await sessionReady;
@@ -67,10 +84,7 @@ function initIntroScreen() {
   });
   levelSelect.appendChild(replay);
   const backBtn = document.getElementById('level-back');
-  if (backBtn) backBtn.addEventListener('click', () => {
-    levelSelect.classList.add('hidden');
-    introScreen.classList.remove('hidden');
-  });
+  if (backBtn) backBtn.addEventListener('click', goToCharacterSelect);
 }
 
 // LEVEL SELECT — now just picks which level and hands off to the new
@@ -91,6 +105,9 @@ function initLevelSelect() {
       levelSelect.classList.add('hidden');
       modeSelect.classList.remove('hidden');
       modeSelect.dataset.pendingLevel = levelId;
+      // Level 2's day is its own clear, smoky afternoon (Level2Config.js)
+      const daySub = document.querySelector('#mode-day .mode-sub');
+      if (daySub) daySub.textContent = levelId === '2' ? 'Low sun through the smoke' : 'Overcast, light drizzle';
     });
   });
 }
@@ -103,6 +120,13 @@ function initModeSelect() {
   if (!modeSelect) return;
 
   let modeChosen = false;
+
+  // ← Back: one step up the menu chain (mode -> level -> character -> start)
+  const modeBack = document.getElementById('mode-back');
+  if (modeBack) modeBack.addEventListener('click', () => {
+    modeSelect.classList.add('hidden');
+    document.getElementById('level-select').classList.remove('hidden');
+  });
 
   buttons.forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -129,6 +153,7 @@ async function launchLevel(levelId, mode) {
   const loadLevel = LEVEL_LOADERS[levelId];
   if (!loadLevel) return;
   if (loading) loading.classList.remove('hidden');
+  disposeCharacterSelect(); // the level brings its own renderer
   try {
     const levelModule = await loadLevel();
     levelModule.startLevel(mode);

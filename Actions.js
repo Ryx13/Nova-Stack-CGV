@@ -3,6 +3,7 @@ import * as CANNON from 'cannon-es';
 import { state } from './state.js';
 import { createStreetAtmosphere } from './StreetAtmosphere.js';
 import { updateLocomotion } from './Movement.mjs';
+import { markStaticSince } from './mergeStatic.js';
 import {
   scene, world, camera, renderer, dom, sfx, sky,
   pushKillFeed, doDeath, doWin, checkExtraction, updateExtractRing,
@@ -11,7 +12,7 @@ import {
   forwardFromYaw, rightFromYaw,
   STREET_HALF_W, ZOMBIE_SPAWN_INTERVAL,
   updateFuelHUD as updateFuelHUDBase,
-  applyTimeOfDay, updateWeatherFX,
+  applyTimeOfDay, updateWeatherFX, addLight,
 } from './Scene.js';
 // Actions.js and characters.js import from each other (characters.js needs
 // damagePlayer/spawnHitSpark/spawnBlood for zombie hits; Actions.js needs
@@ -112,7 +113,7 @@ function spawnMuzzleFlash() {
   const gunWorldPos = new THREE.Vector3();
   activeGunMesh().getWorldPosition(gunWorldPos);
   flash.position.copy(gunWorldPos);
-  scene.add(flash);
+  addLight(scene, flash);
   setTimeout(() => scene.remove(flash), 50);
 }
 const tracerMat = new THREE.MeshBasicMaterial({ color: 0xfff4c2, transparent: true, opacity: 0.95 });
@@ -306,8 +307,7 @@ export function startReload() {
    PLAYER DAMAGE / DEATH
 --------------------------------------------------------------------- */
 export function damagePlayer(dmg) {
-  if (state.narrativeBlocked) return;
-  if (state.isDead) return;
+  if (state.narrativeBlocked || state.isDead || state.dying) return;
   if (state.shieldActive) return; // shield blocks all attacks outright
   // Brief grace after any hit. Without it, every zombie swings on its
   // own ~0.95s cooldown, so a pack of three stacked ~30 dps into a
@@ -322,17 +322,10 @@ export function damagePlayer(dmg) {
   if (dom.bloodVig) dom.bloodVig.style.opacity = String(1 - state.playerHealth / state.playerMaxHealth);
   sfx.hurt();
   state.shake = Math.max(state.shake, 0.22);
-  if (state.playerHealth <= 0) {
-    // Play the Shooter_Pack death clip (if loaded) before handing off to
-    // Scene.js's doDeath() for the game-over UI/logic. The lock keeps
-    // updatePlayerMovement's normal idle/walk selection from stomping on
-    // it on the very next frame.
-    if (playerVis.actions && playerVis.actions.die) {
-      setPlayerAction('die');
-      state.playerActionLock = playerVis.dieDuration || 2;
-    }
-    doDeath();
-  }
+  if (state.playerHealth / state.playerMaxHealth <= HEARTBEAT_THRESHOLD) monitorBite();
+  // Zero health is 99.99% infection: overrun — the fall, the feeding, and
+  // only then the death screen (see OVERRUN below)
+  if (state.playerHealth <= 0) startDying();
 }
 
 // Low-health tension cue: pulses #critical-pulse and a synthesized
@@ -344,7 +337,7 @@ const HEARTBEAT_THRESHOLD = 0.3; // fraction of max health
 export function updateLowHealthFX(dt) {
   if (!dom.criticalPulse) return;
   const pct = state.playerMaxHealth > 0 ? state.playerHealth / state.playerMaxHealth : 1;
-  const critical = !state.isDead && pct > 0 && pct <= HEARTBEAT_THRESHOLD;
+  const critical = !!state.dying || (!state.isDead && pct > 0 && pct <= HEARTBEAT_THRESHOLD);
   if (!critical) {
     dom.criticalPulse.classList.remove('active');
     state.heartbeatTimer = 0;
@@ -359,8 +352,230 @@ export function updateLowHealthFX(dt) {
   if (state.heartbeatTimer <= 0) {
     state.heartbeatTimer = interval;
     sfx.heartbeat();
+    monitorBeat();
   }
 }
+
+/* ---------------------------------------------------------------------
+   OVERRUN — THE INFECTION MONITOR AND THE DEATH SCENE (every level)
+
+   Once health is in the red (the critical pulse, <= 30%), an infection
+   monitor shows over the health bar: a scrolling heart-monitor trace
+   that beats with the heartbeat and spikes on every bite, and a reading
+   that climbs as health falls — 99.99% at zero health. At 99.99% the player
+   is overrun: they stop answering the controls and fall (the 'die'
+   clip), the zombies near them close in, crouch over the body and feed
+   (faked with posture: no eating clip exists for either zombie rig), the
+   camera pulls back to watch, and the death screen follows.
+
+   state.dying ({ t, eaters }) is the stretch between: not dead (so the
+   world, the zombies and the player's own animation keep running) but
+   no longer playing. Actions' animate loop runs updateDying in place of
+   the gameplay block while it's set.
+--------------------------------------------------------------------- */
+const INFECTION_FATAL = 99.99;      // the reading at zero health — overrun only when it's all but total
+const DYING_SECONDS = 4.2;          // fall + feeding before the death screen
+const EAT_RADIUS = 12;              // zombies this close come to feed
+const monitor = { el: null, ctx: null, pct: null, samples: null, beat: -1, bite: 0, shown: false, value: 0 };
+
+function buildInfectionMonitor() {
+  if (monitor.el) return;
+  const style = document.createElement('style');
+  style.textContent = `
+    #infection-monitor{position:absolute;left:22px;bottom:118px;width:236px;padding:6px 10px 8px;
+      background:rgba(18,4,4,0.72);border:1px solid rgba(255,60,50,0.55);border-radius:4px;
+      box-shadow:0 0 18px rgba(255,30,20,0.25);opacity:0;transform:translateY(6px);
+      transition:opacity .35s,transform .35s;pointer-events:none;}
+    #infection-monitor.on{opacity:1;transform:none;}
+    #infection-monitor .im-head{display:flex;justify-content:space-between;align-items:baseline;
+      font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#ff9c90;}
+    #infection-monitor .im-pct{font-size:18px;letter-spacing:.04em;color:#ff4a3a;font-weight:700;
+      text-shadow:0 0 10px rgba(255,40,30,.7);}
+    #infection-monitor canvas{display:block;width:100%;height:46px;margin-top:3px;}
+    #infection-monitor.fatal{border-color:#ff2a1a;animation:im-fatal .5s steps(2) infinite;}
+    @keyframes im-fatal{50%{border-color:rgba(255,42,26,.2);}}
+  `;
+  document.head.appendChild(style);
+  const el = document.createElement('div');
+  el.id = 'infection-monitor';
+  el.innerHTML = '<div class="im-head"><span>Infection</span><span class="im-pct">0%</span></div><canvas width="216" height="46"></canvas>';
+  dom.hud.appendChild(el);
+  monitor.el = el;
+  monitor.pct = el.querySelector('.im-pct');
+  monitor.ctx = el.querySelector('canvas').getContext('2d');
+  monitor.samples = new Float32Array(216);
+}
+
+// A heartbeat on the trace (called from the heartbeat timer)
+function monitorBeat() { monitor.beat = 0; }
+// A bite: a tall spike, and the reading jumps
+export function monitorBite() { monitor.bite = 1; }
+
+// The trace's next sample: flat line, a P-QRS-T beat when one's running,
+// a jagged spike on a bite, and noise that grows with the infection
+function nextSample(dt) {
+  let y = (Math.random() - 0.5) * 0.06 * (1 + monitor.value / 40);
+  if (monitor.beat >= 0) {
+    const b = monitor.beat;
+    if (b < 0.06) y += 0.12 * Math.sin((b / 0.06) * Math.PI);            // P
+    else if (b < 0.09) y -= 0.18 * ((b - 0.06) / 0.03);                   // Q
+    else if (b < 0.12) y += 0.95 * (1 - Math.abs((b - 0.105) / 0.015));   // R
+    else if (b < 0.15) y -= 0.3 * (1 - (b - 0.12) / 0.03);                // S
+    else if (b < 0.3) y += 0.2 * Math.sin(((b - 0.15) / 0.15) * Math.PI); // T
+    monitor.beat += dt;
+    if (monitor.beat > 0.3) monitor.beat = -1;
+  }
+  if (monitor.bite > 0) {
+    y += (Math.random() < 0.5 ? 1 : -1) * monitor.bite * 1.1;
+    monitor.bite = Math.max(0, monitor.bite - dt * 4);
+  }
+  return THREE.MathUtils.clamp(y, -1, 1);
+}
+
+// Whole percent until the last one, then hundredths: 99.41% ... 99.99%
+function infectionText(v) {
+  return v >= 99 ? `${(Math.floor(Math.min(v, 99.99) * 100) / 100).toFixed(2)}%` : `${Math.round(v)}%`;
+}
+
+function updateInfectionMonitor(dt) {
+  if (!monitor.el) return;
+  const pct = state.playerMaxHealth > 0 ? state.playerHealth / state.playerMaxHealth : 1;
+  const show = !!state.dying || (!state.isDead && pct <= HEARTBEAT_THRESHOLD);
+  if (show !== monitor.shown) { monitor.shown = show; monitor.el.classList.toggle('on', show); }
+  if (!show) { monitor.value = 0; return; }
+  // The reading: 0% at the top of the red zone, 99.99% at zero health,
+  // held there while being fed on
+  const target = state.dying
+    ? INFECTION_FATAL
+    : INFECTION_FATAL * THREE.MathUtils.clamp(1 - pct / HEARTBEAT_THRESHOLD, 0, 1);
+  monitor.value += (target - monitor.value) * Math.min(1, dt * 6);
+  monitor.pct.textContent = infectionText(monitor.value);
+  monitor.el.classList.toggle('fatal', monitor.value >= 99);
+  // Scroll the trace ~110 px/s
+  const s = monitor.samples;
+  const steps = Math.max(1, Math.round(dt * 110));
+  for (let k = 0; k < steps; k++) {
+    s.copyWithin(0, 1);
+    s[s.length - 1] = nextSample(dt / steps);
+  }
+  const ctx = monitor.ctx, W = ctx.canvas.width, H = ctx.canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = 'rgba(255,70,55,0.18)';
+  ctx.lineWidth = 1;
+  for (let gx = 0; gx < W; gx += 18) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
+  ctx.strokeStyle = '#ff4a3a';
+  ctx.lineWidth = 1.6;
+  ctx.shadowColor = 'rgba(255,40,30,0.9)';
+  ctx.shadowBlur = 6;
+  ctx.beginPath();
+  for (let i = 0; i < W; i++) {
+    const y = H / 2 - s[i] * (H / 2 - 3);
+    if (i) ctx.lineTo(i, y); else ctx.moveTo(i, y);
+  }
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+}
+
+// Zero health: overrun. The fall, the feeders, then the death screen.
+function startDying() {
+  state.firePressed = false;
+  state.reloading = false;
+  if (dom.reloadText) dom.reloadText.classList.add('hidden');
+  if (playerVis.actions && playerVis.actions.die) {
+    setPlayerAction('die');
+    state.playerActionLock = Infinity;
+  }
+  if (playerVis.shootAction) playerVis.shootAction.stop();
+  // The nearest zombies get places round the body, spread evenly
+  const body = playerVis.group.position;
+  const near = state.zombies
+    .filter((z) => z.alive && z.state !== 'downed' && z.mesh.position.distanceTo(body) < EAT_RADIUS)
+    .sort((a, b) => a.mesh.position.distanceTo(body) - b.mesh.position.distanceTo(body))
+    .slice(0, 5);
+  const start = Math.random() * Math.PI * 2;
+  near.forEach((z, i) => {
+    const a = start + (i / near.length) * Math.PI * 2;
+    z.feed = { spot: new THREE.Vector3(body.x + Math.sin(a) * 0.95, 0, body.z + Math.cos(a) * 0.95), k: 0, phase: Math.random() * 6 };
+    z.mesh.rotation.order = 'YXZ'; // the hunch tips forward from wherever it faces
+  });
+  state.dying = { t: 0, eaters: near, camFrom: camera.position.clone(), caption: buildOverrunCaption() };
+  sfx.hurt();
+}
+
+// What's happening, said on screen: OVERRUN, and the infection reading
+function buildOverrunCaption() {
+  if (!document.getElementById('overrun-style')) {
+    const style = document.createElement('style');
+    style.id = 'overrun-style';
+    style.textContent = `
+      #overrun-caption{position:fixed;left:0;right:0;top:30%;text-align:center;z-index:21;pointer-events:none;
+        opacity:0;transform:scale(1.08);transition:opacity .6s,transform 1.2s;padding:0 16px;}
+      #overrun-caption.on{opacity:1;transform:none;}
+      #overrun-caption h2{margin:0;font-size:clamp(40px,8vw,88px);letter-spacing:.18em;color:#ff3b2b;
+        text-shadow:0 0 24px rgba(255,30,20,.8),0 3px 0 #2a0000;}
+      #overrun-caption p{margin:8px 0 0;font-size:clamp(14px,1.8vw,19px);letter-spacing:.06em;color:#ffd6cf;
+        text-shadow:0 1px 8px rgba(0,0,0,.9);}
+    `;
+    document.head.appendChild(style);
+  }
+  const el = document.createElement('div');
+  el.id = 'overrun-caption';
+  el.innerHTML = '<h2>OVERRUN</h2><p></p>';
+  document.body.appendChild(el);
+  return el;
+}
+
+function updateDying(dt) {
+  const d = state.dying;
+  d.t += dt;
+  const body = playerVis.group.position;
+  // The player: the fall plays out and holds
+  if (playerVis.mixer) playerVis.mixer.update(dt);
+  if (playerVis.rigObj) groundClampRig(playerVis.rigObj, playerVis.footBoneL, playerVis.footBoneR, dt, 10, playerVis.ankleToSole);
+  syncHandGun();
+  // Feeders walk in to their places, then crouch and hunch over the body,
+  // heads and shoulders jerking as they tear at it
+  for (const z of d.eaters) {
+    if (!z.alive) continue;
+    const f = z.feed;
+    const to = f.spot.clone().sub(z.mesh.position).setY(0);
+    const face = Math.atan2(body.x - z.mesh.position.x, body.z - z.mesh.position.z);
+    if (to.length() > 0.12 && f.k === 0) {
+      z.mesh.position.addScaledVector(to.normalize(), Math.min(to.length(), Math.max(2.5, z.speed * 0.7) * dt));
+      z.mesh.rotation.y = lerpAngle(z.mesh.rotation.y, face, dt * 8);
+      if (z.mixer) z.mixer.update(dt);
+    } else {
+      f.k = Math.min(1, f.k + dt * 2.2);
+      const t = d.t * 1 + f.phase;
+      const jerk = Math.max(0, Math.sin(t * 7.3)) * 0.12 + Math.sin(t * 13.1) * 0.03;
+      z.mesh.rotation.y = lerpAngle(z.mesh.rotation.y, face + Math.sin(t * 1.7) * 0.15, dt * 4);
+      z.mesh.rotation.x = f.k * (0.62 + jerk);
+      z.mesh.position.y = -f.k * (0.42 + jerk * 0.6);
+      if (z.mixer) { z.mixer.timeScale = 0.35; z.mixer.update(dt); }
+    }
+  }
+  // Everyone else keeps coming
+  for (const z of state.zombies) if (!z.feed) z.update(dt, body);
+  // The camera pulls back and up, circling slowly, looking down at them
+  const ang = Math.atan2(d.camFrom.x - body.x, d.camFrom.z - body.z) + d.t * 0.18;
+  const k = Math.min(1, d.t / 1.6);
+  const goal = new THREE.Vector3(body.x + Math.sin(ang) * 4.2, 3.4, body.z + Math.cos(ang) * 4.2);
+  camera.position.lerpVectors(d.camFrom, goal, k * k * (3 - 2 * k));
+  camera.lookAt(body.x, 0.5, body.z);
+  updateInfectionMonitor(dt);
+  updateLowHealthFX(dt);
+  if (d.t > 0.6) {
+    d.caption.classList.add('on');
+    d.caption.querySelector('p').textContent = `Infection ${infectionText(monitor.value)} — they've got you.`;
+  }
+  if (d.t >= DYING_SECONDS) {
+    d.caption.remove();
+    state.deathInfection = infectionText(INFECTION_FATAL);
+    state.dying = null;
+    doDeath();
+  }
+}
+
 
 /* ---------------------------------------------------------------------
    VEHICLE ENTER / EXIT
@@ -754,8 +969,17 @@ function initInputHandlers() {
   });
   dom.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   document.addEventListener('pointerlockchange', () => {
+    const wasLocked = state.pointerLocked;
     state.pointerLocked = document.pointerLockElement === dom.canvas;
     if (!state.pointerLocked) clearInput();
+    // Esc while the mouse is captured never reaches keydown — the browser
+    // spends it releasing the pointer. So losing the lock mid-run IS the
+    // Esc press: pause, the way players expect. Not when the game itself
+    // let go (pausing already, end screens, a menu panel opening).
+    if (wasLocked && !state.pointerLocked && !state.paused && !state.isDead && !state.narrativeBlocked && !state.cinematic
+      && !document.querySelector('.end-screen:not(.hidden), .panel-screen:not(.hidden)')) {
+      togglePause();
+    }
   });
   dom.canvas.addEventListener('click', () => {
     const gameActive = !dom.hud.classList.contains('hidden') && dom.death.classList.contains('hidden') && dom.win.classList.contains('hidden');
@@ -768,7 +992,7 @@ function initInputHandlers() {
     }
   });
   window.addEventListener('mousedown', (e) => {
-    if (!state.pointerLocked || state.narrativeBlocked) return;
+    if (!state.pointerLocked || state.narrativeBlocked || state.dying) return;
     if (e.button === 0) { state.firePressed = true; tryShoot(); }
     if (e.button === 2) tryMelee();
   });
@@ -777,6 +1001,7 @@ function initInputHandlers() {
   });
   window.addEventListener('keydown', (e) => {
     if (state.narrativeBlocked) return;
+    if (state.dying && e.code !== 'Tab' && e.code !== 'KeyP' && e.code !== 'Escape') return;
     if (e.code === 'KeyR') startReload();
     if (e.code === 'KeyF') toggleVehicle();
     if (e.code === 'KeyV' && !state.inVehicle) state.firstPerson = !state.firstPerson;
@@ -786,13 +1011,34 @@ function initInputHandlers() {
     // purchase/activation from firing on held-key auto-repeat.
     if (!e.repeat && e.code === 'KeyE' && levelKeyHooks.KeyE) levelKeyHooks.KeyE();
     if (!e.repeat && e.code === 'KeyG' && levelKeyHooks.KeyG) levelKeyHooks.KeyG();
-    if (e.code === 'Tab') {
+    // Tab, P, or Esc (Esc only arrives here once the mouse is free — e.g.
+    // to resume from the pause screen; see pointerlockchange above)
+    if (e.code === 'Tab' || e.code === 'KeyP' || e.code === 'Escape') {
+      // Esc over an open Leaderboard/Credits panel belongs to the panel
+      if (e.code === 'Escape' && document.querySelector('.panel-screen:not(.hidden)')) return;
       e.preventDefault(); // Tab normally shifts browser focus — stop that
-      togglePause();
+      if (!e.repeat) togglePause();
     }
   });
   if (dom.pauseBtn) dom.pauseBtn.addEventListener('click', () => togglePause());
   if (dom.resumeBtn) dom.resumeBtn.addEventListener('click', () => togglePause());
+  // Quit to the title screen: a fresh page load is the clean teardown (the
+  // level owns a renderer, physics world and timers). Asks twice so a
+  // stray click doesn't throw away a run.
+  const menuBtn = document.getElementById('pause-menu-btn');
+  if (menuBtn) {
+    let armed = null;
+    menuBtn.addEventListener('click', () => {
+      if (armed) { location.reload(); return; }
+      menuBtn.textContent = 'Quit this run? Click again';
+      menuBtn.classList.add('armed');
+      armed = setTimeout(() => {
+        armed = null;
+        menuBtn.textContent = '← Main Menu';
+        menuBtn.classList.remove('armed');
+      }, 3000);
+    });
+  }
 }
 
 /* ---------------------------------------------------------------------
@@ -836,12 +1082,16 @@ export function bootLevel(levelConfig = {}) {
 
   // World population — mirrors the exact order the original monolithic
   // game.js ran this in at module load time.
+  // Everything built from here to the trash cans is fixed scenery — a
+  // level may merge it into a few big meshes (mergeStatic.js)
+  const sceneryStart = scene.children.length;
   loadWorldBounds();
   loadStreetSurface();
   const { depotYard } = loadBuildings();
   loadObstacles();
   loadTrashCans();
-  streetAtmosphere = createStreetAtmosphere(scene);
+  markStaticSince(scene, sceneryStart);
+  if (state.levelId !== 2) streetAtmosphere = createStreetAtmosphere(scene);
   if (!state.skipCar) loadCars();
   loadMainCharacter();
   loadZombies();
@@ -850,6 +1100,7 @@ export function bootLevel(levelConfig = {}) {
   if (!state.skipDepot) missionTracker = createMissionTracker(depotYard);
 
   initInputHandlers();
+  buildInfectionMonitor();
 
   // Initial HUD paint, matching the bottom of the original game.js.
   updateAmmoHUD();
@@ -879,7 +1130,10 @@ function startAnimationLoop() {
     sky.position.copy(camera.position);
     updateWeatherFX(dt);
     streetAtmosphere?.update(dt, state, sfx, camera);
-    if (!state.isDead && !state.paused && !state.narrativeBlocked && dom.hud && !dom.hud.classList.contains('hidden')) {
+    // state.cinematic: a level's intro owns the camera (Level2Intro.js)
+    if (state.dying && !state.paused && !state.narrativeBlocked) {
+      updateDying(dt);
+    } else if (!state.isDead && !state.paused && !state.cinematic && !state.narrativeBlocked && dom.hud && !dom.hud.classList.contains('hidden')) {
       state.runTime += dt;
       stepAccumulator += dt;
       while (stepAccumulator >= FIXED_STEP) {
@@ -923,6 +1177,7 @@ function startAnimationLoop() {
       const activePos = state.inVehicle ? carVis.group.position : playerVis.group.position;
       updateZombies(dt, activePos);
       updateLowHealthFX(dt);
+      updateInfectionMonitor(dt);
       updateExplosions(dt);
       updateShield(dt);
       state.spawnTimer -= dt;

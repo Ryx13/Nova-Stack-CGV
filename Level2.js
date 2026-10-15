@@ -3,26 +3,30 @@
 // The player pursues a girl carrying a critical substance through an
 // abandoned town toward a distant port. She moves at the player's walk
 // speed, so the edge is route choice and power-ups — catch her (occupy
-// her position + E) before she reaches the pier and teleports away.
+// her position + E) before she reaches her boat at the pier and gets away.
 //
 // Design brief, zone map, and the implementation catalog live in
 // level2.md. This file is everything the level owns, in order: level
 // config + startLevel(), scene dressing builders (port set piece,
 // street blockage, collapse zone, vending machines, coins), the girl
 // NPC + route, purchases, adrenaline, the mission system (win/lose,
-// teleport cinematic, zombie escalation), and the reference HUD.
+// getaway cinematic, zombie escalation), and the reference HUD.
 
 import './Level2Config.js';  // MUST be first — sets skip flags before heavy modules
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { scene, camera, addStaticBox, pushKillFeed, dom, sfx, KILL_TARGET, STREET_HALF_W } from './Scene.js';
+import { scene, camera, addStaticBox, pushKillFeed, dom, sfx, KILL_TARGET, STREET_HALF_W, addLight, sunlightOnly } from './Scene.js';
 import { state } from './state.js';
-import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis, spawnZombie, loadDeferredAssets } from './characters.js';
+import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis, playerBody, spawnZombie, loadDeferredAssets, updateBlinkingLamps, updateFireLights, syncHandGun, spawnChargers } from './characters.js';
 import { spawnCoin } from './PowerUps.js';
-import { createToxicMaterial } from './shaders.js';
 import { bootLevel, registerLevelTick, levelKeyHooks } from './Actions.js';
 import { VendingMachine, makeIcon } from './VendingMachine.js';
 import { finishRun } from './account.js';
+import { instantiateCharacter, loadGLB, fitClip, clipsFor, boneByName } from './roster.js';
+import { holdForIntro, playIntro, updateIntro } from './Level2Intro.js';
+import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
+import { buildStreetDressing } from './streetDressing.js';
+import { buildSurroundings } from './Level2Surroundings.js';
 
 const LEVEL_CONFIG = {
   id: 2,
@@ -48,20 +52,37 @@ export function startLevel(mode) {
   });
   // Level 2 dressing layer on top of the loaded base world (port,
   // blockage, collapse nest, machines, coins). Handles returned for the
-  // logic phase — machines (purchase wiring) + teleportPoint (lose).
+  // logic phase — machines (purchase wiring) + escapePoint (lose).
+  const sceneryStart = scene.children.length;
   const sceneHandles = buildLevel2Scene();
+  markStaticSince(scene, sceneryStart);
+  // Base world + this level's dressing are all fixed scenery now: merge it
+  // (~1,500 meshes into a few hundred chunked ones — see mergeStatic.js)
+  const mergeStats = mergeStaticScenery(scene);
+  console.log(`[mergeStatic] ${mergeStats.meshesBefore} meshes -> ${mergeStats.meshesAfter}`);
+  // Trees, rubble, litter, stains, cables — instanced, so added after the merge
+  buildStreetDressing();
+  // Scrubland, mountains and the open sea around it all (custom haze shader)
+  registerLevelTick(buildSurroundings());
+  // The dead grid's faulty streetlights (state.liveStreetlights)
+  registerLevelTick(updateBlinkingLamps);
+  // The burning wrecks' flickering firelight (state.bigFires)
+  registerLevelTick(updateFireLights);
   lv2Scene = sceneHandles;
   // Reference-style HUD (objectives, distances, inventory panel).
-  lv2HUD = buildLevel2HUD(sceneHandles.teleportPoint);
+  lv2HUD = buildLevel2HUD(sceneHandles.escapePoint);
   // The chase itself: the girl NPC and her per-frame tick.
   spawnGirl();
+  // The fly-through briefing: gameplay holds from here until it ends
+  holdForIntro();
+  registerLevelTick(tickIntro);
   registerLevelTick(updateGirl);
   // Purchases: machine interaction tick + the E key.
   lv2Machines = [
     { kind: 'radar', machine: sceneHandles.machines.radar, price: RADAR_PRICE },
     { kind: 'adrenaline', machine: sceneHandles.machines.adrenaline, price: ADRENALINE_PRICE },
   ];
-  lv2TeleportPoint = sceneHandles.teleportPoint;
+  lv2EscapePoint = sceneHandles.escapePoint;
   adrenalineStock = ADRENALINE_START_STOCK;
   registerLevelTick(updateVendingInteraction);
   levelKeyHooks.KeyE = handleKeyE;
@@ -78,13 +99,13 @@ export function startLevel(mode) {
   registerLevelTick(updateMission);
 }
 
-// Handles for the logic phase: { machines, teleportPoint } from the
+// Handles for the logic phase: { machines, escapePoint } from the
 // scene build, plus lv2HUD (live HUD setters — setGirlDistance etc.).
 export let lv2HUD = null;
 export let lv2Scene = null;
 // Purchase-system runtime refs, filled in startLevel().
 let lv2Machines = null;   // [{ kind, machine, price }]
-let lv2TeleportPoint = null;
+let lv2EscapePoint = null;
 let adrenalineStock = 0;  // remaining in the adrenaline machine
 // End-screen refs, created by buildLevel2EndScreens (mission section).
 let lv2Win = null, lv2WinStats = null;
@@ -108,7 +129,6 @@ const rnd = mulberry32(0x5EED02);
 
 // Port palette — the eerie teal that marks the destination.
 const TEAL = 0x2affd5;
-const TEAL_LIGHT = 0x17d5b0;
 // Machine beacon palette — lime marks the start machine (radar), pink
 // the mid-level one (adrenaline). Each machine's position glows in its
 // own color through the fog from far away (see placeVendingMachine).
@@ -359,15 +379,11 @@ function makeFallenZombie(x, z, ry) {
   return g;
 }
 
-/** Vending machine + its collider + full beacon. The beacon is how the
-    player finds the machine in the fog, in the machine's own glow
-    color: a ground ring marking the stand-here spot, a vertical light
-    column rising from the cabinet top (crests wrecks and containers
-    from afar, but tops out well below the port's taller teal spire,
-    which stays THE landmark), and a point light washing the cabinet
-    front so it reads up close too. Ring and beam use the same unfogged,
-    pulsing toxic material as the port beacon. `catalog` is the
-    machine's supplies preset — Level 2 passes its own one-product
+/** Vending machine + its collider, in the machine's own glow color: at
+    night the cabinet's front light is thrown in that colour onto the
+    pavement in front of it. Nothing is lit above or behind the cabinet —
+    it's opaque, so its light only falls in front. `catalog` is
+    the machine's supplies preset — Level 2 passes its own one-product
     presets (radar / adrenaline) below. */
 function placeVendingMachine(x, z, ry, catalog, glow = RADAR_GLOW) {
   const machine = new VendingMachine({
@@ -375,26 +391,15 @@ function placeVendingMachine(x, z, ry, catalog, glow = RADAR_GLOW) {
     position: new THREE.Vector3(x, 0, z),
     rotationY: ry,
     catalog,
+    glowColor: glow,
+    frontLight: !sunlightOnly(),
   });
   addStaticBox(
     VendingMachine.WIDTH / 2, VendingMachine.HEIGHT / 2, VendingMachine.DEPTH / 2,
     x, VendingMachine.HEIGHT / 2, z, ry
   );
-  // Ground ring — the stand-here spot. Offset clears the (now bigger)
-  // cabinet's footprint while staying inside the 2.6 m buy range.
-  const marker = new THREE.Mesh(new THREE.RingGeometry(1.3, 1.7, 36), createToxicMaterial(glow));
-  marker.rotation.x = -Math.PI / 2;
-  // Local +Z is the cabinet front — drop the marker in front of it.
-  marker.position.set(x + Math.sin(ry) * 2.2, 0.05, z + Math.cos(ry) * 2.2);
-  scene.add(marker);
-  // Vertical beam from the cabinet top — the position landmark.
-  const beam = new THREE.Mesh(new THREE.BoxGeometry(0.35, 5.5, 0.35), createToxicMaterial(glow));
-  beam.position.set(x, VendingMachine.HEIGHT + 2.75, z);
-  scene.add(beam);
-  // Close-range wash so the cabinet itself reads in its glow color.
-  const wash = new THREE.PointLight(glow, 1.6, 10, 2);
-  wash.position.set(x + Math.sin(ry) * 0.8, 2.4, z + Math.cos(ry) * 0.8);
-  scene.add(wash);
+  // No ground marker: the light the cabinet throws on the pavement (at
+  // night) and the buy prompt in range are what mark the spot
   return machine;
 }
 
@@ -415,8 +420,8 @@ function placeCoinCluster(x, z, n) {
 /** THE PORT — the chase's destination and the level's signature image.
     Quay slab over the street end, dark teal water beyond the south
     world bound, gantry cranes, container yard, warehouses, ship
-    silhouettes, and the pier with the teleport beacon (the girl's
-    escape point). Returns the teleportPoint handle. */
+    silhouettes, and the pier with her getaway boat moored at its end.
+    Returns the escapePoint and boat handles. */
 function buildPort() {
   // Quay — concrete cap over the street end. No collider (18 cm step,
   // same convention as the base scene's curbs).
@@ -428,19 +433,7 @@ function buildPort() {
   quay.receiveShadow = true;
   scene.add(quay);
 
-  // Water — dark teal, faint emissive so it isn't pitch black at night.
-  // Sits above the asphalt plane (which runs under everything) but below
-  // the quay top. Past the south bound wall it's pure backdrop.
-  const water = new THREE.Mesh(
-    new THREE.PlaneGeometry(260, 58),
-    new THREE.MeshStandardMaterial({
-      color: 0x0c2a26, roughness: 0.38, metalness: 0.55,
-      emissive: 0x04120f, emissiveIntensity: 0.4,
-    })
-  );
-  water.rotation.x = -Math.PI / 2;
-  water.position.set(0, 0.05, -236); // z -207 → -265
-  scene.add(water);
+  // The water itself is the open sea in Level2Surroundings.js
 
   // Bollards along the quay edge.
   const bollardMat = new THREE.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.6, metalness: 0.5 });
@@ -482,16 +475,10 @@ function buildPort() {
   makeGantryCrane(-21, -197);
   makeGantryCrane(23, -203);
 
-  // One broad teal wash over the yard so the whole port reads "glowing
-  // docks" once the player is close enough to see surfaces again.
-  const wash = new THREE.PointLight(TEAL_LIGHT, 1.3, 30, 2);
-  wash.position.set(0, 8, -196);
-  scene.add(wash);
-
-  // The pier — walkway over the water to the teleport beacon. The south
-  // bound wall stops the player around z ≈ -208; the pier visual extends
-  // past it so the beacon sits just out of reach. The girl (no physics
-  // body) walks it in the logic phase — reaching it means she's gone.
+  // The pier — walkway over the water to her boat. The south bound wall
+  // stops the player around z ≈ -208; the pier visual extends past it so
+  // the boat sits just out of reach. The girl (no physics body) walks it
+  // in the logic phase — reaching the boat means she's gone.
   const g = new THREE.Group();
   const plankMat = new THREE.MeshStandardMaterial({ map: concreteTex, color: 0x6a6f72, roughness: 0.9 });
   const postMat = new THREE.MeshStandardMaterial({ map: rustTex, color: 0x3a3f45, roughness: 0.7, metalness: 0.4 });
@@ -509,21 +496,69 @@ function buildPort() {
     rail.position.set(rx, 0.95, -207.4);
     g.add(rail);
   });
-  // Teleport beacon: pulsing ring + light column, both unfogged — THE
-  // landmark visible from the level start.
-  const ring = new THREE.Mesh(new THREE.RingGeometry(1.05, 1.45, 40), createToxicMaterial(TEAL));
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.set(0, 0.49, -208.6);
-  g.add(ring);
-  const beam = new THREE.Mesh(new THREE.BoxGeometry(0.4, 11, 0.4), createToxicMaterial(TEAL));
-  beam.position.set(0, 6, -208.6);
-  g.add(beam);
-  const beaconLight = new THREE.PointLight(TEAL_LIGHT, 2.6, 20, 2);
-  beaconLight.position.set(0, 2.6, -208.4);
-  g.add(beaconLight);
   scene.add(g);
 
-  return { teleportPoint: new THREE.Vector3(0, 0, -208.6) };
+  return { escapePoint: new THREE.Vector3(0, 0, -208.6), boat: buildBoat() };
+}
+
+/** THE GETAWAY BOAT — a motorboat moored alongside the end of the pier,
+    bow out to sea, bobbing. assets/boat.glb (art/models/boat.glb run
+    through tools/optimize_model.py); the model's long axis is x with the
+    outboard at +x, so it's turned to put the bow at -z. Loads on its own;
+    the handle's group exists at once so the cinematic can always move it.
+    Returns { group, wake, seat } — seat is where she stands, boat-local. */
+const BOAT_LENGTH = 6.5;
+const BOAT_DRAFT = 0.55;           // hull bottom below the waterline
+const BOAT_MOOR = new THREE.Vector3(3.9, 0.05, -209.6);
+function buildBoat() {
+  const group = new THREE.Group();
+  group.position.copy(BOAT_MOOR);
+  scene.add(group);
+  new GLTFLoader().load('assets/boat.glb', (gltf) => {
+    const obj = gltf.scene;
+    obj.rotation.y = -Math.PI / 2;
+    obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    let box = new THREE.Box3().setFromObject(obj);
+    obj.scale.setScalar(BOAT_LENGTH / box.getSize(new THREE.Vector3()).z);
+    box = new THREE.Box3().setFromObject(obj);
+    const c = box.getCenter(new THREE.Vector3());
+    obj.position.set(-c.x, -BOAT_DRAFT - box.min.y, -c.z);
+    group.add(obj);
+  }, undefined, (err) => console.error('Boat model failed to load:', err));
+  // Wake: a white V trailing the stern, faded in with speed by the cinematic
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 256;
+  const ctx = c.getContext('2d');
+  for (let i = 0; i < 2; i++) {
+    const side = i ? 1 : -1;
+    const grad = ctx.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, 'rgba(255,255,255,0.9)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 14;
+    ctx.beginPath(); ctx.moveTo(64, 0); ctx.lineTo(64 + side * 58, 256); ctx.stroke();
+  }
+  const foam = ctx.createRadialGradient(64, 0, 0, 64, 0, 70);
+  foam.addColorStop(0, 'rgba(255,255,255,0.85)');
+  foam.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = foam; ctx.fillRect(0, 0, 128, 90);
+  const wakeTex = new THREE.CanvasTexture(c);
+  const wake = new THREE.Mesh(
+    new THREE.PlaneGeometry(7, 16),
+    new THREE.MeshBasicMaterial({ map: wakeTex, transparent: true, opacity: 0, depthWrite: false })
+  );
+  wake.rotation.x = -Math.PI / 2;
+  wake.position.set(0, 0.03, BOAT_LENGTH / 2 + 8); // starts at the stern, trails astern (+z)
+  group.add(wake);
+  return { group, wake, seat: new THREE.Vector3(0, -0.15, 0.9), departing: false };
+}
+
+// Moored: a gentle bob and roll
+function updateBoatBob(boat, t) {
+  if (boat.departing) return;
+  boat.group.position.y = BOAT_MOOR.y + Math.sin(t * 1.3) * 0.05;
+  boat.group.rotation.z = Math.sin(t * 0.9) * 0.025;
+  boat.group.rotation.x = Math.sin(t * 1.1 + 1) * 0.012;
 }
 
 /** MAIN-STREET BLOCKAGE (z ≈ -57) — the wreck-pile squeeze. Two wrecks
@@ -605,7 +640,7 @@ function buildZoneDressing() {
 
 /** Builds the full Level 2 dressing layer. Called once from startLevel(),
     after bootLevel(). Returns handles for the logic phase: the two
-    machines (purchase wiring) and the teleport point (lose condition
+    machines (purchase wiring) and the escape point (lose condition
     anchor). */
 function buildLevel2Scene() {
   const port = buildPort();
@@ -639,26 +674,22 @@ function buildLevel2Scene() {
   placeCoinCluster(5, -195, 3);    // Port edge
   placeCoinCluster(-5, -200, 3);   // Port edge
 
-  return { machines, teleportPoint: port.teleportPoint };
+  return { machines, escapePoint: port.escapePoint, boat: port.boat };
 }
 
 
 
-// Placeholder model: Injured Run.glb (single Mixamo run clip — a
-// fleeing figure, thematically right for the chase). Any single-clip
-// rigged GLB drops in here; the loader plays animations[0].
-const GIRL_GLB = 'assets/Injured Run.glb';
+// She's the roster's zombie-schoolgirl body (assets/characters/
+// detention.glb) driven by Injured Run.glb's single Mixamo run clip — a
+// fleeing figure, thematically right for the chase. Both share the Mixamo
+// skeleton, so the clip binds by bone name (see roster.js).
+const GIRL_CHARACTER = 'detention';
+const GIRL_RUN_GLB = 'assets/Injured Run.glb';
 const GIRL_SPEED = 3.7;          // = player walk speed — the locked design
 const GIRL_TARGET_HEIGHT = 1.65;
 const GIRL_RIG_YAW_OFFSET = 0;   // flip to Math.PI if she runs backwards
-// Sight radius: within it she GLOWS pink (emissive pulse + her glint
-// light turns pink) so she reads instantly as THE target against the
-// dark, dull-green zombies; beyond it she's the subtle teal runner.
-// Deliberately the same 25 m that fires the "Girl spotted" beat — one
-// number, one meaning: in sight. Pink reuses the adrenaline beacon's
-// hot pink so the level keeps a single pink in its palette.
+// Within this range of the player the "Girl spotted" beat fires
 const GIRL_SIGHT_RANGE = 25;
-const GIRL_SIGHT_GLOW = 0xff4fd8;
 
 // Her route: 10 m head start at spawn (z +20, directly in front of the
 // player start at (1.5, z 30) — dead-center in view when the loading
@@ -666,7 +697,7 @@ const GIRL_SIGHT_GLOW = 0xff4fd8;
 // straight down the street past the first barrier chicane → through the
 // blockage's east-curb gap (z -57) → weaving the collapse-zone street
 // wrecks → threading the final-approach gauntlet → across the quay →
-// down the pier to the teleport beacon. y values step onto the quay
+// down the pier to her boat. y values step onto the quay
 // (0.18) and pier (0.47) slabs. Waypoints keep ~5 m clearance from every
 // placed wreck/container so she never visibly clips through one (the
 // spawn leg runs the street mid-lane at x 1.5; barrier 0 sits 3.9 m off
@@ -688,206 +719,52 @@ const GIRL_WAYPOINTS = [
   { x: 0,   y: 0,    z: -194 },
   { x: 0,   y: 0.18, z: -197 },  // onto the quay
   { x: 0,   y: 0.47, z: -203 },  // onto the pier
-  { x: 0,   y: 0.47, z: -208.6 },// the beacon — she's gone (lose)
+  { x: 1.6, y: 0.47, z: -209.6 },// the pier edge beside her boat — she's gone (lose)
 ];
 
 let girl = null; // { group, mixer, wpIndex, mats, glint }
 let girlSpotted = false;
 let girlAnnounced = false; // "head start" beat — fired on the first live frame
 
-/* PROCEDURAL BODY for the anim-only girl rig — VERIFIED against the
-   file: Injured Run.glb is a Mixamo skeleton + run clip with ZERO
-   meshes/materials (66 nodes, 65 joints, one animation), so the loader
-   alone renders nothing at all — she was literally invisible (only her
-   glint light and the zombies it lit were visible). This clothes the
-   actual bones: joint spheres + limb cylinders, attached world-aligned
-   at the clip's FIRST RUNNING FRAME (not the bind pose — this file's
-   bind is a lying/folded Blender-import artifact, while the clip
-   assembles a properly standing run), so the run clip drives them like
-   a real character from frame one.
-   Deliberately a BRIGHT, mannequin-style figure (pale top, slate legs,
-   skin head/hands) — reads as “the light figure” against the dark,
-   dull-green zombies even before the sight glow kicks in. All materials
-   are MeshStandardMaterial and land in girlMats, so the 25 m pink sight
-   glow (emissive pulse) hits every part; the lose-cinematic opacity
-   fade works on her too (it traverses meshes). */
-function buildGirlBody(obj, girlMats, unitsPerMeter) {
-  const find = (n) => {
-    let hit = obj.getObjectByName('mixamorig:' + n) || obj.getObjectByName(n);
-    if (hit) return hit;
-    obj.traverse((o) => { if (!hit && o.isBone && o.name.endsWith(n)) hit = o; });
-    return hit;
-  };
-  const B = {};
-  ['Hips', 'Neck', 'Head', 'HeadTop_End',
-   'LeftShoulder', 'LeftArm', 'LeftForeArm', 'LeftHand',
-   'RightShoulder', 'RightArm', 'RightForeArm', 'RightHand',
-   'LeftUpLeg', 'LeftLeg', 'LeftFoot',
-   'RightUpLeg', 'RightLeg', 'RightFoot'].forEach((n) => { B[n] = find(n); });
-  if (!B.Hips || !B.Head) return; // not a Mixamo-style rig — leave her a glow-only marker rather than half-build
-
-  const skinMat = new THREE.MeshStandardMaterial({ color: 0xe6c9a8, roughness: 0.75 });
-  const suitMat = new THREE.MeshStandardMaterial({ color: 0xe3edf2, roughness: 0.85 }); // pale top
-  const legMat = new THREE.MeshStandardMaterial({ color: 0x8fa9bc, roughness: 0.85 });  // slate leggings
-  for (const m of [skinMat, suitMat, legMat]) {
-    m.emissive = new THREE.Color(0x1f5a4d); // subtle teal runner base — same look as a meshed model
-    girlMats.push(m);
-  }
-  // With attach()'s per-bone counter-scale, part geometry is authored
-  // directly in world meters — unitsPerMeter is 1 and kept only so the
-  // helper reads symmetrically at every call below.
-  const M = (meters) => meters * unitsPerMeter;
-  const wp = (b) => { const p = new THREE.Vector3(); b.getWorldPosition(p); return p; };
-  const Y_AXIS = new THREE.Vector3(0, 1, 0);
-  const IDENTITY_Q = new THREE.Quaternion();
-
-  // Attach a mesh to a bone at a WORLD position/orientation (bind pose):
-  // converted into the bone's local space so the clip's bone rotations
-  // carry the part from frame one.
-  function attach(mesh, bone, worldPos, worldQuat) {
-    bone.updateWorldMatrix(true, false);
-    mesh.position.copy(bone.worldToLocal(worldPos.clone()));
-    const qb = new THREE.Quaternion(); bone.getWorldQuaternion(qb);
-    mesh.quaternion.copy(worldQuat).premultiply(qb.invert());
-    // CRITICAL scale compensation: the bones sit under the file's scene
-    // root "Armature" node, which carries the Mixamo cm→m scale 0.01
-    // (verified in the GLB). Parts parented to bones inherit it, so
-    // without this counter-scale every sphere/capsule renders ~100x too
-    // small — right positions, microscopic body: the invisible-girl
-    // symptom all over again. Counter-scaling by the bone's live world
-    // scale means the geometry below is authored directly in meters.
-    const bs = new THREE.Vector3(); bone.getWorldScale(bs);
-    mesh.scale.setScalar(1 / Math.max(bs.x, 1e-9));
-    mesh.castShadow = mesh.receiveShadow = true;
-    bone.add(mesh);
-  }
-  // Capsule between two bones' world positions, parented to the upper
-  // bone (approximate below the elbow/knee — plenty at street distance).
-  function limb(a, b, r, mat) {
-    if (!a || !b) return;
-    const pa = wp(a), pb = wp(b);
-    const mid = pa.clone().add(pb).multiplyScalar(0.5);
-    const len = Math.max(pa.distanceTo(pb), 0.01);
-    const q = new THREE.Quaternion().setFromUnitVectors(Y_AXIS, pb.clone().sub(pa).normalize());
-    attach(new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 8), mat), a, mid, q);
-  }
-  function joint(b, r, mat) {
-    if (!b) return;
-    attach(new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), mat), b, wp(b), IDENTITY_Q);
-  }
-
-  // Torso + pelvis + neck + head
-  limb(B.Hips, B.Neck, M(0.13), suitMat);
-  joint(B.Hips, M(0.125), legMat);
-  limb(B.Neck, B.Head, M(0.045), skinMat);
-  if (B.Head && B.HeadTop_End) {
-    const headCenter = wp(B.Head).lerp(wp(B.HeadTop_End), 0.5);
-    attach(new THREE.Mesh(new THREE.SphereGeometry(M(0.105), 12, 10), skinMat), B.Head, headCenter, IDENTITY_Q);
-  } else {
-    joint(B.Head, M(0.105), skinMat);
-  }
-  // Arms — pale sleeves to the elbow, bare forearms + hands
-  ['Left', 'Right'].forEach((side) => {
-    limb(B[side + 'Arm'], B[side + 'ForeArm'], M(0.05), suitMat);
-    limb(B[side + 'ForeArm'], B[side + 'Hand'], M(0.045), skinMat);
-    joint(B[side + 'Shoulder'], M(0.065), suitMat);
-    joint(B[side + 'Hand'], M(0.05), skinMat);
-  });
-  // Legs + feet
-  ['Left', 'Right'].forEach((side) => {
-    limb(B[side + 'UpLeg'], B[side + 'Leg'], M(0.065), legMat);
-    limb(B[side + 'Leg'], B[side + 'Foot'], M(0.05), legMat);
-    joint(B[side + 'Foot'], M(0.06), legMat);
-  });
-}
-
 function spawnGirl() {
-  new GLTFLoader().load(GIRL_GLB, (gltf) => {
-    const obj = gltf.scene;
-    const girlMats = [];
-    // Single-clip model — the mixer is created up front (not at the
-    // tail) so the anim-only branch below can pose the skeleton to the
-    // clip's first running frame BEFORE measuring and clothing it.
-    let mixer = null;
-    if (gltf.animations && gltf.animations.length) {
-      mixer = new THREE.AnimationMixer(obj);
-      mixer.clipAction(gltf.animations[0]).play();
-    }
-    let hasMeshes = false;
-    obj.traverse((o) => { if (o.isMesh) hasMeshes = true; });
-    if (hasMeshes) {
-      // Ground-snap + scale to target height — the loadDecorCar pattern.
-      const box = new THREE.Box3().setFromObject(obj);
-      const size = new THREE.Vector3(); box.getSize(size);
-      obj.scale.setScalar(GIRL_TARGET_HEIGHT / Math.max(size.y, 0.2));
-      const box2 = new THREE.Box3().setFromObject(obj);
-      const center = new THREE.Vector3(); box2.getCenter(center);
-      obj.position.set(-center.x, -box2.min.y, -center.z);
-      // Distinct cool tint + raised emissive: readable through night fog
-      // without glowing like a beacon.
-      obj.traverse((o) => {
-        if (!o.isMesh) return;
-        o.castShadow = true; o.receiveShadow = true;
-        o.material = o.material.clone();
-        o.material.color.multiply(new THREE.Color(0.75, 1.15, 1.05));
-        o.material.emissive = new THREE.Color(0x1f5a4d);
-        girlMats.push(o.material);
-      });
-    } else {
-      // ANIM-ONLY MODEL (this is what Injured Run.glb actually is — see
-      // buildGirlBody's header). Two file quirks break the naive path:
-      // (1) the geometry-Box3 sizing degenerates on the empty scene, and
-      // (2) the BIND pose is a lying/folded Blender-import artifact —
-      // but the clip itself assembles a properly standing run (verified
-      // in the file: hips track puts them at ~0.93 m world height,
-      // torso leaning up-forward like a runner). So advance the mixer
-      // ~one keyframe FIRST — the clip starts at t≈0.017 s — posing the
-      // skeleton into the actual running figure, then measure and
-      // clothe THAT. Any future single-clip GLB WITH a mesh still takes
-      // the hasMeshes branch unchanged.
-      if (mixer) mixer.update(0.02);
-      obj.updateMatrixWorld(true);
-      const boneBox = () => {
-        let minX = Infinity, minY = Infinity, minZ = Infinity;
-        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-        obj.traverse((o) => {
-          if (!o.isBone) return;
-          const p = new THREE.Vector3(); o.getWorldPosition(p);
-          if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
-          if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
-          if (p.z < minZ) minZ = p.z; if (p.z > maxZ) maxZ = p.z;
-        });
-        return { minX, minY, minZ, maxX, maxY, maxZ };
-      };
-      obj.updateMatrixWorld(true);
-      let bb = boneBox();
-      const height = Math.max(bb.maxY - bb.minY, 0.2);
-      const s = GIRL_TARGET_HEIGHT / height;
-      obj.scale.setScalar(s);
-      obj.position.set(0, 0, 0); // re-measure from a clean origin
-      obj.updateMatrixWorld(true);
-      bb = boneBox();
-      obj.position.set(-(bb.minX + bb.maxX) / 2, -bb.minY, -(bb.minZ + bb.maxZ) / 2);
-      obj.updateMatrixWorld(true);
-      buildGirlBody(obj, girlMats, 1);
-    }
+  Promise.all([instantiateCharacter(GIRL_CHARACTER), loadGLB(GIRL_RUN_GLB)]).then(async ([obj, run]) => {
+    const mixer = new THREE.AnimationMixer(obj);
+    const runAction = run.animations.length ? mixer.clipAction(fitClip(run.animations[0], run.scene, obj)) : null;
+    if (runAction) runAction.play();
+    // Ground-snap + scale to target height — the loadDecorCar pattern.
+    // A fresh clone has never had its world matrices computed; measuring
+    // before this reads the Armature's cm->m 0.01 scale as identity.
+    obj.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(obj);
+    const size = new THREE.Vector3(); box.getSize(size);
+    obj.scale.setScalar(GIRL_TARGET_HEIGHT / Math.max(size.y, 0.2));
+    const box2 = new THREE.Box3().setFromObject(obj);
+    const center = new THREE.Vector3(); box2.getCenter(center);
+    obj.position.set(-center.x, -box2.min.y, -center.z);
+    // No tint, glow or light of her own: lit like everything else, she
+    // has to be spotted, not followed (the radar machine sells tracking).
+    // Own material copies so the lose cinematic can fade her alone.
+    obj.traverse((o) => { if (o.isMesh) o.material = o.material.clone(); });
     const group = new THREE.Group();
     group.add(obj);
-    // A glint light travelling with her — teal while out of sight, hot
-    // pink within the 25 m sight radius (updateGirlSightGlow owns the
-    // swap, so it also washes the ground under her when she's seen).
-    const glint = new THREE.PointLight(TEAL_LIGHT, 1.4, 7, 2);
-    glint.position.set(0, 1.3, 0);
-    group.add(glint);
     const wp = GIRL_WAYPOINTS[0];
     group.position.set(wp.x, wp.y, wp.z);
+    // Facing her route from the start, so the intro's close-up sees her face
+    const next = GIRL_WAYPOINTS[1];
+    group.rotation.y = Math.atan2(next.x - wp.x, next.z - wp.z) + GIRL_RIG_YAW_OFFSET;
     scene.add(group);
-    girl = { group, mixer, wpIndex: 1, mats: girlMats, glint };
+    // Standing idle through the intro; updateGirl crossfades to the run
+    const idleClip = (await clipsFor(obj)).idle;
+    const idle = idleClip ? mixer.clipAction(idleClip) : null;
+    if (idle) { idle.play(); runAction.stop(); }
+    attachAntidote(obj);
+    girl = { group, mixer, wpIndex: 1, idle, run: runAction };
     state.girlPos = group.position; // live reference — see section header
     // "Head start" announcement moved to updateGirl's first LIVE frame —
     // pushed here it would fire behind the loading overlay and fade
     // before anyone can read it.
-  }, undefined, () => {
+  }).catch((err) => {
+    console.error('Chase girl failed to load:', err);
     // Model failed to load — spawn an invisible marker girl instead so
     // the CHASE still fully functions (movement, radar dot, catch/lose
     // checks all key off state.girlPos): there's just no visible runner.
@@ -895,63 +772,110 @@ function spawnGirl() {
     const group = new THREE.Group();
     const wp = GIRL_WAYPOINTS[0];
     group.position.set(wp.x, wp.y, wp.z);
-    // Same travelling glint as the visible girl — with the model failed,
-    // the pink in-sight glow below still marks her position, so even the
-    // fallback chase stays readable.
-    const glint = new THREE.PointLight(TEAL_LIGHT, 1.4, 7, 2);
-    glint.position.set(0, 1.3, 0);
-    group.add(glint);
     scene.add(group);
-    girl = { group, mixer: null, wpIndex: 1, mats: [], glint };
+    girl = { group, mixer: null, wpIndex: 1 };
     state.girlPos = group.position;
   });
 }
 
-/* SIGHT GLOW — the girl is the level's target, so within GIRL_SIGHT_RANGE
-   she must be unmissable: her materials' emissive pulses hot pink and the
-   glint light travelling with her turns pink, washing her and the ground
-   under her in it — zero confusion with the dull green-gray zombies even
-   in night fog, from any chase angle. Beyond the radius both revert to
-   the subtle teal runner: sight is limited, which is the mechanic (the
-   radar machine sells tracking beyond it). The invisible fallback girl
-   (model failed to load) keeps the glint, so she still glows pink in
-   range — the chase stays readable no matter what. */
-let girlGlowPhase = 0;
-function updateGirlSightGlow(dist, dt) {
-  if (!girl || !girl.glint) return;
-  girlGlowPhase += dt;
-  if (dist < GIRL_SIGHT_RANGE) {
-    // Gentle pulse (~0.9 Hz) between 0.75 and 1.3 — alive, not strobing.
-    const pulse = 0.75 + 0.55 * (0.5 + 0.5 * Math.sin(girlGlowPhase * 5.5));
-    for (const m of girl.mats) {
-      if (!m.emissive) continue; // MeshBasicMaterial has no emissive
-      m.emissive.setHex(GIRL_SIGHT_GLOW);
-      m.emissiveIntensity = pulse;
-    }
-    girl.glint.color.setHex(GIRL_SIGHT_GLOW);
-    girl.glint.intensity = 3.4;
-    girl.glint.distance = 10;
-  } else {
-    for (const m of girl.mats) {
-      if (!m.emissive) continue;
-      m.emissive.setHex(0x1f5a4d);
-      m.emissiveIntensity = 1;
-    }
-    girl.glint.color.setHex(TEAL_LIGHT);
-    girl.glint.intensity = 1.4;
-    girl.glint.distance = 7;
-  }
+/* ANTIDOTE — the vial she runs with, in her right hand: green liquid in
+   clear glass under a steel cap. Deliberately unlit (no emissive, no
+   light) — it's what she carries, not a beacon. Built ~1.3x life size
+   so it still reads in her hand at chase distance. */
+const ANTIDOTE_GRIP = { pos: [0, 0.065, -0.024], rot: [0, 0, -Math.PI / 2] }; // in the hand bone's frame, metres: upright in the palm
+function makeAntidoteVial() {
+  const g = new THREE.Group();
+  const glass = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.021, 0.021, 0.095, 16),
+    new THREE.MeshStandardMaterial({ color: 0xdfeee8, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.35, depthWrite: false })
+  );
+  const liquid = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.0175, 0.0175, 0.068, 16),
+    new THREE.MeshStandardMaterial({ color: 0x4fd65a, roughness: 0.25, metalness: 0 })
+  );
+  liquid.position.y = -0.011;
+  const cap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.023, 0.023, 0.024, 16),
+    new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.35, metalness: 0.85 })
+  );
+  cap.position.y = 0.0595;
+  liquid.renderOrder = 0; glass.renderOrder = 1; // liquid first, glass over it
+  g.add(liquid, glass, cap);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+function attachAntidote(charRoot) {
+  const hand = boneByName(charRoot, 'RightHand');
+  if (!hand) return;
+  const vial = makeAntidoteVial();
+  // The rig's bones carry its cm->m and fit-to-height scaling; undo it so
+  // the vial's own sizes stay metres
+  charRoot.updateMatrixWorld(true);
+  const s = hand.getWorldScale(new THREE.Vector3()).x;
+  vial.scale.setScalar(1 / s);
+  vial.position.set(...ANTIDOTE_GRIP.pos).multiplyScalar(1 / s);
+  vial.rotation.set(...ANTIDOTE_GRIP.rot);
+  hand.add(vial);
 }
 
+/* INTRO — once the loading screen clears, the Level2Intro fly-through
+   briefs the player (girl, port, machines) before the chase starts. It
+   waits up to INTRO_GIRL_WAIT s for her model, so the close-up isn't of
+   an empty street. */
+const INTRO_GIRL_WAIT = 4;
+let introWait = 0;
+let introStarted = false;
+/* START AMBUSH — at GO, five zombies burst out between the player and
+   the girl and charge: two right in front, three a little further on,
+   faster than a sprint, so the chase starts by fighting through them. */
+const AMBUSH_SPEED = [9.5, 11];   // m/s; the player sprints at 8.4
+function spawnStartAmbush() {
+  const p = playerBody.position;  // the spawn, facing -z toward her
+  spawnChargers([
+    [p.x - 3, p.z - 6.5], [p.x + 3, p.z - 5.5],                    // very close
+    [p.x - 6.5, p.z - 14], [p.x, p.z - 16.5], [p.x + 5.5, p.z - 15], // close
+  ], AMBUSH_SPEED);
+}
+
+function tickIntro(dt) {
+  if (!state.readyShown || !state.cinematic) return;
+  // Gameplay (which syncs the player model to its body) is frozen: stand
+  // the model on its spawn and keep its idle breathing meanwhile
+  playerVis.group.position.set(playerBody.position.x, 0, playerBody.position.z);
+  if (playerVis.mixer) playerVis.mixer.update(dt);
+  syncHandGun(); // and the gun in their hand, which gameplay normally keeps there
+  if (!introStarted) {
+    introWait += dt;
+    if (!girl && introWait < INTRO_GIRL_WAIT) return;
+    introStarted = true;
+    const wp = GIRL_WAYPOINTS[0], next = GIRL_WAYPOINTS[1];
+    playIntro({
+      girlPos: new THREE.Vector3(wp.x, wp.y, wp.z),
+      girlFacing: new THREE.Vector3(next.x - wp.x, 0, next.z - wp.z).normalize(),
+      portPos: lv2EscapePoint,
+      playerPos: playerVis.group.position.clone(),
+      onDone: spawnStartAmbush,
+    });
+    return;
+  }
+  updateIntro(dt);
+}
+
+let boatTime = 0;
 function updateGirl(dt) {
+  boatTime += dt;
+  if (lv2Scene && lv2Scene.boat) updateBoatBob(lv2Scene.boat, boatTime);
   // Loading-screen gate: state.readyShown flips exactly when the HUD is
   // revealed (maybeReady), so nothing about the chase — her movement,
   // the announce beat, the escalation clock — runs behind the overlay.
   // Without this she burns her head start while the progress bar is up.
   if (!state.readyShown) return;
   if (!girl || state.paused || state.girlCaught) return;
+  if (state.cinematic) { if (girl.mixer) girl.mixer.update(dt); return; } // idling through the intro
   if (!girlAnnounced) {
     girlAnnounced = true;
+    // Off the intro's idle and away
+    if (girl.idle && girl.run) { girl.run.reset().play(); girl.idle.crossFadeTo(girl.run, 0.3, false); }
     pushKillFeed('She has a head start — move!');
   }
   // After the lose trigger the cinematic (mission phase) owns her; while
@@ -976,15 +900,10 @@ function updateGirl(dt) {
     }
   }
   if (girl.mixer) girl.mixer.update(dt);
-  // First-sight killfeed + the sight glow — the one-shot atmosphere beat
-  // and the always-on visibility mechanic share the 25 m sight radius.
-  if (playerVis) {
-    const distToPlayer = playerVis.group.position.distanceTo(g.position);
-    if (!girlSpotted && distToPlayer < GIRL_SIGHT_RANGE) {
-      girlSpotted = true;
-      pushKillFeed('Girl spotted — heading for the port!');
-    }
-    updateGirlSightGlow(distToPlayer, dt);
+  // First-sight killfeed beat
+  if (playerVis && !girlSpotted && playerVis.group.position.distanceTo(g.position) < GIRL_SIGHT_RANGE) {
+    girlSpotted = true;
+    pushKillFeed('Girl spotted — heading for the port!');
   }
 }
 
@@ -1085,13 +1004,13 @@ function handleKeyE() {
     girl once the radar is bought — the locked design) and the live
     girl-distance row fed through lv2HUD.setGirlDistance. */
 function updateVendingInteraction() {
-  if (!lv2Machines || state.isDead || state.paused || state.girlCaught) return;
+  if (!lv2Machines || state.isDead || state.paused || state.girlCaught || state.cinematic) return;
   // Compass retarget: PORT is the visible goal from the start; GIRL only
   // after the radar purchase. girlPos is a live Vector3 reference, so the
   // override stays current as she moves without resetting it per frame.
   state.compassOverride = state.hasRadarUpgrade && state.girlPos
     ? { pos: state.girlPos, label: 'GIRL' }
-    : { pos: lv2TeleportPoint, label: 'PORT' };
+    : { pos: lv2EscapePoint, label: 'PORT' };
   if (state.hasRadarUpgrade && state.girlPos && lv2HUD && playerVis) {
     lv2HUD.setGirlDistance(playerVis.group.position.distanceTo(state.girlPos));
   }
@@ -1163,8 +1082,8 @@ let missionStartTime = 0;  // armed on the first live frame in updateMission
 let escalationTimer = ESCALATE_START;
 // One-shot killfeed progress beats (see the TODO catalog's beat list).
 let beatClosingIn = false, beatNearingPort = false, beatFinalStretch = false;
-// Active lose cinematic: { phase: 'approach'|'teleport', t, camGoal,
-// lookAt, flash, flashLight }. Null outside the ~4 s sequence.
+// Active lose cinematic: { phase: 'board'|'depart', t, camGoal, lookAt,
+// from, speed }. Null outside the ~4.5 s sequence.
 let loseCinematic = null;
 
 /** The two Level 2 end screens, mirroring the stock .end-screen pattern
@@ -1224,88 +1143,79 @@ function catchGirl() {
   finishRun('win', lv2Win);
 }
 
-/** LOSE trigger — she made the pier beacon. Hands the next ~4 s to the
-    cinematic: camera swings to a pier vantage framing her at the
-    beacon, the teleport flash takes her, then the lose screen. */
+/** LOSE trigger — she made her boat. Hands the next ~4.5 s to the
+    cinematic: the camera swings to a quay vantage, she vaults the rail
+    into the boat, and it opens up and runs for the open sea; then the
+    lose screen. */
 function startLoseCinematic() {
   state.isDead = true;             // freeze gameplay incl. the stock camera
   state.adrenalineActive = false;
   sfx.setEngine(0, false);
   document.exitPointerLock();
   dom.prompt.classList.add('hidden');
-  pushKillFeed('She reached the port —');
-  // Vantage past the quay's container stacks, framing her on the pier
-  // with the beacon beam and open water behind her.
-  const gp = state.girlPos;
+  pushKillFeed('She reached her boat —');
+  const boat = lv2Scene.boat;
+  boat.departing = true;
   loseCinematic = {
-    phase: 'approach',
+    phase: 'board',
     t: 0,
-    camGoal: new THREE.Vector3(6.5, 3.4, -196.5),
-    lookAt: new THREE.Vector3(gp.x, 1.2, gp.z),
-    flash: null,
-    flashLight: null,
+    // Over the yard's clear mid-lane (|x| < 4), above the container stacks
+    camGoal: new THREE.Vector3(2.5, 5.5, -199),
+    lookAt: boat.group.position.clone().setY(1),
+    from: state.girlPos.clone(),
+    speed: 0,
   };
+  // Off the run and into a stance for the ride
+  if (girl && girl.idle && girl.run) { girl.idle.reset().play(); girl.run.crossFadeTo(girl.idle, 0.3, false); }
 }
 
 /** The cinematic itself — this tick owns the camera while the gameplay
-    gate is frozen. approach (~2.2 s): swing to the vantage, watching her
-    wait at the beacon. teleport (~1.5 s): expanding teal flash + light
-    spike, she fades and is drawn up into the beam, then the screen. */
+    gate is frozen. board (~0.7 s): she vaults from the pier into the
+    boat. depart (~3.6 s): the boat opens up out to sea, bow lifting,
+    wake building, the camera tracking it from the quay; then the screen. */
 function updateLoseCinematic(dt) {
   const c = loseCinematic;
+  const boat = lv2Scene.boat;
   c.t += dt;
   camera.position.lerp(c.camGoal, Math.min(1, dt * 1.8));
+  c.lookAt.lerp(boat.group.position.clone().setY(1), Math.min(1, dt * 3));
   camera.lookAt(c.lookAt);
 
-  if (c.phase === 'approach') {
-    if (c.t >= 2.2) {
-      c.phase = 'teleport';
-      c.t = 0;
-      // The beacon takes her: unfogged additive flash + light spike.
-      const p = state.girlPos.clone();
-      const flash = new THREE.Mesh(
-        new THREE.SphereGeometry(0.6, 24, 16),
-        new THREE.MeshBasicMaterial({
-          color: TEAL, transparent: true, opacity: 0.85,
-          blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
-        })
-      );
-      flash.position.copy(p); flash.position.y += 1;
-      scene.add(flash);
-      const light = new THREE.PointLight(TEAL_LIGHT, 0, 26, 2);
-      light.position.copy(p); light.position.y += 1.4;
-      scene.add(light);
-      c.flash = flash;
-      c.flashLight = light;
-      sfx.burst('sawtooth', 720, 1.1, 0.3);
-      pushKillFeed('— and teleported away.');
+  if (c.phase === 'board') {
+    const k = Math.min(1, c.t / 0.7);
+    if (girl) {
+      const to = boat.group.localToWorld(boat.seat.clone());
+      const g = girl.group;
+      g.position.lerpVectors(c.from, to, k);
+      g.position.y += Math.sin(Math.PI * k) * 1.2; // up over the rail
+      g.rotation.y = Math.atan2(to.x - c.from.x, to.z - c.from.z) + GIRL_RIG_YAW_OFFSET;
+      if (k >= 1) {
+        boat.group.attach(g);
+        g.position.copy(boat.seat);
+        g.rotation.set(0, Math.PI + GIRL_RIG_YAW_OFFSET, 0); // facing the bow
+      }
     }
+    if (k >= 1) { c.phase = 'depart'; c.t = 0; sfx.burst('sawtooth', 90, 1.4, 0.18); pushKillFeed('— and she\'s away.'); }
     return;
   }
 
-  // Teleport phase — flash expands & fades, girl dissolves into it.
-  const k = Math.min(1, c.t / 1.5);
-  if (c.flash) {
-    c.flash.scale.setScalar(1 + k * 9);
-    c.flash.material.opacity = 0.85 * (1 - k);
-  }
-  if (c.flashLight) c.flashLight.intensity = 9 * Math.sin(k * Math.PI);
-  if (girl) {
-    girl.group.traverse((o) => {
-      if (!o.isMesh) return;
-      o.material.transparent = true;
-      o.material.opacity = 1 - k;
-    });
-    girl.group.position.y += dt * 1.6; // drawn up into the beam
-  }
-  if (k >= 1) {
-    if (girl) { scene.remove(girl.group); girl = null; }
-    if (c.flash) {
-      scene.remove(c.flash);
-      c.flash.geometry.dispose();
-      c.flash.material.dispose();
-    }
-    if (c.flashLight) scene.remove(c.flashLight);
+  // Depart: throttle up to ~17 m/s, bow lifting as it gets on the plane,
+  // curving west to run out between the moored ships (one lies dead
+  // ahead, another east of it; heading is radians off -z, + = east)
+  const k = Math.min(1, c.t / 2.2);
+  c.speed = 17 * k * k;
+  const heading = -Math.min(0.5, Math.max(0, c.t - 0.3) * 0.4);
+  boat.group.position.x += Math.sin(heading) * c.speed * dt;
+  boat.group.position.z -= Math.cos(heading) * c.speed * dt;
+  boat.group.rotation.y = -heading;
+  boat.group.rotation.x = 0.07 * Math.sin(Math.min(1, c.t / 1.4) * Math.PI * 0.5) - 0.03 * Math.max(0, c.t - 1.6);
+  boat.group.rotation.z = Math.sin(c.t * 2.1) * 0.02;
+  boat.group.position.y = BOAT_MOOR.y + Math.sin(c.t * 5) * 0.04;
+  boat.wake.material.opacity = Math.min(0.85, c.speed / 10);
+  boat.wake.scale.y = 0.6 + Math.min(1.4, c.speed / 12);
+  boat.wake.position.z = BOAT_LENGTH / 2 + 8 * boat.wake.scale.y;
+  if (girl && girl.mixer) girl.mixer.update(dt);
+  if (c.t >= 3.6) {
     state.girlPos = null;
     loseCinematic = null;
     lv2LoseStats.textContent =
@@ -1321,9 +1231,9 @@ function updateMission(dt) {
   // Same loading gate as updateGirl — and the chase clock arms HERE,
   // on the first live frame, so loading-screen seconds never count
   // toward the win-screen time stat.
-  if (!state.readyShown) return;
+  if (!state.readyShown || state.cinematic) return;
   if (!missionStartTime) missionStartTime = performance.now();
-  if (state.paused) return;
+  if (state.paused || state.dying) return; // overrun: the death scene has the floor
   if (loseCinematic) { updateLoseCinematic(dt); return; }
   if (state.girlCaught || state.isDead) return; // ended either way
   if (!playerVis || !state.girlPos) return;
@@ -1345,7 +1255,7 @@ function updateMission(dt) {
     beatClosingIn = true;
     pushKillFeed('Closing in — keep the pressure on');
   }
-  const girlDist = state.girlPos.distanceTo(lv2TeleportPoint);
+  const girlDist = state.girlPos.distanceTo(lv2EscapePoint);
   if (!beatNearingPort && girlDist < 50) {
     beatNearingPort = true;
     pushKillFeed("She's nearing the port!");

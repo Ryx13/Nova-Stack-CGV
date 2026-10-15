@@ -5,6 +5,7 @@ import {
   scene, world, dom, sfx, addStaticBox, pushKillFeed,
   DEPOT_POS, STREET_HALF_W, WEST_POCKET_Z, rowX,
   updateAmmoHUD, updateCoinHUD, updateShieldHUD,
+  addLight,
 } from './Scene.js';
 import { createShieldMaterial, shieldUniforms } from './shaders.js';
 import { updateFuelHUD, MAG_SIZE } from './Actions.js';
@@ -103,7 +104,7 @@ export class Barrel {
 export function spawnExplosionEffect(pos) {
   const light = new THREE.PointLight(0xff8a33, 7, 16, 2);
   light.position.copy(pos).setY(pos.y + 1.2);
-  scene.add(light);
+  addLight(scene, light);
   if (!explosionTemplate) {
     // VFX model not loaded yet (or failed) — the kill/damage logic above
     // already happened regardless, this just skips the visual. Still
@@ -243,7 +244,7 @@ export function spawnPowerup(pos, type) {
   ring.rotation.x = Math.PI / 2;
   group.add(ring);
   const light = new THREE.PointLight(color, 1.6, 5, 2);
-  group.add(light);
+  addLight(group, light);
   group.position.set(pos.x, 0.55, pos.z);
   scene.add(group);
   state.powerups.push({ mesh: group, type, life: 26 });

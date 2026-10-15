@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as CANNON from 'cannon-es';
 import { state } from './state.js';
 import {
@@ -8,10 +9,12 @@ import {
   addStaticBox, addObstacle, pushKillFeed, flashDamage, markLoaded, updateObjectiveHUD,
   STREET_HALF_W, STREET_LENGTH, KILL_TARGET, ZOMBIE_MAX_ALIVE, DEPOT_POS, WEST_POCKET_Z, rowX,
   matPlayer, matChassis,
+  addLight,
 } from './Scene.js';
 import { spawnPickup, spawnCoin, registerKillstreak } from './PowerUps.js';
 import { damagePlayer, spawnHitSpark, spawnBlood } from './Actions.js';
 import { createFireMaterial, createToxicMaterial } from './shaders.js';
+import { getSelectedCharacter, instantiateCharacter, clipsFor, boneByName } from './roster.js';
 
 /* ======================================================================
    characters.js — LOADING/CREATION OF CHARACTERS AND SCENE OBJECTS
@@ -239,7 +242,95 @@ function makeWindowTexture(litChance) {
   return tex;
 }
 export const windowTex = makeWindowTexture(0.18); // kept exported for compatibility
-const windowTexVariants = [makeWindowTexture(0.08), makeWindowTexture(0.18), makeWindowTexture(0.32)];
+export const windowTexVariants = [makeWindowTexture(0.08), makeWindowTexture(0.18), makeWindowTexture(0.32)];
+
+/* DAYLIGHT FACADES (clear-day levels) — nothing glows in daylight, and an
+   abandoned block looks it: one tile is two storeys (6.4 m) by three bays
+   (7.5 m) at real proportions, each window dark glass catching the sky,
+   smashed, boarded, or burnt out with soot licking up the wall above,
+   and grime streaking down from every sill. Light plaster/concrete base
+   so the per-building tint and the sun do the shading. Built only when a
+   clear-day level asks for one. */
+export const FACADE_TILE_W = 7.5;
+export const FACADE_TILE_H = 6.4;
+let dayFacadeVariants = null;
+export function dayFacades() {
+  if (!dayFacadeVariants) dayFacadeVariants = [0, 1, 2, 3].map(() => makeDayFacadeTexture());
+  return dayFacadeVariants;
+}
+function makeDayFacadeTexture() {
+  const tex = new THREE.CanvasTexture(makeCanvas(256, 256, (ctx, w, h) => {
+    ctx.fillStyle = '#d9d0c4'; ctx.fillRect(0, 0, w, h);
+    // plaster mottling
+    for (let i = 0; i < 260; i++) {
+      ctx.fillStyle = `rgba(${Math.random() < 0.5 ? '40,34,28' : '255,250,240'},${(Math.random() * 0.07).toFixed(3)})`;
+      ctx.beginPath(); ctx.arc(Math.random() * w, Math.random() * h, 3 + Math.random() * 18, 0, Math.PI * 2); ctx.fill();
+    }
+    const storeyH = h / 2, bayW = w / 3;
+    for (let r = 0; r < 2; r++) {
+      // floor-line ledge
+      ctx.fillStyle = 'rgba(60,52,44,0.35)'; ctx.fillRect(0, r * storeyH + storeyH - 6, w, 4);
+      for (let c = 0; c < 3; c++) {
+        const x = c * bayW + bayW * 0.24, y = r * storeyH + storeyH * 0.22;
+        const ww = bayW * 0.52, wh = storeyH * 0.5;
+        const roll = Math.random();
+        // sill grime runs down the wall below every window
+        for (let k = 0; k < 6; k++) {
+          const sx = x + Math.random() * ww;
+          const g = ctx.createLinearGradient(0, y + wh, 0, y + wh + 20 + Math.random() * 40);
+          g.addColorStop(0, 'rgba(45,38,30,0.35)'); g.addColorStop(1, 'rgba(45,38,30,0)');
+          ctx.fillStyle = g; ctx.fillRect(sx, y + wh, 1.5 + Math.random() * 2.5, 60);
+        }
+        if (roll < 0.18) {
+          // burnt out: black hole, soot plume up the wall
+          const g = ctx.createLinearGradient(0, y + wh, 0, y - storeyH * 0.55);
+          g.addColorStop(0, 'rgba(20,16,12,0.85)'); g.addColorStop(1, 'rgba(20,16,12,0)');
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.moveTo(x - 4, y + wh); ctx.lineTo(x + ww + 4, y + wh);
+          ctx.lineTo(x + ww + 14, y - storeyH * 0.5); ctx.lineTo(x - 14, y - storeyH * 0.5);
+          ctx.fill();
+          ctx.fillStyle = '#0b0907'; ctx.fillRect(x, y, ww, wh);
+        } else {
+          // frame + reveal
+          ctx.fillStyle = '#3b342d'; ctx.fillRect(x - 3, y - 3, ww + 6, wh + 6);
+          if (roll < 0.36) {
+            // boarded up
+            ctx.fillStyle = '#5a4630'; ctx.fillRect(x, y, ww, wh);
+            ctx.strokeStyle = 'rgba(25,18,10,0.7)'; ctx.lineWidth = 1.5;
+            for (let b = 1; b < 5; b++) { ctx.beginPath(); ctx.moveTo(x, y + (wh * b) / 5); ctx.lineTo(x + ww, y + (wh * b) / 5); ctx.stroke(); }
+            ctx.fillStyle = '#6b5539'; ctx.save(); ctx.translate(x + ww / 2, y + wh / 2); ctx.rotate(-0.5); ctx.fillRect(-ww * 0.65, -4, ww * 1.3, 8); ctx.restore();
+          } else {
+            // glass: dark interior, sky reflection brightening toward the top
+            const g = ctx.createLinearGradient(0, y, 0, y + wh);
+            g.addColorStop(0, '#6d6f70'); g.addColorStop(0.45, '#2b2d2f'); g.addColorStop(1, '#131415');
+            ctx.fillStyle = g; ctx.fillRect(x, y, ww, wh);
+            ctx.fillStyle = '#3b342d'; ctx.fillRect(x + ww / 2 - 1.5, y, 3, wh); // mullion
+            if (roll < 0.62) {
+              // smashed: a dark hole with jagged shards left in the frame
+              ctx.fillStyle = '#0d0d0e';
+              ctx.beginPath();
+              const cx = x + ww * (0.3 + Math.random() * 0.4), cy = y + wh * (0.3 + Math.random() * 0.4);
+              for (let a = 0; a < 9; a++) {
+                const ang = (a / 9) * Math.PI * 2, rr = Math.min(ww, wh) * (0.2 + Math.random() * 0.35);
+                ctx.lineTo(cx + Math.cos(ang) * rr, cy + Math.sin(ang) * rr);
+              }
+              ctx.fill();
+            }
+          }
+        }
+      }
+    }
+    // weather streaks top to bottom + darkening toward the ground
+    for (let i = 0; i < 40; i++) {
+      ctx.fillStyle = `rgba(50,42,34,${(Math.random() * 0.08).toFixed(3)})`;
+      ctx.fillRect(Math.random() * w, 0, 1 + Math.random() * 3, h);
+    }
+  }));
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
 
 // Shared radial glow sprite for streetlight heads (and any future prop
 // dressing) — one texture, many sprites.
@@ -294,7 +385,7 @@ const neonGlowTex = new THREE.CanvasTexture(makeCanvas(128, 128, (ctx) => {
   g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
 }));
-function addNeonSign(g, w, d, streetSide, night) {
+function addNeonSign(g, w, d, streetSide, night, dead = false) {
   const word = NEON_WORDS[Math.floor(rnd() * NEON_WORDS.length)];
   const color = NEON_COLORS[Math.floor(rnd() * NEON_COLORS.length)];
   // ~45% mount as a "blade" sign sticking out perpendicular to the facade
@@ -319,8 +410,14 @@ function addNeonSign(g, w, d, streetSide, night) {
     panel.position.set(streetSide * (w / 2 + 0.09), 4.4 + rnd() * 1.6, (rnd() - 0.5) * d * 0.55);
     panel.rotation.y = streetSide > 0 ? Math.PI / 2 : -Math.PI / 2;
   }
-  panel.userData.neonSign = true;
+  panel.userData.neonSign = !dead;
   g.add(panel);
+  if (dead) {
+    // Daylight in a dead city: the sign hangs there switched off — tube
+    // colours dulled to grey-tinted glass, no glow
+    panel.material.color.setRGB(0.32, 0.3, 0.28);
+    return;
+  }
   const halo = new THREE.Sprite(new THREE.SpriteMaterial({
     map: neonGlowTex, transparent: true, depthWrite: false, fog: false,
     blending: THREE.AdditiveBlending, opacity: night ? 0.65 : 0.25,
@@ -622,52 +719,486 @@ export function loadStreetSurface() {
 }
 
 /* ---------------------------------------------------------------------
+   RUINED CITY (state.ruinedCity — Level 2) — the street after the
+   outbreak: shopfront ground floors with shutters and smashed glass,
+   stepped broken rooflines where whole storeys came down, blown-out
+   street corners exposing floor slabs and rebar, and fully collapsed
+   blocks slumped into rubble mounds (makeCollapsedBuilding).
+
+   Facade UVs are planar in building-local metres (one texture tile =
+   FACADE tile size), so windows stay aligned across every piece of a
+   ruin and textures never stretch with a building's size — which also
+   lets every building share the same few textures. Ruin decisions use
+   their own seeded RNG so the shared world rnd() sequence — wreck and
+   prop placement — is exactly what it was before.
+--------------------------------------------------------------------- */
+let ruinRnd = mulberry32(0x5EED_2B1);
+const STOREY = 3.2;
+const NIGHT_TILE = 4;           // the night window texture's old 4 m repeat
+let storefrontTex = null;
+let concreteRuinMat = null;
+let interiorMat = null;
+let rebarMat = null;
+
+function ruinMaterials() {
+  if (!concreteRuinMat) {
+    concreteRuinMat = new THREE.MeshStandardMaterial({ map: concreteTex, color: 0x9a948c, roughness: 0.96 });
+    interiorMat = new THREE.MeshStandardMaterial({ color: 0x1c1915, roughness: 1 });
+    rebarMat = new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.7, metalness: 0.4 });
+  }
+  return { concrete: concreteRuinMat, interior: interiorMat, rebar: rebarMat };
+}
+
+// World-scale planar UVs: side faces map (along-face, height) / tile,
+// tops map (x, z). Works on any box — cut, jagged or translated.
+export function planarFacadeUVs(geo, tileW, tileH) {
+  const pos = geo.attributes.position, nrm = geo.attributes.normal, uv = geo.attributes.uv;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const nx = nrm.getX(i), ny = nrm.getY(i), nz = nrm.getZ(i);
+    if (Math.abs(ny) > 0.5) uv.setXY(i, x / tileW, z / tileW);
+    else if (Math.abs(nx) > Math.abs(nz)) uv.setXY(i, (nx > 0 ? -z : z) / tileW, y / tileH);
+    else uv.setXY(i, (nz > 0 ? x : -x) / tileW, y / tileH);
+  }
+  uv.needsUpdate = true;
+}
+
+// A box standing on y = y0 whose top is broken: the top grid drops by
+// whole storeys (plus a ragged fraction) column by column. `dropAt`
+// maps a top vertex (x, z) to how much it loses; keyed by position so
+// faces sharing an edge agree and the shell stays closed.
+export function brokenBox(w, h, d, y0, dropAt) {
+  const geo = new THREE.BoxGeometry(w, h, d, Math.max(2, Math.round(w / 2.4)), 1, Math.max(2, Math.round(d / 2.4)));
+  geo.translate(0, y0 + h / 2, 0);
+  const pos = geo.attributes.position;
+  const drops = new Map();
+  const top = y0 + h - 0.001;
+  for (let i = 0; i < pos.count; i++) {
+    if (pos.getY(i) < top) continue;
+    const k = `${pos.getX(i).toFixed(2)},${pos.getZ(i).toFixed(2)}`;
+    if (!drops.has(k)) drops.set(k, Math.min(h - 0.5, dropAt(pos.getX(i), pos.getZ(i))));
+    pos.setY(i, y0 + h - drops.get(k));
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+// Damage comes off in sections, not per vertex: the top is cut into 4-8 m
+// cells that each lose 0..maxStoreys whole storeys, so it reads as broken
+// plateaus stepping down (one 2.4 m slope between cells) rather than spikes
+// (keep: the share of cells left whole)
+const raggedStoreys = (maxStoreys, keep = 0.35) => {
+  const seg = 4 + ruinRnd() * 4;
+  const cells = new Map();
+  return (x, z) => {
+    const k = `${Math.floor(x / seg)},${Math.floor(z / seg)}`;
+    if (!cells.has(k)) cells.set(k, ruinRnd() < keep ? 0 : (1 + Math.floor(ruinRnd() * maxStoreys)) * STOREY);
+    return cells.get(k) + ruinRnd() * 0.5;
+  };
+};
+
+// Rolled-down shutters, smashed shop windows, boarded bays and graffiti —
+// one 10 m x 3.2 m tile wrapping every building's ground floor
+function storefrontTexture() {
+  if (storefrontTex) return storefrontTex;
+  storefrontTex = new THREE.CanvasTexture(makeCanvas(512, 160, (ctx, w, h) => {
+    ctx.fillStyle = '#4a4540'; ctx.fillRect(0, 0, w, h);
+    const bays = 3, bw = w / bays;
+    for (let b = 0; b < bays; b++) {
+      const x = b * bw + 10, y = 26, ww = bw - 20, hh = h - 30;
+      const kind = Math.random();
+      if (kind < 0.45) {
+        // corrugated roller shutter, rust and dents
+        ctx.fillStyle = '#6d6862'; ctx.fillRect(x, y, ww, hh);
+        for (let s = y; s < y + hh; s += 5) { ctx.fillStyle = 'rgba(20,18,16,0.35)'; ctx.fillRect(x, s, ww, 1.5); }
+        for (let r = 0; r < 18; r++) { ctx.fillStyle = `rgba(120,62,28,${(Math.random() * 0.35).toFixed(2)})`; ctx.fillRect(x + Math.random() * ww, y + Math.random() * hh, 4 + Math.random() * 14, 2 + Math.random() * 20); }
+        if (Math.random() < 0.5) { ctx.fillStyle = '#0c0b0a'; ctx.fillRect(x, y + hh * 0.75, ww * (0.3 + Math.random() * 0.5), hh * 0.25); } // pried up
+      } else if (kind < 0.8) {
+        // smashed shop window: dark interior, shards in the frame
+        ctx.fillStyle = '#121110'; ctx.fillRect(x, y, ww, hh);
+        ctx.fillStyle = 'rgba(160,170,175,0.35)';
+        for (let s = 0; s < 6; s++) {
+          ctx.beginPath(); const sx = x + Math.random() * ww; ctx.moveTo(sx, y); ctx.lineTo(sx + 10 + Math.random() * 30, y); ctx.lineTo(sx + Math.random() * 20, y + 10 + Math.random() * 40); ctx.fill();
+        }
+        ctx.strokeStyle = '#2a2622'; ctx.lineWidth = 4; ctx.strokeRect(x, y, ww, hh);
+      } else {
+        // boarded
+        ctx.fillStyle = '#5b4732'; ctx.fillRect(x, y, ww, hh);
+        for (let p = 0; p < 7; p++) { ctx.fillStyle = `rgba(${p % 2 ? '35,26,16' : '110,86,58'},0.4)`; ctx.fillRect(x + (ww * p) / 7, y, 2, hh); }
+      }
+      // sign fascia above each bay, faded
+      ctx.fillStyle = `hsl(${(Math.random() * 360) | 0},18%,${22 + Math.random() * 12}%)`; ctx.fillRect(x - 4, 4, ww + 8, 18);
+    }
+    // graffiti scrawls
+    for (let gI = 0; gI < 5; gI++) {
+      ctx.strokeStyle = ['#b33a2e', '#2e6fb3', '#d8d0c0', '#1d1d1d', '#3f9a4a'][gI % 5]; ctx.lineWidth = 3 + Math.random() * 3; ctx.globalAlpha = 0.6;
+      ctx.beginPath(); let gx = Math.random() * w, gy = 60 + Math.random() * 80; ctx.moveTo(gx, gy);
+      for (let k = 0; k < 8; k++) { gx += 8 + Math.random() * 14; gy += (Math.random() - 0.5) * 30; ctx.lineTo(gx, gy); }
+      ctx.stroke(); ctx.globalAlpha = 1;
+    }
+    // grime rising from the pavement
+    const g = ctx.createLinearGradient(0, h, 0, h * 0.4);
+    g.addColorStop(0, 'rgba(30,25,20,0.55)'); g.addColorStop(1, 'rgba(30,25,20,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  }));
+  storefrontTex.wrapS = storefrontTex.wrapT = THREE.RepeatWrapping;
+  storefrontTex.colorSpace = THREE.SRGBColorSpace;
+  return storefrontTex;
+}
+
+// Body of a ruined building into group g. Returns 'intact' | 'broken' |
+// 'corner' so the caller knows whether a roof slab / rooftop kit fits.
+// forceShape ('corner' | 'broken' | 'wrecked' | 'gutted' | 'intact')
+// overrides the roll, which is still drawn. 'wrecked' is broken harder: up
+// to 5 storeys lost, but never below ~8 m, so a lit window low on the
+// facade stays under the top. 'gutted' loses over half its height, every
+// section down a further 0-2 storeys.
+function addRuinedBody(g, w, h, d, mats, tileW, tileH, streetSide, forceShape) {
+  const roll = { corner: 0.1, broken: 0.5, wrecked: 0.5, gutted: 0.5, intact: 0.9 }[forceShape] ?? ruinRnd();
+  if (forceShape) ruinRnd();
+  const add = (geo, mat, shadow = true) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = shadow; m.receiveShadow = true;
+    g.add(m);
+    return m;
+  };
+  if (roll < 0.25 && h > 12) {
+    // Blown-out upper corner on the street face, at one end of the block
+    const { concrete, interior, rebar } = ruinMaterials();
+    const cutH = Math.max(2, Math.floor(h * (0.3 + ruinRnd() * 0.25) / STOREY)) * STOREY;
+    const nw = w * (0.38 + ruinRnd() * 0.15), nd = d * (0.35 + ruinRnd() * 0.15);
+    const end = ruinRnd() < 0.5 ? -1 : 1;              // which z end loses its corner
+    const sx = streetSide;                              // street face is at x = sx * w / 2
+    const upH = h - cutH;
+    const lower = new THREE.BoxGeometry(w, cutH, d); lower.translate(0, cutH / 2, 0);
+    // A: the far (non-street) slice, full depth; B: the street slice, minus the notch
+    const aW = w - nw, bD = d - nd;
+    const geoA = brokenBox(aW, upH, d, cutH, raggedStoreys(1));
+    geoA.translate(-sx * nw / 2, 0, 0);
+    const geoB = brokenBox(nw, upH, bD, cutH, raggedStoreys(2));
+    geoB.translate(sx * (w - nw) / 2, 0, -end * nd / 2);
+    for (const geo of [lower, geoA, geoB]) { planarFacadeUVs(geo, tileW, tileH); add(geo, mats); }
+    // Exposed floors in the notch: slabs at every storey, some snapped
+    // short and sagging, rebar poking out of the broken edges
+    const nx = sx * (w / 2 - nw / 2), nz = end * (d / 2 - nd / 2);
+    for (let y = cutH; y < h - 1; y += STOREY) {
+      const frac = ruinRnd() < 0.35 ? 0.35 + ruinRnd() * 0.4 : 1;
+      const slab = new THREE.BoxGeometry(nw * frac, 0.28, nd * (frac < 1 ? 1 : 0.98));
+      const m = add(slab, concrete);
+      m.position.set(nx - sx * nw * (1 - frac) / 2, y, nz);
+      if (frac < 1) m.rotation.z = sx * (0.06 + ruinRnd() * 0.1);
+      for (let r = 0; r < 3; r++) {
+        const bar = add(new THREE.BoxGeometry(0.05, 0.05, 0.6 + ruinRnd() * 0.8), rebar, false);
+        bar.position.set(nx + sx * (nw * frac - nw / 2), y + 0.05, nz + (ruinRnd() - 0.5) * nd * 0.8);
+        bar.rotation.set(ruinRnd() * 0.6 - 0.3, Math.PI / 2, ruinRnd() * 0.5 - 0.25);
+      }
+    }
+    // Dark interior walls behind the notch (instead of facade windows facing inward)
+    const back = add(new THREE.PlaneGeometry(nd, upH), interior, false);
+    back.position.set(nx - sx * nw / 2 + sx * 0.02, cutH + upH / 2, nz);
+    back.rotation.y = sx > 0 ? Math.PI / 2 : -Math.PI / 2;
+    const side = add(new THREE.PlaneGeometry(nw, upH), interior, false);
+    side.position.set(nx, cutH + upH / 2, nz - end * nd / 2 + end * 0.02);
+    side.rotation.y = end > 0 ? 0 : Math.PI;
+    return 'corner';
+  }
+  if (forceShape === 'gutted') {
+    const base = Math.floor(h * 0.55 / STOREY);
+    const cells = new Map();
+    const geo = brokenBox(w, h, d, 0, (x, z) => {
+      const k = `${Math.floor(x / 5)},${Math.floor(z / 5)}`;
+      if (!cells.has(k)) cells.set(k, Math.min(h - 6, (base + Math.floor(ruinRnd() * 3)) * STOREY));
+      return cells.get(k) + ruinRnd() * 0.5;
+    });
+    planarFacadeUVs(geo, tileW, tileH);
+    add(geo, mats);
+    return 'broken';
+  }
+  if (roll < 0.7) {
+    const storeys = forceShape === 'wrecked'
+      ? Math.max(1, Math.min(5, Math.floor((h - 8.5) / STOREY)))
+      : (h > 20 ? 3 : 2);
+    const geo = brokenBox(w, h, d, 0, raggedStoreys(storeys, forceShape === 'wrecked' ? 0.1 : 0.35));
+    planarFacadeUVs(geo, tileW, tileH);
+    add(geo, mats);
+    return 'broken';
+  }
+  const geo = new THREE.BoxGeometry(w, h, d);
+  geo.translate(0, h / 2, 0);
+  planarFacadeUVs(geo, tileW, tileH);
+  add(geo, mats);
+  return 'intact';
+}
+
+/* LIT WINDOWS — on a dead-grid night, the few windows that still have
+   power, each throwing a soft shaft of light out and down toward the
+   street. Slots follow the day facade texture (FACADE_TILE_W x
+   FACADE_TILE_H tiles, 3 bays x 2 storeys): window centres every 2.5 m
+   along at 1.25 m and every 3.2 m up at 1.696 m, measured in the planar
+   UV space of the facade — world metres for world-planar geometry, or
+   from (ux, uz) for geometry UV'd in a group's local space.
+   lit: { windows: [], rays: [] } collects geometry; addLitWindowMeshes
+   merges it into two meshes (one draw call each). */
+export function addLitWindows(lit, { cx, cz, w, d, n, rnd, count, minY = 4, maxY, ux = 0, uz = 0 }) {
+  const alongX = Math.abs(n.z) > 0.5;                 // the facade runs along x
+  const span = alongX ? w : d;
+  const c = alongX ? cx - ux : cz - uz;               // facade centre, in UV space
+  const fx = cx + n.x * w / 2, fz = cz + n.z * d / 2; // facade centre, world
+  const bay = FACADE_TILE_W / 3, storey = FACADE_TILE_H / 2;
+  const cols = [], rows = [];
+  for (let u = Math.ceil((c - span / 2 + 1 - bay / 2) / bay) * bay + bay / 2; u < c + span / 2 - 1; u += bay) cols.push(u + (alongX ? ux : uz));
+  for (let y = 1.696; y <= maxY; y += storey) if (y >= minY) rows.push(y);
+  if (!cols.length || !rows.length) return;
+  const up = new THREE.Vector3(0, 1, 0), down = new THREE.Vector3(0, -1, 0);
+  const taken = new Set();
+  for (let i = 0; i < count; i++) {
+    const s = cols[(rnd() * cols.length) | 0], y = rows[(rnd() * rows.length) | 0];
+    if (taken.has(`${s},${y}`)) continue;
+    taken.add(`${s},${y}`);
+    const pos = new THREE.Vector3((alongX ? s : fx) + n.x * 0.06, y, (alongX ? fz : s) + n.z * 0.06);
+    const win = new THREE.PlaneGeometry(1.25, 1.55);
+    win.lookAt(n); // turns the plane's face toward n
+    win.translate(pos.x, pos.y, pos.z);
+    lit.windows.push(win);
+    // The shaft: an open frustum, narrow end on the window, fanning out
+    // along the facade normal and tipped down toward the ground
+    const L = 9 + rnd() * 5;
+    const dir = n.clone().applyAxisAngle(up, (rnd() - 0.5) * 0.3);
+    dir.multiplyScalar(Math.cos(0.35 + rnd() * 0.2)).add(new THREE.Vector3(0, -Math.sin(0.45), 0)).normalize();
+    const ray = new THREE.CylinderGeometry(0.7, 2.4, L, 8, 1, true);
+    ray.translate(0, -L / 2, 0);                       // narrow end (top) at the origin
+    ray.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(down, dir));
+    ray.translate(pos.x, pos.y, pos.z);
+    ray.deleteAttribute('normal');
+    lit.rays.push(ray);
+  }
+}
+let rayTex = null;
+function rayTexture() {
+  if (rayTex) return rayTex;
+  // Bright at the window (the frustum's top, v = 1), gone by the far end
+  rayTex = new THREE.CanvasTexture(makeCanvas(4, 128, (ctx) => {
+    const g = ctx.createLinearGradient(0, 0, 0, 128);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.35, 'rgba(255,255,255,0.45)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 4, 128);
+  }));
+  return rayTex;
+}
+export function addLitWindowMeshes(lit) {
+  if (!lit.windows.length) return;
+  scene.add(new THREE.Mesh(mergeGeometries(lit.windows), new THREE.MeshBasicMaterial({ color: 0xffb35e })));
+  const rays = new THREE.Mesh(mergeGeometries(lit.rays), new THREE.MeshBasicMaterial({
+    map: rayTexture(), color: 0xffbf7a, transparent: true, opacity: 0.26,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+  }));
+  rays.renderOrder = 2;
+  scene.add(rays);
+}
+
+/* Rubble mound — a lumpy dome of broken concrete with chunks and slabs
+   bedded in it, all merged into one mesh per material. `w` x `d`
+   footprint, `peak` metres high. Visual only — callers add colliders. */
+export function makeRubbleMound(w, d, peak) {
+  const { concrete, rebar } = ruinMaterials();
+  const g = new THREE.Group();
+  const mound = new THREE.PlaneGeometry(w, d, 14, 14);
+  mound.rotateX(-Math.PI / 2);
+  const pos = mound.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i) / (w / 2), z = pos.getZ(i) / (d / 2);
+    const r = Math.min(1, Math.sqrt(x * x + z * z));
+    const dome = Math.cos(r * Math.PI / 2);
+    pos.setY(i, Math.max(0, peak * dome * dome * (0.75 + ruinRnd() * 0.5)));
+  }
+  mound.computeVertexNormals();
+  const chunks = [];
+  const n = Math.round((w * d) / 6);
+  for (let i = 0; i < n; i++) {
+    const s = 0.3 + ruinRnd() * 1.1;
+    const c = new THREE.BoxGeometry(s, s * (0.3 + ruinRnd() * 0.5), s * (0.6 + ruinRnd() * 0.8));
+    const px = (ruinRnd() - 0.5) * w * 0.9, pz = (ruinRnd() - 0.5) * d * 0.9;
+    const rr = Math.min(1, Math.hypot(px / (w / 2), pz / (d / 2)));
+    c.rotateX(ruinRnd() * 0.8); c.rotateY(ruinRnd() * Math.PI); c.rotateZ(ruinRnd() * 0.8);
+    c.translate(px, peak * Math.cos(rr * Math.PI / 2) ** 2 * 0.9, pz);
+    chunks.push(c);
+  }
+  // a couple of big broken floor slabs leaning out of the pile
+  for (let i = 0; i < 2; i++) {
+    const s = new THREE.BoxGeometry(2.5 + ruinRnd() * 2.5, 0.25, 1.8 + ruinRnd() * 1.6);
+    s.rotateZ(0.3 + ruinRnd() * 0.5); s.rotateY(ruinRnd() * Math.PI);
+    s.translate((ruinRnd() - 0.5) * w * 0.5, peak * 0.55, (ruinRnd() - 0.5) * d * 0.5);
+    chunks.push(s);
+  }
+  const bars = [];
+  for (let i = 0; i < 8; i++) {
+    const b = new THREE.BoxGeometry(0.05, 0.05, 1 + ruinRnd() * 1.5);
+    b.rotateX(ruinRnd() - 0.5); b.rotateY(ruinRnd() * Math.PI);
+    b.translate((ruinRnd() - 0.5) * w * 0.6, peak * (0.4 + ruinRnd() * 0.5), (ruinRnd() - 0.5) * d * 0.6);
+    bars.push(b);
+  }
+  const rock = new THREE.Mesh(mergeGeometries([mound, ...chunks.map((c) => c.toNonIndexed())].map((x) => (x.index ? x.toNonIndexed() : x))), concrete);
+  rock.castShadow = rock.receiveShadow = true;
+  g.add(rock);
+  g.add(new THREE.Mesh(mergeGeometries(bars.map((b) => b.toNonIndexed())), rebar));
+  return g;
+}
+
+/* Collapsed block — stub walls with ragged tops sloping down toward the
+   street, floors pancaked down inside, and a rubble mound filling the
+   footprint and spilling across the pavement (never the road: `spillTo`
+   is the x the spill may reach). Colliders: the footprint, low; the
+   spill, lower. */
+export function makeCollapsedBuilding(x, z, w, d, h, streetSide, spillTo) {
+  const g = new THREE.Group();
+  const clearDay = state.timeOfDay === 'day' && state.clearDay;
+  const tex = clearDay ? dayFacades()[(ruinRnd() * 4) | 0] : windowTexVariants[0];
+  const tileW = clearDay ? FACADE_TILE_W : NIGHT_TILE, tileH = clearDay ? FACADE_TILE_H : NIGHT_TILE;
+  const wallMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, color: new THREE.Color().setHSL(0.07, 0.14, clearDay ? 0.55 : 0.4) });
+  const { concrete, interior } = ruinMaterials();
+  const T = 0.45;
+  const sx = streetSide;
+  const add = (geo, mat, shadow = true) => {
+    const m = new THREE.Mesh(geo, mat); m.castShadow = shadow; m.receiveShadow = true; g.add(m); return m;
+  };
+  // ragged top that falls away toward the street side
+  const slope = (fromX) => (vx) => {
+    const t = (sx * (vx + fromX) + w / 2) / w; // 0 far side .. 1 street side
+    return h * (0.15 + 0.75 * Math.max(0, Math.min(1, t))) + ruinRnd() * 1.6;
+  };
+  // far wall
+  const far = brokenBox(T, h, d, 0, () => h * 0.1 + ruinRnd() * STOREY * 1.5);
+  far.translate(-sx * (w / 2 - T / 2), 0, 0);
+  // side walls, sloping down toward the street
+  const sideA = brokenBox(w, h, T, 0, slope(0)); sideA.translate(0, 0, d / 2 - T / 2);
+  const sideB = brokenBox(w, h, T, 0, slope(0)); sideB.translate(0, 0, -d / 2 + T / 2);
+  // street wall: knee-high stubs with gaps
+  const stubs = [];
+  for (let zz = -d / 2 + 1; zz < d / 2 - 1; zz += 2.2 + ruinRnd() * 2) {
+    if (ruinRnd() < 0.35) continue;
+    const sh = 0.8 + ruinRnd() * 2.6;
+    const s = brokenBox(T, sh, 1.6 + ruinRnd() * 1.4, 0, () => ruinRnd() * sh * 0.5);
+    s.translate(sx * (w / 2 - T / 2), 0, zz);
+    stubs.push(s);
+  }
+  for (const geo of [far, sideA, sideB, ...stubs]) { planarFacadeUVs(geo, tileW, tileH); add(geo, wallMat); }
+  // dark floor of the gutted interior
+  const floor = add(new THREE.PlaneGeometry(w - T * 2, d - T * 2), interior, false);
+  floor.rotation.x = -Math.PI / 2; floor.position.y = 0.04;
+  // pancaked floors hanging from the far wall down toward the street
+  for (let i = 0; i < 3; i++) {
+    const y = STOREY * (1 + i) + ruinRnd();
+    if (y > h * 0.8) break;
+    const sl = add(new THREE.BoxGeometry(w * (0.55 + ruinRnd() * 0.3), 0.3, d * (0.5 + ruinRnd() * 0.35)), concrete);
+    sl.position.set(-sx * w * 0.18, y * 0.7, (ruinRnd() - 0.5) * d * 0.3);
+    sl.rotation.z = sx * -(0.35 + ruinRnd() * 0.35);
+    sl.rotation.x = (ruinRnd() - 0.5) * 0.3;
+  }
+  // rubble filling the footprint and spilling across the pavement
+  const spill = Math.max(0, Math.abs(spillTo - x) - w / 2);
+  const mound = makeRubbleMound(w + spill, d * 1.05, Math.min(h * 0.35, 5));
+  mound.position.set(sx * spill / 2, 0, 0);
+  g.add(mound);
+  g.position.set(x, 0, z);
+  scene.add(g);
+  g.traverse((o) => { if (o.isMesh) state.occluders.push(o); });
+  addStaticBox(w / 2, h * 0.3, d / 2, x, h * 0.3, z);
+  if (spill > 0.5) addStaticBox(spill / 2, 0.6, d * 0.45, x + sx * (w / 2 + spill / 2), 0.6, z);
+  return g;
+}
+
+/* ---------------------------------------------------------------------
    BUILDINGS
 --------------------------------------------------------------------- */
-export function makeBuilding(x, z, w, h, d) {
+export function makeBuilding(x, z, w, h, d, opts = {}) {
   const g = new THREE.Group();
-  const tex = windowTexVariants[Math.floor(rnd() * windowTexVariants.length)].clone();
-  tex.needsUpdate = true;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(Math.max(2, Math.round(w / 4)), Math.max(3, Math.round(h / 4)));
-  const tint = new THREE.Color().setHSL(0.08, 0.08, 0.38 + rnd() * 0.12);
-  // Lit windows glow: the facade texture doubles as the emissive map —
-  // dark walls contribute ~nothing, lit patches emit. Full strength at
-  // night when the sun is off and they're the point; softened in Day
-  // mode where a glowing facade reads odd under full sun.
   const night = state.timeOfDay === 'night';
-  const mat = new THREE.MeshStandardMaterial({
-    map: tex, roughness: 0.94, color: tint,
-    emissive: 0xffb066, emissiveMap: tex, emissiveIntensity: night ? 0.9 : 0.22,
-  });
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  mesh.position.y = h / 2;
-  mesh.castShadow = true; mesh.receiveShadow = true;
-  g.add(mesh);
-  const band = new THREE.Mesh(
-    new THREE.BoxGeometry(w + 0.08, 3.2, d + 0.08),
-    new THREE.MeshStandardMaterial({ color: 0x2b2724, roughness: 0.9 })
-  );
-  band.position.y = 1.6;
-  g.add(band);
-  const door = new THREE.Mesh(
-    new THREE.BoxGeometry(1.2, 2.4, 0.12),
-    new THREE.MeshStandardMaterial({ color: 0x1a1512, roughness: 0.8 })
-  );
-  const face = x > 0 ? -1 : 1;
-  door.position.set(face * (w / 2 - 1.4) * 0.15, 1.2, (x > 0 ? -1 : 1) * (d / 2 + 0.05));
-  if (x > 0) door.position.z = -d / 2 - 0.06;
-  else door.position.z = d / 2 + 0.06;
-  g.add(door);
-  const roof = new THREE.Mesh(
-    new THREE.BoxGeometry(w * 0.92, 0.4, d * 0.92),
-    new THREE.MeshStandardMaterial({ map: roofTex, roughness: 1 })
-  );
-  roof.position.y = h + 0.15;
-  g.add(roof);
+  const clearDay = state.timeOfDay === 'day' && state.clearDay;
+  // Same rnd() calls in every mode, so the city's layout never changes
+  // with the time of day
+  const variant = rnd();
+  const lightness = rnd();
+  let mat;
+  const ruined = state.ruinedCity;
+  // Dead-grid night (state.deadGridNight, Level 2): the day facades, dark,
+  // with no glowing window grid — lit windows are added one by one
+  // (addLitWindows) on the few buildings that still have power
+  const deadNight = night && state.deadGridNight && !opts.oldLook;
+  if (clearDay || deadNight) {
+    const set = dayFacades();
+    let tex = set[Math.floor(variant * set.length)];
+    if (!ruined) {
+      tex = tex.clone();
+      tex.needsUpdate = true;
+      tex.repeat.set(Math.max(1, Math.round(w / FACADE_TILE_W)), Math.max(1, Math.round(h / FACADE_TILE_H)));
+    }
+    // Varied weathered plaster/concrete/brick-ish tints
+    const tint = new THREE.Color().setHSL(0.06 + variant * 0.05, 0.12 + lightness * 0.12,
+      deadNight ? 0.24 + lightness * 0.08 : 0.5 + lightness * 0.18);
+    mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, color: tint });
+  } else {
+    let tex = windowTexVariants[Math.floor(variant * windowTexVariants.length)];
+    if (!ruined) {
+      tex = tex.clone();
+      tex.needsUpdate = true;
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(Math.max(2, Math.round(w / 4)), Math.max(3, Math.round(h / 4)));
+    }
+    const tint = new THREE.Color().setHSL(0.08, 0.08, 0.38 + lightness * 0.12);
+    // Lit windows glow: the facade texture doubles as the emissive map —
+    // dark walls contribute ~nothing, lit patches emit. Full strength at
+    // night when the sun is off and they're the point; softened in Day
+    // mode where a glowing facade reads odd under full sun.
+    mat = new THREE.MeshStandardMaterial({
+      map: tex, roughness: 0.94, color: tint,
+      emissive: 0xffb066, emissiveMap: tex, emissiveIntensity: night ? 0.9 : 0.22,
+    });
+  }
+  const roofMat = new THREE.MeshStandardMaterial({ map: roofTex, roughness: 1 });
+  let shape = 'intact';
+  if (ruined) {
+    // Box faces in order +x -x +y -y +z -z: facade on the sides, broken
+    // concrete roof material on top
+    const mats = [mat, mat, roofMat, roofMat, mat, mat];
+    const real = clearDay || deadNight;
+    const tileW = real ? FACADE_TILE_W : NIGHT_TILE, tileH = real ? FACADE_TILE_H : NIGHT_TILE;
+    shape = addRuinedBody(g, w, h, d, mats, tileW, tileH, x > 0 ? -1 : 1, opts.forceShape);
+    const bandGeo = new THREE.BoxGeometry(w + 0.08, 3.2, d + 0.08);
+    bandGeo.translate(0, 1.6, 0);
+    planarFacadeUVs(bandGeo, 10, 3.2);
+    const band = new THREE.Mesh(bandGeo, new THREE.MeshStandardMaterial({ map: storefrontTexture(), roughness: 0.9 }));
+    band.receiveShadow = true;
+    g.add(band);
+  } else {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    mesh.position.y = h / 2;
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    g.add(mesh);
+    const band = new THREE.Mesh(
+      new THREE.BoxGeometry(w + 0.08, 3.2, d + 0.08),
+      new THREE.MeshStandardMaterial({ color: 0x2b2724, roughness: 0.9 })
+    );
+    band.position.y = 1.6;
+    g.add(band);
+    const door = new THREE.Mesh(
+      new THREE.BoxGeometry(1.2, 2.4, 0.12),
+      new THREE.MeshStandardMaterial({ color: 0x1a1512, roughness: 0.8 })
+    );
+    const face = x > 0 ? -1 : 1;
+    door.position.set(face * (w / 2 - 1.4) * 0.15, 1.2, (x > 0 ? -1 : 1) * (d / 2 + 0.05));
+    if (x > 0) door.position.z = -d / 2 - 0.06;
+    else door.position.z = d / 2 + 0.06;
+    g.add(door);
+  }
+  // A roof slab and rooftop kit only fit an intact top
+  if (shape === 'intact') {
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(w * 0.92, 0.4, d * 0.92), roofMat);
+    roof.position.y = h + 0.15;
+    g.add(roof);
+  }
   // Roughly a third of the street-facing facades carry a neon sign
   // (streetSide: east row faces -x, west row faces +x toward the road).
-  if (rnd() < 0.35) addNeonSign(g, w, d, x > 0 ? -1 : 1, night);
+  if (rnd() < 0.35) addNeonSign(g, w, d, x > 0 ? -1 : 1, night, clearDay);
   if (rnd() > 0.4) {
     const ac = new THREE.Mesh(
       new THREE.BoxGeometry(1.6, 0.7, 1.2),
@@ -675,7 +1206,7 @@ export function makeBuilding(x, z, w, h, d) {
     );
     ac.position.set((rnd() - 0.5) * w * 0.4, h + 0.7, (rnd() - 0.5) * d * 0.3);
     ac.castShadow = true;
-    g.add(ac);
+    if (shape === 'intact') g.add(ac);
   }
   if (h > 18 && rnd() > 0.45) {
     const railMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.6, roughness: 0.4 });
@@ -699,45 +1230,106 @@ export function makeBuilding(x, z, w, h, d) {
     );
     tierRoof.position.set(tier.position.x, h + tierH + 0.15, tier.position.z);
     g.add(tierRoof);
+    if (shape !== 'intact') { g.remove(tier); g.remove(tierRoof); }
   }
   g.position.set(x, 0, z);
-  g.userData.streetBuilding = true; g.userData.shell = mesh;
+  // A collapsed ruin takes this lot: the block was only built so its
+  // rnd() draws happen and everything placed after it lands where it did
+  if (opts.consumeOnly) return g;
+  if (!ruined) { g.userData.streetBuilding = true; g.userData.shell = g.children[0]; }
   scene.add(g);
   g.traverse((o) => { if (o.isMesh) state.occluders.push(o); });
   addStaticBox(w / 2, h / 2, d / 2, x, h / 2, z);
   return g;
 }
 
+// state.collapsedBlocks (set by a level's config): [{ side, z0, z1,
+// spill?, seed? }] — the street-row building whose centre falls in a
+// range is a collapsed ruin instead of a standing block. spill: false
+// keeps its rubble off the pavement; seed builds it from its own RNG
+// instead of ruinRnd, so adding it leaves every later ruin unchanged.
+function collapsesAt(side, z) {
+  return (state.collapsedBlocks || []).find((c) => c.side === side && z <= c.z0 && z >= c.z1);
+}
+function buildRuin(c, x, z, w, d, h, sx) {
+  const spillTo = c.spill === false ? -sx * rowX : -sx * (STREET_HALF_W + 0.6);
+  if (c.seed === undefined) return makeCollapsedBuilding(x, z, w, d, h, sx, spillTo);
+  const shared = ruinRnd;
+  ruinRnd = mulberry32(c.seed);
+  try { return makeCollapsedBuilding(x, z, w, d, h, sx, spillTo); } finally { ruinRnd = shared; }
+}
+
+// Dead-grid night plan for one street-front building, from its own RNG
+// so the street's layout and day look never move: collapsed (rubble kept
+// off the pavement, own seed), wrecked with one lit window, a few dark
+// ones standing with two, and the rest the original blocks, damaged.
+const nightRnd = mulberry32(0x0D3AD);
+function nightPlan() {
+  const r = nightRnd();
+  if (r < 0.38) return { collapse: { side: '', spill: false, seed: (nightRnd() * 0x7fffffff) | 0 } };
+  if (r < 0.64) return { shape: 'wrecked', windows: 1 };
+  if (r < 0.72) return { shape: 'intact', windows: 2 };
+  // The original block with its own windows, but never whole on a dead night
+  return { oldLook: true, shape: nightRnd() < 0.5 ? 'corner' : 'broken' };
+}
+// One street-front lot: the block, or the ruin that took its place, and
+// on a dead-grid night its plan and lit windows. sx: street side of the
+// block's facade (-1: east row, facing -x).
+let guttedLeft = 3; // the first three tall original blocks from the start come down hardest
+function streetBlock(x, z, w, h, d, sx, ruin, lit) {
+  const plan = lit && !ruin ? nightPlan() : null;
+  if (plan?.oldLook && h > 24 && guttedLeft > 0) { plan.shape = 'gutted'; guttedLeft--; }
+  const fall = ruin || plan?.collapse;
+  makeBuilding(x, z, w, h, d, { consumeOnly: !!fall, forceShape: plan?.shape, oldLook: plan?.oldLook });
+  if (fall) { buildRuin(fall, x, z, w, d, h * 0.6, sx); return; }
+  if (!plan?.windows) return;
+  // Wrecked: the window stays low, under the broken top
+  addLitWindows(lit, {
+    cx: x, cz: z, w, d, n: new THREE.Vector3(sx, 0, 0), rnd: nightRnd, count: plan.windows,
+    minY: 4, maxY: plan.shape === 'wrecked' ? Math.min(6, h - 1.5) : h - 1.5, ux: x, uz: z,
+  });
+}
+
 export function loadBuildings() {
+  const lit = state.timeOfDay === 'night' && state.deadGridNight ? { windows: [], rays: [] } : null;
   for (let z = 30; z > -STREET_LENGTH + 10; z -= (15 + rnd() * 9)) {
     const h = 16 + rnd() * 28;
     const w = 11 + rnd() * 7;
     const d = 11 + rnd() * 7;
-    if (Math.abs(z - DEPOT_POS.z) > 16) makeBuilding(rowX + w / 2, z, w, h, d);
+    if (Math.abs(z - DEPOT_POS.z) > 16) streetBlock(rowX + w / 2, z, w, h, d, -1, collapsesAt('east', z), lit);
     if (Math.abs((z + 5) - WEST_POCKET_Z) > 14) {
-      makeBuilding(-rowX - w / 2, z + 5, w * (0.85 + rnd() * 0.3), h * (0.7 + rnd() * 0.4), d);
+      const ww = w * (0.85 + rnd() * 0.3), hh = h * (0.7 + rnd() * 0.4);
+      streetBlock(-rowX - w / 2, z + 5, ww, hh, d, 1, collapsesAt('west', z + 5), lit);
     }
   }
+  if (lit) addLitWindowMeshes(lit);
   buildWestPocket();
   const night = state.timeOfDay === 'night';
+  const clearDay = state.timeOfDay === 'day' && state.clearDay;
   for (let i = 0; i < 18; i++) {
     // Distant skyline: window textures instead of flat black so the far
     // blocks read as buildings — and a handful of lit windows survive
     // out there too, via the same emissive-map trick the street-facing
     // buildings use.
-    const silTex = windowTexVariants[2].clone();
+    const silTex = (clearDay ? dayFacades()[3] : windowTexVariants[2]).clone();
     silTex.needsUpdate = true;
     silTex.wrapS = silTex.wrapT = THREE.RepeatWrapping;
-    silTex.repeat.set(3 + rnd() * 3, 6 + rnd() * 6);
+    const rx = 3 + rnd() * 3, ry = 6 + rnd() * 6;
+    silTex.repeat.set(clearDay ? rx * 0.6 : rx, clearDay ? ry * 0.6 : ry);
     const sil = new THREE.Mesh(
       new THREE.BoxGeometry(18 + rnd() * 22, 28 + rnd() * 50, 16 + rnd() * 18),
-      new THREE.MeshStandardMaterial({
-        map: silTex, color: 0x35302a, roughness: 1,
-        emissive: 0xffb066, emissiveMap: silTex, emissiveIntensity: night ? 0.8 : 0.15,
-      })
+      clearDay
+        ? new THREE.MeshStandardMaterial({ map: silTex, color: 0x8a7e72, roughness: 1 })
+        : new THREE.MeshStandardMaterial({
+          map: silTex, color: 0x35302a, roughness: 1,
+          emissive: 0xffb066, emissiveMap: silTex, emissiveIntensity: night ? 0.8 : 0.15,
+        })
     );
     sil.position.set((rnd() < 0.5 ? -1 : 1) * (48 + rnd() * 40), sil.geometry.parameters.height / 2, -20 - rnd() * STREET_LENGTH);
-    scene.add(sil);
+    // A level with its own city behind the street (state.backCity — Level
+    // 2) has real blocks here; the draws above still happen so nothing
+    // placed after them moves
+    if (!state.backCity) scene.add(sil);
   }
   const depotYard = state.skipDepot ? null : buildDepotYard();
   return { depotYard };
@@ -746,7 +1338,11 @@ export function loadBuildings() {
 /* ---------------------------------------------------------------------
    WRECKED CARS, DECOR CARS, BARRIERS, STREETLIGHTS
 --------------------------------------------------------------------- */
-export function makeWreck(x, z, ry, burning) {
+// opts.model: { url, length, strip } — draw this wreck with a GLB instead.
+// The box car is still built (same rnd() draws, so everything after it
+// lands where it did) and stays as the camera's occluder, but is never
+// shown; the model takes its place once loaded (see showWreckModel).
+export function makeWreck(x, z, ry, burning, opts = {}) {
   const g = new THREE.Group();
   const col = burning ? 0x2a2320 : [0x4a3a32, 0x3d4550, 0x5c4030, 0x2f3340, 0x8a1f1f, 0x1f3a52][Math.floor(rnd() * 6)];
   const bodyMat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.75, metalness: 0.35 });
@@ -797,17 +1393,76 @@ export function makeWreck(x, z, ry, burning) {
   g.position.set(x, 0, z);
   g.rotation.y = ry;
   if (crushed || rnd() > 0.6) g.rotation.z = (rnd() - 0.5) * (crushed ? 0.35 : 0.18);
-  scene.add(g);
+  if (opts.model) {
+    g.updateMatrixWorld(true); // never added, so its occluders need a world matrix now
+    const spot = { ...opts.model, x, z, rotation: g.rotation.clone() };
+    if (state.lightBoot) pendingWreckModels.push(spot); else showWreckModel(spot);
+  } else scene.add(g);
   g.traverse((o) => { if (o.isMesh) state.occluders.push(o); });
   addStaticBox(1.05, 0.7, 2.15, x, 0.7, z, ry);
-  if (burning) {
+  if (burning && state.bigFires) {
+    // The whole car alight: flames over the hood, cabin and trunk, a
+    // heavier smoke column, and a strong flickering light that throws the
+    // fire across the street (updateFireLights)
+    const along = (dz) => new THREE.Vector3(x + Math.sin(ry) * dz, 0, z + Math.cos(ry) * dz);
+    [[1.4, 0.55, 2.0], [-0.1, 0.75, 2.6], [-1.6, 0.6, 1.8]].forEach(([dz, y, s]) => {
+      const p = along(dz); p.y = y;
+      spawnFlameBillboards(p, s);
+    });
+    spawnFireEffect(new THREE.Vector3(x, 1.4, z), 1.6);
+    const light = new THREE.PointLight(0xff7a2a, BIG_FIRE_LIGHT, 26, 1.6);
+    light.position.set(x, 1.8, z);
+    addLight(scene, light);
+    fireLights.push({ light, seed: Math.random() * 100 });
+  } else if (burning) {
     const light = new THREE.PointLight(0xff6a1a, 3.4, 11, 2);
     light.position.set(x, 1.15, z);
-    scene.add(light);
+    addLight(scene, light);
     spawnFireEffect(new THREE.Vector3(x, 0.9, z));
     spawnFlameBillboards(new THREE.Vector3(x, 0.45, z), 1.3);
   }
   return g;
+}
+
+// Big fires' lights (state.bigFires): a flicker made of two out-of-step
+// sines plus a little jitter, around BIG_FIRE_LIGHT. Only the intensity
+// moves, so nothing recompiles. Lights that addLight skipped (sunlit
+// days) are still listed but sit outside the scene, so this is harmless.
+const BIG_FIRE_LIGHT = 9;
+const fireLights = [];
+let fireTime = 0;
+export function updateFireLights(dt) {
+  fireTime += dt;
+  for (const f of fireLights) {
+    const t = fireTime + f.seed;
+    const flick = 0.78 + 0.14 * Math.sin(t * 9.3) + 0.1 * Math.sin(t * 23.7 + 1.3) + Math.random() * 0.06;
+    f.light.intensity = BIG_FIRE_LIGHT * flick;
+  }
+}
+
+const pendingWreckModels = [];
+function showWreckModel({ url, length, strip = [], x, z, rotation }) {
+  new GLTFLoader().load(url, (gltf) => {
+    const obj = gltf.scene;
+    const drop = [];
+    obj.traverse((o) => { if (strip.some((n) => o.name.startsWith(n))) drop.push(o); });
+    drop.forEach((o) => o.parent?.remove(o));
+    obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    // Long axis along local z like the box car's, sized to its length,
+    // centred on the spot and sat on the ground
+    let box = new THREE.Box3().setFromObject(obj);
+    let size = box.getSize(new THREE.Vector3());
+    if (size.x > size.z) { obj.rotation.y = Math.PI / 2; box = new THREE.Box3().setFromObject(obj); size = box.getSize(new THREE.Vector3()); }
+    obj.scale.setScalar(length / size.z);
+    box = new THREE.Box3().setFromObject(obj);
+    const c = box.getCenter(new THREE.Vector3());
+    obj.position.set(-c.x, -box.min.y, -c.z);
+    const wrap = new THREE.Group();
+    wrap.add(obj);
+    wrap.position.set(x, 0, z);
+    wrap.rotation.copy(rotation);
+    scene.add(wrap);
+  }, undefined, (err) => console.error(`Wreck model ${url} failed to load:`, err));
 }
 
 export function loadDecorCar(url, x, z, ry, targetLength) {
@@ -851,7 +1506,12 @@ export function makeBarrier(x, z, ry) {
   addStaticBox(1.2, 0.42, 0.28, x, 0.42, z, ry);
 }
 
+// Every lamp post placed, as [x, z] — Level 2's street dressing strings
+// overhead cables between neighbours
+export const streetlightSpots = [];
+
 export function makeStreetlight(x, z) {
+  streetlightSpots.push([x, z]);
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x2c2c2c, roughness: 0.55, metalness: 0.65 });
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 6, 8), poleMat);
   pole.position.set(x, 3, z); pole.castShadow = true;
@@ -860,12 +1520,26 @@ export function makeStreetlight(x, z) {
   arm.rotation.z = Math.PI / 2;
   arm.position.set(x + (x > 0 ? -0.7 : 0.7), 5.9, z);
   scene.add(arm);
+  // Clear-day levels (state.clearDay, Level 2) switch the lamps off in
+  // daylight: an unlit bulb, and none of the light, halo or cone below —
+  // which also takes ~two dozen SpotLights off every lit pixel's bill.
+  // A level can also keep only a few lamps powered (state.liveStreetlights,
+  // Level 2's dead grid): every post not on that list stands dark.
+  const live = state.liveStreetlights?.find((l) => l.side === Math.sign(x) && l.z === z);
+  const lampOn = !(state.timeOfDay === 'day' && state.clearDay) && (!state.liveStreetlights || !!live);
+  const blink = !!live?.blink;
   const lamp = new THREE.Mesh(
     new THREE.SphereGeometry(0.18, 8, 8),
-    new THREE.MeshStandardMaterial({ color: 0xfff2c0, emissive: 0xffc266, emissiveIntensity: 1.8 })
+    // A blinking bulb is flagged transparent purely to keep it out of the
+    // static merge (mergeStatic.js), which would freeze its glow
+    new THREE.MeshStandardMaterial({ color: 0xfff2c0, emissive: 0xffc266, emissiveIntensity: lampOn ? 1.8 : 0, transparent: blink })
   );
   lamp.position.set(x + (x > 0 ? -1.35 : 1.35), 5.85, z);
   scene.add(lamp);
+  if (!lampOn) {
+    addObstacle(x, z, 0.35);
+    return;
+  }
 
   // SpotLight, not PointLight — this is what actually gives the light a
   // cone-shaped falloff (a PointLight radiates evenly in every
@@ -916,14 +1590,58 @@ export function makeStreetlight(x, z) {
   beam.position.set(lamp.position.x, lamp.position.y - beamHeight / 2, lamp.position.z);
   scene.add(beam);
 
+  if (blink) {
+    blinkingLamps.push({
+      spot, glow, beam, bulb: lamp.material,
+      intensity: spot.intensity, glowOpacity: glow.material.opacity, beamOpacity: beamMat.opacity,
+      phase: 'on', t: 0.5 + Math.random() * 4, flick: 0, k: 1, // Math.random, not rnd: keeps the seeded layout unchanged
+    });
+  }
+
   addObstacle(x, z, 0.35);
 }
 
+// Faulty lamps (a state.liveStreetlights entry with blink: true): mostly
+// on, but every few seconds the supply stutters — a burst of rapid
+// flicker that sometimes drops out for a second or two. Only intensity
+// and opacity change; the SpotLight never leaves the scene, so blinking
+// never forces a shader recompile the way toggling .visible would.
+const blinkingLamps = [];
+export function updateBlinkingLamps(dt) {
+  for (const b of blinkingLamps) {
+    b.t -= dt;
+    if (b.t <= 0) {
+      if (b.phase === 'on') { b.phase = 'stutter'; b.t = 0.25 + Math.random() * 0.9; }
+      else if (b.phase === 'stutter' && Math.random() < 0.4) { b.phase = 'off'; b.t = 0.4 + Math.random() * 1.8; }
+      else { b.phase = 'on'; b.t = 1.5 + Math.random() * 4; }
+    }
+    let k = b.phase === 'on' ? 1 : 0;
+    if (b.phase === 'stutter') {
+      b.flick -= dt;
+      if (b.flick <= 0) { b.flick = 0.04 + Math.random() * 0.1; b.stutterK = Math.random() < 0.55 ? 0.08 : 1; }
+      k = b.stutterK;
+    }
+    if (k === b.k) continue;
+    b.k = k;
+    b.spot.intensity = b.intensity * k;
+    b.glow.material.opacity = b.glowOpacity * k;
+    b.beam.material.opacity = b.beamOpacity * k;
+    b.bulb.emissiveIntensity = 1.8 * k;
+  }
+}
+
 export function loadObstacles() {
+  let modelUsed = false;
   for (let z = 20; z > -STREET_LENGTH + 20; z -= (18 + rnd() * 16)) {
     const side = rnd() < 0.5 ? -1 : 1;
     const x = side * (STREET_HALF_W - 1.7 - rnd() * 2);
-    makeWreck(x, z, (rnd() - 0.5) * 1.1 + (side < 0 ? Math.PI / 2 : -Math.PI / 2), rnd() < 0.32);
+    const ry = (rnd() - 0.5) * 1.1 + (side < 0 ? Math.PI / 2 : -Math.PI / 2);
+    const burning = rnd() < 0.32;
+    // The level's burning-car model goes to the first burning wreck: the
+    // one nearest the spawn
+    const model = burning && !modelUsed ? state.burningCarModel : null;
+    if (model) modelUsed = true;
+    makeWreck(x, z, ry, burning, { model });
   }
   if (state.lightBoot) {
     // Light boot (Level 2): the two rusty-car decor GLB fetches (7.7 MB)
@@ -1093,7 +1811,7 @@ function buildDepotYard() {
   scene.add(marker);
   const markerLight = new THREE.PointLight(0xffaa22, 2.4, 14, 2);
   markerLight.position.set(cx, 2, cz);
-  scene.add(markerLight);
+  addLight(scene, markerLight);
   const beam = new THREE.Mesh(
     new THREE.CylinderGeometry(0.15, 2.2, 34, 16, 1, true),
     new THREE.MeshBasicMaterial({
@@ -1416,22 +2134,41 @@ export function triggerShootAnim() {
   playerVis.shootAction.play();
 }
 
+// Player action -> clip name in assets/characters/animations.glb (built
+// from art/animations/<clip>.fbx). A missing clip just leaves that action
+// out: pickLocomotionAction falls back (strafes/back -> walk, jumpBack ->
+// jump) and death skips its animation.
+const PLAYER_CLIPS = {
+  idle: ['idle', 'listen'],
+  walk: ['walk'],
+  sprint: ['run', 'walk'],
+  walkBack: ['walk_back'],
+  strafeL: ['strafe_left'],
+  strafeR: ['strafe_right'],
+  jump: ['jump'],
+  die: ['die'],
+};
+const PLAYER_ONE_SHOTS = new Set(['jump', 'die']);
+
 export function loadMainCharacter() {
-  new GLTFLoader().load('assets/player_character.glb', (gltf) => {
-    const obj = gltf.scene;
+  const characterId = getSelectedCharacter();
+  instantiateCharacter(characterId).then(async (obj) => {
+    const clips = await clipsFor(obj);
+    // A fresh clone has never had its world matrices computed; measuring
+    // before this reads the Armature's cm->m 0.01 scale as identity.
+    obj.updateMatrixWorld(true);
     const box0 = new THREE.Box3().setFromObject(obj);
     const size = new THREE.Vector3(); box0.getSize(size);
     state.playerBaseScale = THREE.MathUtils.clamp(PLAYER_TARGET_HEIGHT / Math.max(size.y, 0.2), 0.05, 2.8);
     obj.rotation.y = state.PLAYER_RIG_YAW_OFFSET;
-    obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     playerVis.proceduralBody.visible = false;
     playerVis.group.add(obj);
     playerVis.rigged = true;
     playerVis.rigObj = obj;
     playerRigObjRef = obj;
     applyPlayerScale();
-    playerVis.footBoneL = obj.getObjectByName('foot_l') || findBoneLike(obj, 'foot_l') || findBoneLike(obj, 'LeftFoot') || null;
-    playerVis.footBoneR = obj.getObjectByName('foot_r') || findBoneLike(obj, 'foot_r') || findBoneLike(obj, 'RightFoot') || null;
+    playerVis.footBoneL = boneByName(obj, 'LeftFoot');
+    playerVis.footBoneR = boneByName(obj, 'RightFoot');
     if (!playerVis.footBoneL && !playerVis.footBoneR) {
       // Without a foot bone, groundClampRig() silently no-ops every frame
       // and the player's height is whatever applyPlayerScale set once at
@@ -1441,152 +2178,82 @@ export function loadMainCharacter() {
     } else {
       playerVis.ankleToSole = measureAnkleToSole(obj, playerVis.footBoneL, playerVis.footBoneR);
     }
-    const handBone = obj.getObjectByName('hand_r');
+    const handBone = boneByName(obj, 'RightHand');
     if (handBone) {
       playerVis.handBone = handBone;
+      playerVis.handGrip = solveHandGrip(obj, handBone);
       playerVis.gunOnHand = true;
+      if (playerVis.gun) playerVis.gun.rotation.set(0, 0, 0); // the grip orients the whole pivot now
+      knifeThirdPerson.rotation.set(0, Math.PI, 0); // blade along the gun's muzzle (+Z), not back up the arm
       playerVis.group.remove(playerVis.gunPivot);
       scene.add(playerVis.gunPivot);
     }
-    if (gltf.animations && gltf.animations.length) {
-      playerVis.mixer = new THREE.AnimationMixer(obj);
-      const findClip = (name) => THREE.AnimationClip.findByName(gltf.animations, name);
-      const walkClip = findClip('Walk');
-      const runClip = findClip('Run_Anime') || walkClip;
-      const jumpClip = findClip('Jump_2');
-      const shootClip = findClip('Pistol_Shoot');
-      const idleClip = findClip('Pistol_Idle') || walkClip;
-      const found = { Walk: !!walkClip, Run_Anime: !!runClip, Jump_2: !!jumpClip, Pistol_Shoot: !!shootClip, Pistol_Idle: !!findClip('Pistol_Idle') };
-      pushKillFeed('Anim clips: ' + Object.entries(found).map(([k, v]) => `${k}${v ? '✓' : '✗'}`).join(' '));
-      playerVis.actions = {};
-      if (walkClip) playerVis.actions.walk = playerVis.mixer.clipAction(walkClip);
-      for (const [key, name] of Object.entries({walkBack:'Walk_Backwards',strafeL:'Strafe_left',strafeR:'Strafe_right'})) {
-        const clip = findClip(name);
-        if (clip && state.levelId === 3) playerVis.actions[key] = playerVis.mixer.clipAction(clip);
+
+    playerVis.mixer = new THREE.AnimationMixer(obj);
+    playerVis.actions = {};
+    for (const [key, names] of Object.entries(PLAYER_CLIPS)) {
+      const clip = names.map((n) => clips[n]).find(Boolean);
+      if (!clip) continue;
+      const action = playerVis.mixer.clipAction(clip);
+      if (PLAYER_ONE_SHOTS.has(key)) {
+        action.setLoop(THREE.LoopOnce);
+        action.clampWhenFinished = true;
       }
-      if (runClip) playerVis.actions.sprint = playerVis.mixer.clipAction(runClip);
-      if (idleClip) playerVis.actions.idle = playerVis.mixer.clipAction(idleClip);
-      if (jumpClip) {
-        playerVis.actions.jump = playerVis.mixer.clipAction(jumpClip);
-        playerVis.actions.jump.setLoop(THREE.LoopOnce);
-        playerVis.actions.jump.clampWhenFinished = true;
-        playerVis.jumpDuration = jumpClip.duration;
-      }
-      if (shootClip) {
-        const additiveShoot = THREE.AnimationUtils.makeClipAdditive(shootClip);
-        playerVis.shootAction = playerVis.mixer.clipAction(additiveShoot);
-        playerVis.shootAction.blendMode = THREE.AdditiveAnimationBlendMode;
-        playerVis.shootAction.setLoop(THREE.LoopOnce);
-        playerVis.shootAction.clampWhenFinished = true;
-        playerVis.shootAction.enabled = true;
-        playerVis.shootAction.setEffectiveWeight(1);
-      }
-      if (playerVis.actions.idle) {
-        playerVis.actions.idle.play();
-        playerVis.currentActionName = 'idle';
-      }
-    } else {
-      // No baked-in animations on this model at all — still stand up a
-      // mixer + actions table so loadShooterPack() below has somewhere
-      // to attach the Shooter_Pack clips once they finish loading.
-      playerVis.mixer = new THREE.AnimationMixer(obj);
-      playerVis.actions = {};
+      playerVis.actions[key] = action;
+    }
+    if (clips.jump) playerVis.jumpDuration = clips.jump.duration;
+    if (clips.die) playerVis.dieDuration = clips.die.duration;
+    if (clips.shoot) {
+      // Additive, so the recoil layers over whatever locomotion is playing
+      const additiveShoot = THREE.AnimationUtils.makeClipAdditive(clips.shoot);
+      playerVis.shootAction = playerVis.mixer.clipAction(additiveShoot);
+      playerVis.shootAction.blendMode = THREE.AdditiveAnimationBlendMode;
+      playerVis.shootAction.setLoop(THREE.LoopOnce);
+      playerVis.shootAction.clampWhenFinished = true;
+      playerVis.shootAction.enabled = true;
+      playerVis.shootAction.setEffectiveWeight(1);
+    }
+    const missing = [...Object.keys(PLAYER_CLIPS), 'shoot'].filter((k) => !playerVis.actions[k] && !(k === 'shoot' && playerVis.shootAction));
+    if (missing.length) pushKillFeed(`Player anims missing: ${missing.join(', ')}`);
+    if (playerVis.actions.idle) {
+      playerVis.actions.idle.play();
+      playerVis.currentActionName = 'idle';
     }
     state.loadFlags.player = true;
     markLoaded('player');
-    // Shooter_Pack DISABLED — verified its files (walking.glb etc.) use
-    // 'L_Wrist'/'bone_12'/'Pelvis'-style bone names, the same skeleton as
-    // the WRONG zombie_walker.glb model this loader used to point at, not
-    // player_character.glb's actual rig ('hand_r'/'foot_l'/'pelvis').
-    // AnimationMixer resolves tracks by exact bone name, so binding these
-    // clips to player_character.glb's rig finds nothing to attach to and
-    // does nothing — but it still OVERWRITES the walk/sprint/idle/jump
-    // actions already correctly set up above from the model's own real
-    // clips (Walk/Run_Anime/Jump_2/Pistol_Idle), replacing working
-    // animations with non-functional ones. That's the direct cause of
-    // "stuck in the pistol-pointing pose, no walk/run/jump" — the working
-    // idle pose was the last thing to actually animate before being
-    // clobbered. If a Shooter_Pack rebuilt for player_character.glb's
-    // actual skeleton becomes available later, re-enable this call.
-    // loadShooterPack();
-  }, undefined, (err) => {
+  }).catch((err) => {
     console.error('Player model failed to load:', err);
     pushKillFeed('Player model failed to load — using fallback body');
     markLoaded('player');
   });
 }
 
-/* -----------------------------------------------------------------
-   SHOOTER PACK — per-animation FBX exports for the rifle-carrying
-   player rig (walking.fbx, "rifle run.fbx", strafe.fbx x2, "firing
-   rifle.fbx", "rifle aiming idle.fbx", backward variants, jump
-   forward/backward, and a death clip). Expected on disk at
-   assets/<original filename>.fbx — unzip Shooter_Pack.zip
-   there, keeping the original filenames (spaces included) so the paths
-   below match exactly.
-
-   THREE's AnimationMixer binds a clip's tracks to the target skeleton
-   purely by bone name, so a clip loaded from a completely different FBX
-   file will drive the player's actual rig correctly as long as both
-   were exported from the same underlying skeleton, which is the case
-   here. If a file is missing or the rig doesn't line up for some
-   reason, that one animation is simply skipped (falls back to whatever
-   was baked into the base model, or to 'idle') — nothing else breaks.
---------------------------------------------------------------------- */
-const SHOOTER_ANIM_FILES = {
-  idle: '/rifle aiming idle.glb',
-  walk: 'assets/walking.glb',
-  sprint: 'assets/rifle run.glb',
-  walkBack: 'assets/walking backwards.glb',
-  runBack: 'assets/run backwards.glb',
-  strafeL: 'assets/strafe.glb',
-  strafeR: 'assets/strafe (2).glb',
-  jump: 'assets/jump forward.glb',
-  jumpBack: 'assets/jump backward.glb',
-  startWalk: 'assets/start walking.glb',
-  stopWalk: 'assets/stop walking.glb',
-  startWalkBack: 'assets/start walking backwards.glb',
-  stopWalkBack: 'assets/walk backwards stop.glb',
-  shoot: 'assets/firing rifle.glb',
-  die: 'assets/walking to dying.glb',
-};
-const ONE_SHOT_KEYS = new Set(['jump', 'jumpBack', 'startWalk', 'stopWalk', 'startWalkBack', 'stopWalkBack', 'die']);
-
-export function loadShooterPack() {
-  if (!playerVis.mixer || !playerVis.rigObj) return; // nothing to attach clips to yet
-  if (!playerVis.actions) playerVis.actions = {};
-  Object.entries(SHOOTER_ANIM_FILES).forEach(([key, path]) => {
-    new GLTFLoader().load(path, (gltf) => {
-      const clip = gltf.animations && gltf.animations[0];
-      if (!clip) return;
-      if (key === 'shoot') {
-        const additive = THREE.AnimationUtils.makeClipAdditive(clip);
-        const shootAction = playerVis.mixer.clipAction(additive, playerVis.rigObj);
-        shootAction.blendMode = THREE.AdditiveAnimationBlendMode;
-        shootAction.setLoop(THREE.LoopOnce);
-        shootAction.clampWhenFinished = true;
-        shootAction.enabled = true;
-        shootAction.setEffectiveWeight(1);
-        playerVis.shootAction = shootAction; // takes over from the baked-in Pistol_Shoot, if any
-        return;
-      }
-      const action = playerVis.mixer.clipAction(clip, playerVis.rigObj);
-      if (ONE_SHOT_KEYS.has(key)) {
-        action.setLoop(THREE.LoopOnce);
-        action.clampWhenFinished = true;
-      }
-      if (key === 'jump') playerVis.jumpDuration = clip.duration;
-      if (key === 'jumpBack') playerVis.jumpBackDuration = clip.duration;
-      if (key === 'die') playerVis.dieDuration = clip.duration;
-      playerVis.actions[key] = action;
-      if (key === 'idle' && !playerVis.currentActionName) {
-        action.play();
-        playerVis.currentActionName = 'idle';
-      }
-    }, undefined, () => {
-      pushKillFeed(`Shooter pack: "${key}" clip failed to load`);
-    });
-  });
+// Pistol pose relative to the roster rig's RightHand bone, solved per
+// character from its rest T-pose (right arm out along -X, palm down, thumb
+// forward) because hand bones rest at slightly different angles on each
+// body. pistol.glb has its slide on +Y and muzzle on +Z; it's set with the
+// muzzle along the hand, slide toward the back of the hand and the grip
+// (model point 0,-3,-1) in the palm. The rigs have no finger bones, so this
+// is as close as the hand can get to holding it — verified on the pistol
+// idle, walk and shooting clips. Must run before any clip poses the rig.
+const GRIP_PALM_ALONG_HAND = 8;   // hand-bone units (cm) out from the wrist
+const GRIP_PALM_BELOW = 0.02;     // metres toward the palm side
+function solveHandGrip(rig, hand) {
+  rig.updateMatrixWorld(true);
+  const rigQ = rig.getWorldQuaternion(new THREE.Quaternion());
+  const toRig = rigQ.clone().invert();
+  const handQ = toRig.clone().multiply(hand.getWorldQuaternion(new THREE.Quaternion()));
+  const gunQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(-1, 0, 0), Math.PI / 2)
+    .multiply(new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(
+      new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(-1, 0, 0))));
+  const handPos = hand.getWorldPosition(new THREE.Vector3());
+  const palm = hand.localToWorld(new THREE.Vector3(0, GRIP_PALM_ALONG_HAND, 0)).sub(handPos)
+    .applyQuaternion(toRig).add(new THREE.Vector3(0, -GRIP_PALM_BELOW, 0));
+  const grip = new THREE.Vector3(0, -3, -1).multiplyScalar(PISTOL_SCALE).applyQuaternion(gunQ);
+  return {
+    quat: handQ.invert().multiply(gunQ),
+    pos: palm.sub(grip).applyQuaternion(gunQ.clone().invert()),
+  };
 }
 
 const _gunSyncPos = new THREE.Vector3();
@@ -1597,6 +2264,15 @@ export function syncHandGun() {
   if (!playerVis.gunOnHand || !playerVis.handBone || state.inVehicle) return;
   playerVis.handBone.getWorldPosition(_gunSyncPos);
   playerVis.handBone.getWorldQuaternion(_gunSyncQuat);
+  const grip = playerVis.handGrip;
+  if (grip) {
+    playerVis.gunPivot.position.copy(_gunSyncPos);
+    playerVis.gunPivot.quaternion.copy(_gunSyncQuat).multiply(grip.quat);
+    playerVis.gunPivot.translateX(grip.pos.x);
+    playerVis.gunPivot.translateY(grip.pos.y);
+    playerVis.gunPivot.translateZ(grip.pos.z);
+    return;
+  }
   const preset = GUN_GRIP_PRESETS[state.gunGripIndex];
   playerVis.gunPivot.position.copy(_gunSyncPos);
   playerVis.gunPivot.quaternion.copy(_gunSyncQuat);
@@ -1984,7 +2660,7 @@ export function spawnDeathSparkles(pos) {
   const center = pos.clone().add(new THREE.Vector3(0, 0.9, 0));
   const flash = new THREE.PointLight(0xbfe9ff, 6, 6, 2);
   flash.position.copy(center);
-  scene.add(flash);
+  addLight(scene, flash);
   setTimeout(() => scene.remove(flash), 120);
   for (let i = 0; i < 22; i++) {
     const color = DEATH_SPARK_COLORS[Math.floor(Math.random() * DEATH_SPARK_COLORS.length)];
@@ -2073,12 +2749,15 @@ export function loadDeferredAssets() {
   loadZombieTemplate('assets/model-rigged.glb', { runs: true });
   loadPistolModel();
   loadCorpses();
+  pendingWreckModels.splice(0).forEach(showWreckModel);
 }
 
 export class Zombie {
-  constructor(pos) {
+  // opts.template: a specific loaded template (see zombieTemplateFor)
+  constructor(pos, opts = {}) {
     this.mesh = new THREE.Group();
-    const template = zombieTemplates.length ? zombieTemplates[Math.floor(Math.random() * zombieTemplates.length)] : null;
+    const template = opts.template
+      || (zombieTemplates.length ? zombieTemplates[Math.floor(Math.random() * zombieTemplates.length)] : null);
     this.rigged = !!template;
     this.hasAnim = false;
     if (this.rigged) {
@@ -2131,7 +2810,9 @@ export class Zombie {
         }
         this.action = this.mixer.clipAction(clip);
         this.action.play();
-        this.mixer.timeScale = template.runs ? 1.15 : 0.4;
+        // A level can speed runners up (state.runnerSpeedMul): the run
+        // clip speeds up with them so their feet keep pace with the ground
+        this.mixer.timeScale = template.runs ? 1.15 * (state.runnerSpeedMul || 1) : 0.4;
       }
     } else {
       const built = buildZombieMesh();
@@ -2162,7 +2843,7 @@ export class Zombie {
     // Runners (model-rigged.glb) move noticeably faster than the
     // standard shamblers — that's the whole point of a "runner" variant.
     this.speed = (template && template.runs)
-      ? 4.4 + Math.random() * 1.8
+      ? (4.4 + Math.random() * 1.8) * (state.runnerSpeedMul || 1)
       : 2.6 + Math.random() * 1.6;
     this.attackCooldown = 0;
     this.deathTimer = 0;
@@ -2400,6 +3081,26 @@ export function spawnDepotGuards() {
     state.zombies.push(z);
     state.spawnedTotal++;
   });
+}
+
+// A loaded template by kind: the runner if wanted and in, else any
+export function zombieTemplateFor(runner) {
+  return zombieTemplates.find((t) => !!t.runs === runner) || zombieTemplates[0] || null;
+}
+
+// Zombies placed by hand that charge at `speed` m/s (an ambush): runner
+// bodies when that template has loaded, their clip sped up to match the
+// pace (the base rates are ~5.3 m/s at 1.15x for runners, ~3.4 at 0.4x
+// for walkers) so feet don't skate. Past the usual caps on purpose.
+export function spawnChargers(points, speed) {
+  const template = zombieTemplateFor(true);
+  for (const [x, z] of points) {
+    const zom = new Zombie(new THREE.Vector3(x, 0, z), { template });
+    zom.speed = speed[0] + Math.random() * (speed[1] - speed[0]);
+    if (zom.mixer) zom.mixer.timeScale = zom.runs ? 1.15 * zom.speed / 5.3 : 0.4 * zom.speed / 3.4;
+    state.zombies.push(zom);
+    state.spawnedTotal++;
+  }
 }
 
 export function spawnZombie() {

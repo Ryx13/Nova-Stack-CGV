@@ -72,6 +72,39 @@
   #mode-night:hover{background:linear-gradient(180deg, rgba(224,168,60,.32), rgba(224,168,60,.08));
     border-color:var(--amber);transform:translateY(-2px);}
 
+  /* ---------- CHARACTER SELECT SCREEN ---------- */
+  #character-select{position:fixed;inset:0;z-index:54;background:#060606;}
+  #character-select:not(.hidden){animation:fadeUp .45s ease both;}
+  #cs-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;}
+  #cs-top{position:absolute;top:0;left:0;right:0;padding:28px 16px 0;text-align:center;pointer-events:none;}
+  #cs-top h1{font-family:'Oswald',sans-serif;font-weight:700;letter-spacing:8px;margin:0;
+    font-size:clamp(22px,4vw,38px);color:#f2ede2;text-transform:uppercase;
+    text-shadow:0 0 30px rgba(200,30,30,.55), 0 4px 0 #000;}
+  #cs-top h1 span{color:var(--blood);}
+  #cs-detail{margin-top:10px;}
+  #cs-name{font-family:'Oswald',sans-serif;font-weight:700;font-size:clamp(28px,5vw,48px);
+    letter-spacing:6px;color:#f2ede2;text-transform:uppercase;line-height:1;}
+  #cs-role{font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:5px;color:var(--amber);
+    text-transform:uppercase;margin-top:6px;}
+  #cs-blurb{font-size:15px;color:#b7b0a2;margin-top:4px;}
+  #cs-bottom{position:absolute;left:0;right:0;bottom:0;padding:0 16px 24px;
+    display:flex;flex-direction:column;align-items:center;gap:14px;
+    background:linear-gradient(0deg, rgba(6,6,6,.95) 40%, rgba(6,6,6,0));}
+  #cs-cards{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;max-width:100%;}
+  .cs-card{width:128px;padding:10px 8px;background:rgba(10,10,8,.6);border:1px solid #3a352d;
+    color:#f2ede2;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;
+    transition:transform .15s, border-color .15s, background .2s;}
+  .cs-card:hover{border-color:#c8c2b4;transform:translateY(-2px);}
+  .cs-card.active{border-color:var(--blood);background:linear-gradient(180deg, rgba(200,30,30,.28), rgba(200,30,30,.06));}
+  .cs-card.loading{opacity:.5;}
+  .cs-card-name{font-family:'Oswald',sans-serif;font-weight:600;font-size:16px;letter-spacing:2px;text-transform:uppercase;}
+  .cs-card-role{font-size:11px;letter-spacing:1px;color:#8a8477;text-transform:uppercase;}
+  #cs-confirm{padding:14px 52px;font-family:'Oswald',sans-serif;font-weight:600;letter-spacing:4px;font-size:16px;
+    background:var(--blood);color:#f2ede2;border:1px solid #ff6b6b;cursor:pointer;text-transform:uppercase;
+    transition:transform .15s, filter .15s;}
+  #cs-confirm:hover{transform:translateY(-2px);filter:brightness(1.15);}
+  @media (max-width:640px){ .cs-card{width:96px;padding:8px 4px;} .cs-card-role{display:none;} }
+
   /* ---------- START SCREEN ---------- */
   #start-screen{
     position:fixed;inset:0;z-index:50;
@@ -309,6 +342,15 @@
     font-size:15px;background:transparent;border:1px solid #c8c2b4;color:#f2ede2;cursor:pointer;
     text-transform:uppercase;}
   .end-screen button:hover{background:#c8c2b4;color:#000;}
+  .end-screen .menu-exit{margin-top:12px;padding:9px 26px;font-size:13px;border-color:#5a564c;color:#b7b0a2;}
+  .end-screen .menu-exit.armed{border-color:var(--blood);color:#ff8a8a;}
+
+  /* ---------- BACK ARROW (character / level / mode select) ---------- */
+  .back-arrow{position:absolute;top:22px;left:22px;z-index:2;padding:9px 16px;
+    font-family:'Oswald',sans-serif;font-weight:600;letter-spacing:2px;font-size:14px;text-transform:uppercase;
+    background:rgba(10,10,8,.55);color:#f2ede2;border:1px solid #5a564c;cursor:pointer;
+    transition:border-color .15s, background .15s, transform .15s;}
+  .back-arrow:hover{border-color:#c8c2b4;background:rgba(255,255,255,.08);transform:translateX(-2px);}
 
   #loading{position:fixed;inset:0;z-index:70;background:#050505;color:#8a8477;display:flex;
     flex-direction:column;align-items:center;justify-content:center;font-family:'Oswald',sans-serif;letter-spacing:3px;font-size:14px;gap:8px;}
@@ -439,7 +481,25 @@
   <div id="load-status" style="font-size:11px;letter-spacing:2px;color:#5a564c">MODELS</div>
 </div>
 
+<div id="character-select" class="hidden">
+  <canvas id="cs-canvas"></canvas>
+  <button type="button" class="back-arrow" id="cs-back" aria-label="Back to the start screen">← Back</button>
+  <div id="cs-top">
+    <h1>Choose Your <span>Survivor</span></h1>
+    <div id="cs-detail">
+      <div id="cs-name"></div>
+      <div id="cs-role"></div>
+      <div id="cs-blurb"></div>
+    </div>
+  </div>
+  <div id="cs-bottom">
+    <div id="cs-cards"></div>
+    <button type="button" id="cs-confirm">Deploy</button>
+  </div>
+</div>
+
 <div id="level-select" class="hidden">
+  <button type="button" class="back-arrow" id="level-back" aria-label="Back to character select">← Back</button>
   <h1>DEAD<span>WAY</span> CITY</h1>
   <div id="level-buttons">
     <button data-level="1">Level 1</button>
@@ -454,6 +514,7 @@
 </div>
 
 <div id="mode-select" class="hidden">
+  <button type="button" class="back-arrow" id="mode-back" aria-label="Back to level select">← Back</button>
   <h1>Choose Your Deployment Conditions</h1>
   <div id="mode-buttons">
     <div id="mode-day" class="mode-card" data-mode="day">
@@ -591,8 +652,9 @@
 
 <div id="pause-overlay" class="end-screen hidden">
   <h1 class="end-title">PAUSED</h1>
-  <div class="end-sub">Press Tab or click below to resume.</div>
+  <div class="end-sub">Press Esc, Tab or P — or click below — to resume.</div>
   <button id="resume-btn">Resume</button>
+  <button type="button" id="pause-menu-btn" class="menu-exit">← Main Menu</button>
   <div class="end-actions">
     <button type="button" data-open-leaderboard>Leaderboard</button>
     <button type="button" data-open-credits>Credits</button>

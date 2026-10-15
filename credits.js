@@ -125,11 +125,25 @@ export const CREDITS = [
         licence: 'CC BY 4.0',
       },
       {
-        name: 'Player character',
-        what: 'Rigged player body with its animation set (player_character.glb).',
+        name: 'Tutorial player character',
+        what: 'Safe-room courier and animations (assets/player_character.glb).',
         author: 'Mesh2Motion',
-        source: 'https://mesh2motion.org — asset library: https://github.com/Mesh2Motion/mesh2motion-assets',
-        licence: 'CC0 1.0 Universal (no attribution required — credited anyway)',
+        source: 'https://github.com/Mesh2Motion/mesh2motion-assets',
+        licence: 'CC0 1.0 Universal',
+      },
+      {
+        name: 'Survivor roster (Viper, Breacher, Cipher, Ironhand, Ember) and Detention',
+        what: 'Playable characters and the Level 2 runner (assets/characters/). Character design, mesh optimisation (reduced to 30k triangles in Blender) and rigging by Nova Stack; base meshes generated with Mesh.ai.',
+        author: 'Nova Stack',
+        source: 'Sources in art/characters/; rebuilt with tools/build_characters.py',
+        licence: 'Project-owned (Mesh.ai base meshes used in line with its terms of service)',
+      },
+      {
+        name: 'Getaway motorboat',
+        what: "The girl's boat at the Level 2 pier (assets/boat.glb). Design, scaling and triangle reduction in Blender by Nova Stack (627k down to 25k triangles: AI-generated meshes are far too heavy to render as they come); base mesh generated with Mesh.ai.",
+        author: 'Nova Stack',
+        source: 'Finished in Blender from a Mesh.ai base mesh',
+        licence: 'Project-owned (Mesh.ai base mesh used in line with its terms of service)',
       },
       {
         name: 'Walker zombie (model-rigged.glb) and zombie variant (zombie_variant_b.glb)',
@@ -145,7 +159,7 @@ export const CREDITS = [
     items: [
       {
         name: 'Mixamo animation clips',
-        what: 'Walking, rifle run, strafes, start/stop, jumps, firing rifle, dying (14 clips in assets/), and the Level 2 runner\'s Injured Run.',
+        what: 'Every character clip in assets/characters/animations.glb (movement, shooting, dying, the select-screen dance and listening idle), and the Level 2 runner\'s Injured Run.',
         author: 'Adobe Mixamo',
         source: 'https://www.mixamo.com',
         licence: 'Royalty-free under the Adobe/Mixamo terms of use (no attribution required, credited anyway)',
@@ -194,8 +208,15 @@ export const CREDITS = [
         licence: '—',
       },
       {
+        name: 'Claude Code (AI coding assistant)',
+        what: 'Character roster pipeline and select screen, clip fitting and pistol grip, vending machine lighting, Level 2 clear-day atmosphere (painted sky lighting, following sun shadows, smoke, daylight facades), ruined buildings, street dressing and scenery merging; Level 2 intro fly-through, the mountains, sea and back city around it, the getaway boat and its cinematic, the moonlit dead-grid night (lit windows and light shafts, flickering firelight), the opening zombie ambush, and the infection monitor and overrun death scene, with debugging and documentation.',
+        author: 'Anthropic',
+        source: 'https://claude.com/claude-code',
+        licence: '—',
+      },
+      {
         name: 'Blender',
-        what: 'Converting/retargeting FBX animation files to .glb.',
+        what: 'Converting/retargeting FBX animation files to .glb; reducing the roster characters to 30k triangles and building assets/characters/ (tools/build_characters.py); cutting the getaway boat from 627k to 25k triangles (tools/optimize_model.py).',
         author: 'Blender Foundation',
         source: 'https://www.blender.org',
         licence: 'GPL (tool only — output files are ours)',
@@ -211,6 +232,9 @@ export const TEAM_MADE = [
   'Custom GLSL shaders: shield, fog, rain, fire, puddles, toxic sludge',
   'Every sound effect — synthesised live with the Web Audio API, no audio files',
   'Procedural city: buildings, road and sidewalk canvas textures, street props',
+  'Procedural dead-city daylight: painted smoky sky, weathered daylight facades, smoke columns',
+  'Procedural ruins: battle-damaged rooflines, blown-out corners with exposed floors, collapsed blocks, rubble mounds, shopfront ground floors',
+  'Procedural street dressing (dead trees, rubble, litter, stains, overhead cables) and static-scenery merging for performance',
   'Vending machine and supply catalogue system, procedural item icons',
 ];
 

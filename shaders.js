@@ -309,6 +309,7 @@ export const puddleUniforms = {
   uTime: { value: 0 },
   uColor: { value: new THREE.Color(0x0d141a) },
   uSkyColor: { value: new THREE.Color(0x9fb2c2) },
+  uRipple: { value: 1 }, // 1 = rain falling on them, ~0.15 = still water after rain
 };
 
 export const puddleVertexShader = `
@@ -328,6 +329,7 @@ export const puddleFragmentShader = `
   uniform float uTime;
   uniform vec3 uColor;
   uniform vec3 uSkyColor;
+  uniform float uRipple;
   varying vec2 vUv;
   varying vec3 vNormal;
   varying vec3 vViewDir;
@@ -344,7 +346,7 @@ export const puddleFragmentShader = `
     vec2 p = vUv * 6.0;
     float r1 = sin((noise(p + uTime * 0.15) - 0.5) * 12.0 + uTime * 1.4);
     float r2 = sin((noise(p * 1.7 - uTime * 0.1) - 0.5) * 16.0 - uTime * 1.1);
-    float ripple = (r1 + r2) * 0.5;
+    float ripple = (r1 + r2) * 0.5 * uRipple;
 
     float fresnel = pow(1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0), 3.0);
     vec3 col = mix(uColor, uSkyColor, clamp(fresnel * 0.6 + ripple * 0.05, 0.0, 1.0));

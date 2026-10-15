@@ -30,6 +30,15 @@ export const state = {
   // had; 'day' is the new alternative. Scene.js reads this to drive
   // lighting/sky/fog, and to decide whether rain + puddles are active.
   timeOfDay: 'night',
+  // Set by a level's config (Level2Config.js) to swap Day mode's overcast
+  // drizzle for a clear sunlit day — see applyTimeOfDay in Scene.js.
+  clearDay: false,
+  // Set by a level's config (Level2Config.js): street-row buildings are
+  // battle-damaged (broken tops, blown corners, shopfronts) and the
+  // blocks named in collapsedBlocks [{ side, z0, z1 }] lie in ruins —
+  // see RUINED CITY in characters.js.
+  ruinedCity: false,
+  collapsedBlocks: null,
 
   // Run tracking (account.js / cloud.js): which level is running, how
   // long it has been actively played (paused/dead time excluded), and
@@ -37,6 +46,7 @@ export const state = {
   levelId: null,
   runTime: 0,
   runReported: false,
+
 
   // Score / progress
   kills: 0,
@@ -69,13 +79,13 @@ export const state = {
   meleeTimer: 0,
   bobPhase: 0,
   currentSpeed: 3.7,
-  playerScaleOverride: 0.5, // was 0.55 — measured "a little too big" now that
-                            // ground-clamping actually works (previously this
-                            // number was being judged against a floating,
-                            // wrongly-modeled character, so it wasn't a
-                            // reliable data point). Still live-adjustable
-                            // with [ / ] against the debug readout's meters
-                            // display.
+  sprintToggle: false,
+  lastWTapTime: 0,
+  playerScaleOverride: 1, // roster characters are measured in their true
+                          // world size, so PLAYER_TARGET_HEIGHT applies as
+                          // is (the old player_character.glb needed 0.5).
+                          // Still live-adjustable with [ / ] against the
+                          // debug readout's meters display.
   playerBaseScale: 1,
   playerCurrentHeight: 0,
 
@@ -130,6 +140,8 @@ export const state = {
   // Asset loading progress
   loadFlags: { player: false, zombie: false, car: false },
   readyShown: false,
+  cinematic: false,
+  dying: null,        // { t, eaters, camFrom } while overrun, before the death screen (Actions.js)   // a level intro owns the camera; gameplay holds (Level2Intro.js)
 
   // Skip flags — set by Level2Config.js (or similar) BEFORE heavy modules
   // like characters.js evaluate. Checked at module top level to skip
