@@ -16,13 +16,14 @@
    than hard-cutting.
 
    Autoplay policy: playback is attempted as soon as the page loads —
-   wherever the browser allows it (Chrome does for visitors who have
-   engaged with the site, e.g. after previous play sessions) the menu
-   music starts on the title screen itself. Everywhere else the first
-   pointerdown/keydown unlocks audio; the deck is created and preloading
-   from boot either way, so a click starts the music instantly. The
-   unlock listeners stay armed until a play() call actually succeeds, so
-   a blocked attempt is retried by the next gesture.
+   wherever the browser allows it, the menu music starts on the title
+   screen itself. When the browser refuses (the usual first visit in
+   Chrome), the deck does not just sit paused: muted playback is always
+   permitted, so the track pre-rolls SILENTLY from that same moment.
+   The first pointerdown/keydown then only has to unmute it — already
+   buffered and mid-track — and the swell takes half a second. The
+   unlock listeners stay armed until audible playback actually starts,
+   so a blocked attempt is retried by the next gesture.
 
    All three tracks are CC-BY licensed — credits.js carries the full
    attribution.
@@ -106,11 +107,26 @@ function applyContext() {
   if (document.hidden) return; // never start audio in a background tab
   const wasPaused = d.paused;
   const p = d.play(); // resumes mid-track where it was last faded out
-  // Blocked by the autoplay policy? Keep the unlock listeners armed —
-  // the next gesture retries this call. Only a real success disarms them.
-  if (p && p.then) p.then(disarmUnlock).catch(() => {});
+  // Refused (no autoplay permission yet)? Start the silent pre-roll and
+  // keep the unlock listeners armed — the next gesture unmutes/retries.
+  // Only an audible success disarms them.
+  if (p && p.then) p.then(() => { if (!d.muted) disarmUnlock(); }).catch(() => startPreRoll(d));
+  if (d.muted) return; // pre-rolling silently — volume stays at 0 for the unmute swell
   // A track starting from silence swells in faster than a level crossfade.
   fadeTo(d, targetVolume(currentKey), wasPaused ? START_FADE_SECONDS : FADE_SECONDS);
+}
+
+/* The browser refused unmuted playback. Muted playback is always
+   allowed, so keep the track running silently from here — decoded,
+   buffered and mid-track — so the first gesture only has to unmute it
+   instead of starting it from nothing. */
+function startPreRoll(d) {
+  if (d.muted) return; // already rolling silently
+  d.muted = true;
+  d.volume = 0;
+  fades.delete(d); // cancel the fade the refused attempt registered
+  const p = d.play();
+  if (p && p.catch) p.catch(() => {}); // even muted playback refused — stay parked
 }
 
 function armUnlock() {
@@ -121,7 +137,15 @@ function armUnlock() {
 }
 
 function onFirstGesture() {
-  applyContext(); // retried on every gesture until a play() succeeds
+  const d = currentKey ? decks.get(currentKey) : null;
+  if (d && d.muted) {
+    // The pre-rolled track has been playing silently since boot; a
+    // gesture is the one moment the autoplay policy permits sound, so
+    // unmute here and swell it in from zero.
+    d.muted = false;
+    fadeTo(d, targetVolume(currentKey), START_FADE_SECONDS);
+  }
+  applyContext(); // retried on every gesture until playback is audible
 }
 
 function disarmUnlock() {
