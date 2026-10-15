@@ -21,14 +21,19 @@
    Chrome), the deck does not just sit paused: muted playback is always
    permitted, so the track pre-rolls SILENTLY from that same moment and
    the state goes "pending" — silent, waiting for the first gesture.
-   While pending the sound chip reads as MUTED (it is telling the truth:
-   no sound is coming out yet) and the first press anywhere — the chip,
-   M, or any other click or key — switches the music ON, already
-   buffered and mid-track, swelling in over half a second. A pending
-   press on the chip is never treated as "mute": pressing a
-   muted-looking chip turns the sound on instead. The unlock listeners
-   stay armed until audible playback actually starts, so a blocked
-   attempt is retried by the next gesture.
+   While pending the chip keeps its normal look (it is not a mute —
+   nothing the player did) and the first press anywhere — the chip, M,
+   or any other click or key — switches the music ON, already buffered
+   and mid-track, swelling in over half a second. A pending press on
+   the chip is never treated as "mute": the press that starts the music
+   cannot silence it. The unlock listeners stay armed until audible
+   playback actually starts, so a blocked attempt is retried by the
+   next gesture.
+
+   Muting is for the current visit only — it is deliberately NOT
+   persisted. A stored mute once made every reload start silent, which
+   reads as the game defaulting to mute; every load now starts with
+   sound available.
 
    All three tracks are CC-BY licensed — credits.js carries the full
    attribution.
@@ -44,10 +49,10 @@ export const TRACKS = {
 const decks = new Map(); // context key -> HTMLAudioElement (created on first use)
 let currentKey = null;   // the context we want playing right now
 let unlockArmed = false;
-let muted = false;       // persisted master switch for music + sfx
+let muted = false;       // master switch for music + sfx (current visit only)
 let pendingUnlock = false; // silent pre-roll active, waiting for the first gesture
 
-const LS_KEY = 'deadway.sound.muted'; // shared with the sound button in main.js
+const LS_KEY = 'deadway.sound.muted'; // legacy key from earlier builds — cleared at boot
 const listeners = new Set(); // notified whenever the mute state changes
 
 /* Volume fades — switching a level should never hard-cut the music. One
@@ -192,7 +197,10 @@ function disarmUnlock() {
 }
 
 export function initMusic() {
-  try { muted = localStorage.getItem(LS_KEY) === '1'; } catch { /* private mode */ }
+  // Never boot muted: mute lives for the current visit only, and a stored
+  // mute from an earlier build is cleared so it cannot linger at all.
+  muted = false;
+  try { localStorage.removeItem(LS_KEY); } catch { /* private mode */ }
   armUnlock();
   // Pause the music while the tab is backgrounded (the sound keeps
   // playing otherwise, which reads as a bug when the player tabs away)
@@ -207,22 +215,23 @@ export function initMusic() {
 }
 
 /* ---------------------------------------------------------------------
-   MUTE — one switch for the whole game's audio, persisted so a muted
-   player stays muted across reloads. Scene.js and StoryAudio.js read
-   isMuted() so the synthesized sfx honour it as well.
+   MUTE — one switch for the whole game's audio, for the current visit
+   only: every load starts with sound available (see initMusic). Scene.js
+   and StoryAudio.js read isMuted() so the synthesized sfx honour it as
+   well.
 --------------------------------------------------------------------- */
 export function isMuted() { return muted; }
 
 /* True while the music is caught in the silent pre-roll: autoplay was
-   refused, the track is rolling muted, and the next gesture will turn it
-   on. The chip paints itself muted in this state and treats the first
-   press as "switch on" rather than "toggle". */
+   refused and the track is rolling muted until the next gesture turns it
+   on. The chip keeps its normal look in this state; the first press
+   (the chip included) is treated as "switch on" rather than "toggle". */
 export function isSoundPending() { return pendingUnlock; }
 
 /* The main.js entry point for the sound chip and the M key. While the
    pre-roll is pending, a press means "make the music audible" — without
    this, the very press that unmuted the pre-roll would be read as a
-   toggle and flip straight back to muted (persisting it across reloads). */
+   toggle and flip straight back to muted. */
 export function handleSoundToggle() {
   if (clearPendingUnlock()) { applyContext(); return muted; }
   return toggleMuted();
@@ -231,8 +240,7 @@ export function handleSoundToggle() {
 export function setMuted(v) {
   v = !!v;
   if (v === muted) return;
-  muted = v;
-  try { localStorage.setItem(LS_KEY, v ? '1' : '0'); } catch { /* ignore */ }
+  muted = v; // current visit only — deliberately not persisted
   applyMute();
   notify();
 }
