@@ -511,6 +511,12 @@ stale cache: stop the local server, hard-refresh (Ctrl/Cmd+Shift+R), and
 check the browser console (F12) for red errors — an error partway through
 `game.js` can silently stop everything after it from ever running, which
 would explain multiple "still broken" symptoms at once rather than one.
+If the game is simply *silent*, check the sound button (or press M) first —
+the mute choice is persisted (`deadway.sound.muted` in localStorage), so a
+previous session's mute deliberately survives reloads. The music decks (one
+`<audio>` per context) are attached to the document, so
+`document.querySelectorAll('audio')` in the console shows which track is
+loaded, paused or playing.
 Fixes based on direct playtesting feedback, with root causes traced through
 the code (not guesses):
 
