@@ -167,6 +167,7 @@ build step needed.
 - **Space** — jump (on foot) / handbrake (driving)
 - **F** — enter / exit the car (walk up to it first)
 - **R** — reload
+- **M** — mute / unmute all game audio (same as the sound button, top-right)
 - **Esc** — release the mouse cursor
 
 ## What's actually simulated (not faked)
