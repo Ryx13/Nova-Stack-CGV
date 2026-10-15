@@ -19,11 +19,16 @@
    wherever the browser allows it, the menu music starts on the title
    screen itself. When the browser refuses (the usual first visit in
    Chrome), the deck does not just sit paused: muted playback is always
-   permitted, so the track pre-rolls SILENTLY from that same moment.
-   The first pointerdown/keydown then only has to unmute it — already
-   buffered and mid-track — and the swell takes half a second. The
-   unlock listeners stay armed until audible playback actually starts,
-   so a blocked attempt is retried by the next gesture.
+   permitted, so the track pre-rolls SILENTLY from that same moment and
+   the state goes "pending" — silent, waiting for the first gesture.
+   While pending the sound chip reads as MUTED (it is telling the truth:
+   no sound is coming out yet) and the first press anywhere — the chip,
+   M, or any other click or key — switches the music ON, already
+   buffered and mid-track, swelling in over half a second. A pending
+   press on the chip is never treated as "mute": pressing a
+   muted-looking chip turns the sound on instead. The unlock listeners
+   stay armed until audible playback actually starts, so a blocked
+   attempt is retried by the next gesture.
 
    All three tracks are CC-BY licensed — credits.js carries the full
    attribution.
@@ -40,6 +45,7 @@ const decks = new Map(); // context key -> HTMLAudioElement (created on first us
 let currentKey = null;   // the context we want playing right now
 let unlockArmed = false;
 let muted = false;       // persisted master switch for music + sfx
+let pendingUnlock = false; // silent pre-roll active, waiting for the first gesture
 
 const LS_KEY = 'deadway.sound.muted'; // shared with the sound button in main.js
 const listeners = new Set(); // notified whenever the mute state changes
@@ -125,6 +131,8 @@ function startPreRoll(d) {
   d.muted = true;
   d.volume = 0;
   fades.delete(d); // cancel the fade the refused attempt registered
+  pendingUnlock = true; // sound is not audible yet — the chip reads muted
+  notify();
   const p = d.play();
   if (p && p.catch) p.catch(() => {}); // even muted playback refused — stay parked
 }
@@ -136,15 +144,43 @@ function armUnlock() {
   document.addEventListener('keydown', onFirstGesture, true);
 }
 
-function onFirstGesture() {
+/* True when this gesture belongs to the sound UI itself (the chip or the
+   M key). Those presses deliberately do NOT auto-unmute here: main.js's
+   handler runs afterwards and routes them through handleSoundToggle(),
+   which switches a pending pre-roll ON — if this listener unmuted first,
+   the same press would then read as "mute" in the toggle and silence
+   everything again. The M conditions mirror main.js's handler. */
+function isSoundUiEvent(e) {
+  const t = e && e.target;
+  if (e && e.type === 'keydown') {
+    const editing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+    if (!editing && e.code === 'KeyM' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) return true;
+    // Enter/Space activating a focused chip fires a synthetic click after
+    // this keydown — let that click run the toggle instead.
+    if (!e.repeat && t && t.closest && t.closest('#sound-btn') &&
+        (e.code === 'Enter' || e.code === 'Space')) return true;
+    return false;
+  }
+  return !!(t && t.closest && t.closest('#sound-btn'));
+}
+
+/* The silent pre-roll is over the moment any real gesture happens: the
+   deck unmutes (permitted inside the gesture) and swells in from zero.
+   The chip repaints through notify() — sound is genuinely on now. */
+function clearPendingUnlock() {
+  if (!pendingUnlock) return false;
+  pendingUnlock = false;
   const d = currentKey ? decks.get(currentKey) : null;
-  if (d && d.muted) {
-    // The pre-rolled track has been playing silently since boot; a
-    // gesture is the one moment the autoplay policy permits sound, so
-    // unmute here and swell it in from zero.
+  if (!muted && d && d.muted) {
     d.muted = false;
     fadeTo(d, targetVolume(currentKey), START_FADE_SECONDS);
   }
+  notify();
+  return true;
+}
+
+function onFirstGesture(e) {
+  if (!isSoundUiEvent(e)) clearPendingUnlock();
   applyContext(); // retried on every gesture until playback is audible
 }
 
@@ -177,6 +213,21 @@ export function initMusic() {
 --------------------------------------------------------------------- */
 export function isMuted() { return muted; }
 
+/* True while the music is caught in the silent pre-roll: autoplay was
+   refused, the track is rolling muted, and the next gesture will turn it
+   on. The chip paints itself muted in this state and treats the first
+   press as "switch on" rather than "toggle". */
+export function isSoundPending() { return pendingUnlock; }
+
+/* The main.js entry point for the sound chip and the M key. While the
+   pre-roll is pending, a press means "make the music audible" — without
+   this, the very press that unmuted the pre-roll would be read as a
+   toggle and flip straight back to muted (persisting it across reloads). */
+export function handleSoundToggle() {
+  if (clearPendingUnlock()) { applyContext(); return muted; }
+  return toggleMuted();
+}
+
 export function setMuted(v) {
   v = !!v;
   if (v === muted) return;
@@ -203,6 +254,7 @@ function notify() {
 
 function applyMute() {
   if (muted) {
+    pendingUnlock = false; // an explicit mute supersedes any pending pre-roll
     for (const [, d] of decks) {
       if (!d.paused) fadeTo(d, 0, 0.3, () => d.pause());
     }
