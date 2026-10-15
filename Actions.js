@@ -198,6 +198,29 @@ export function showHitmarker() {
   dom.hitmarker.classList.add('show');
 }
 
+const _capA = new THREE.Vector3(), _capB = new THREE.Vector3(), _capP = new THREE.Vector3();
+// Nearest alive infected whose capsule (feet to head, ~0.6 m radius, scaled
+// with the model) the current aim ray passes through, shaped like a
+// raycast hit so tryShoot can treat it the same way.
+function zombieCapsuleHit() {
+  const ray = raycaster.ray;
+  let best = null;
+  for (const z of state.zombies) {
+    if (!z.alive || z.state === 'downed') continue;
+    const sc = Math.max(1, z.mesh.scale.y);
+    const h = ZOMBIE_TARGET_HEIGHT * sc, r = 0.6 * sc;
+    _capA.copy(z.mesh.position);
+    _capB.copy(z.mesh.position).y += h;
+    // Closest approach between the ray and the capsule's axis
+    const along = ray.distanceSqToSegment(_capA, _capB, _capP);
+    if (along > r * r) continue;
+    const d = ray.origin.distanceTo(_capP);
+    if (d > 70 || (best && d >= best.distance)) continue;
+    best = { distance: d, point: _capP.clone(), object: { userData: { owner: z } } };
+  }
+  return best;
+}
+
 export function tryShoot() {
   if (state.narrativeBlocked) return;
   if (state.currentWeapon !== 'gun') { tryKnife(); return; }
@@ -221,7 +244,13 @@ export function tryShoot() {
   const targets = [];
   state.zombies.forEach((z) => { if (z.alive) targets.push(z.mesh); });
   state.explosiveBarrels.forEach((b) => { if (!b.exploded) targets.push(b.mesh); });
-  const hits = raycaster.intersectObjects(targets, true);
+  let hits = raycaster.intersectObjects(targets, true);
+  // Backup hitbox: the model raycast can miss a tall or oddly-skinned
+  // infected (the ray is tested against its bind-pose bounds), so a shot
+  // that visibly lands is also tested against a capsule around each one.
+  // Whichever is nearer along the ray wins.
+  const cap = zombieCapsuleHit();
+  if (cap && (!hits.length || cap.distance < hits[0].distance)) hits = [cap, ...hits];
   const muzzlePos = new THREE.Vector3();
   activeGunMesh().getWorldPosition(muzzlePos);
   const tracerEnd = hits.length
@@ -234,7 +263,7 @@ export function tryShoot() {
       owner.takeDamage();
       showHitmarker();
     } else if (owner) {
-      const headshot = hits[0].point.y > owner.mesh.position.y + 1.42;
+      const headshot = hits[0].point.y > owner.mesh.position.y + 1.42 * Math.max(1, owner.mesh.scale.y);
       owner.takeDamage(headshot ? GUN_DAMAGE * 1.85 : GUN_DAMAGE, headshot);
       showHitmarker();
     }
@@ -1181,7 +1210,7 @@ function startAnimationLoop() {
       updateExplosions(dt);
       updateShield(dt);
       state.spawnTimer -= dt;
-      if (state.spawnTimer <= 0) { state.spawnTimer = ZOMBIE_SPAWN_INTERVAL; spawnZombie(); }
+      if (state.spawnTimer <= 0) { state.spawnTimer = ZOMBIE_SPAWN_INTERVAL / state.zombieCountMul; spawnZombie(); }
       for (let i = state.activeSparks.length - 1; i >= 0; i--) {
         const s = state.activeSparks[i];
         s.userData.vel.y -= 9 * dt;

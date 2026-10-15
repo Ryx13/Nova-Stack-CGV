@@ -1114,6 +1114,8 @@ export function makeBuilding(x, z, w, h, d, opts = {}) {
   const g = new THREE.Group();
   const night = state.timeOfDay === 'night';
   const clearDay = state.timeOfDay === 'day' && state.clearDay;
+  // Level 1's day (state.warmDay) wears the same weathered daylight facades
+  const dayLook = state.timeOfDay === 'day' && (state.clearDay || state.warmDay);
   // Same rnd() calls in every mode, so the city's layout never changes
   // with the time of day
   const variant = rnd();
@@ -1124,7 +1126,7 @@ export function makeBuilding(x, z, w, h, d, opts = {}) {
   // with no glowing window grid — lit windows are added one by one
   // (addLitWindows) on the few buildings that still have power
   const deadNight = night && state.deadGridNight && !opts.oldLook;
-  if (clearDay || deadNight) {
+  if (dayLook || deadNight) {
     const set = dayFacades();
     let tex = set[Math.floor(variant * set.length)];
     if (!ruined) {
@@ -1305,7 +1307,7 @@ export function loadBuildings() {
   if (lit) addLitWindowMeshes(lit);
   buildWestPocket();
   const night = state.timeOfDay === 'night';
-  const clearDay = state.timeOfDay === 'day' && state.clearDay;
+  const clearDay = state.timeOfDay === 'day' && (state.clearDay || state.warmDay);
   for (let i = 0; i < 18; i++) {
     // Distant skyline: window textures instead of flat black so the far
     // blocks read as buildings — and a handful of lit windows survive
@@ -1526,7 +1528,7 @@ export function makeStreetlight(x, z) {
   // A level can also keep only a few lamps powered (state.liveStreetlights,
   // Level 2's dead grid): every post not on that list stands dark.
   const live = state.liveStreetlights?.find((l) => l.side === Math.sign(x) && l.z === z);
-  const lampOn = !(state.timeOfDay === 'day' && state.clearDay) && (!state.liveStreetlights || !!live);
+  const lampOn = !(state.timeOfDay === 'day' && (state.clearDay || state.warmDay)) && (!state.liveStreetlights || !!live);
   const blink = !!live?.blink;
   const lamp = new THREE.Mesh(
     new THREE.SphereGeometry(0.18, 8, 8),
@@ -2711,14 +2713,14 @@ function loadZombieTemplate(path, opts = {}) {
     markLoaded('zombie');
     if (!zombieTemplateResolved) {
       zombieTemplateResolved = true;
-      for (let i = 0; i < 6; i++) spawnZombie();
+      for (let i = 0, n = Math.round(6 * state.zombieCountMul); i < n; i++) spawnZombie();
     }
   }, undefined, () => {
     state.loadFlags.zombie = true;
     markLoaded('zombie');
     if (!zombieTemplateResolved) {
       zombieTemplateResolved = true;
-      for (let i = 0; i < 6; i++) spawnZombie();
+      for (let i = 0, n = Math.round(6 * state.zombieCountMul); i < n; i++) spawnZombie();
     }
   });
 }
@@ -2981,7 +2983,7 @@ export class Zombie {
       if (this.attackCooldown <= 0 && !state.inVehicle) {
         this.attackCooldown = 0.95;
         if (!state.shieldActive) {
-          damagePlayer(8 + Math.random() * 5);
+          damagePlayer((8 + Math.random() * 5) * state.zombieDamageMul);
           flashDamage();
           const push = toPlayer.clone().normalize().multiplyScalar(0.12);
           playerBody.position.x += push.x;
@@ -3073,7 +3075,7 @@ export function spawnDepotGuards() {
     [DEPOT_POS.x - 4, DEPOT_POS.z + 3], [DEPOT_POS.x + 5, DEPOT_POS.z - 2],
     [DEPOT_POS.x - 2, DEPOT_POS.z - 6], [DEPOT_POS.x + 3, DEPOT_POS.z + 6],
   ];
-  spots.forEach((p) => {
+  spots.slice(0, Math.max(1, Math.round(spots.length * state.zombieCountMul))).forEach((p) => {
     const z = new Zombie(new THREE.Vector3(p[0], 0, p[1]));
     z.health = z.maxHealth = 95 + Math.floor(Math.random() * 25);
     z.speed *= 1.15;
@@ -3104,7 +3106,7 @@ export function spawnChargers(points, speed) {
 }
 
 export function spawnZombie() {
-  if (state.zombies.length >= ZOMBIE_MAX_ALIVE || state.spawnedTotal >= KILL_TARGET + 10) return;
+  if (state.zombies.length >= Math.round(ZOMBIE_MAX_ALIVE * state.zombieCountMul) || state.spawnedTotal >= KILL_TARGET + 10) return;
   const around = playerVis.group.position;
   const ang = Math.random() * Math.PI * 2;
   const dist = 16 + Math.random() * 24;

@@ -33,6 +33,15 @@ export const state = {
   // Set by a level's config (Level2Config.js) to swap Day mode's overcast
   // drizzle for a clear sunlit day — see applyTimeOfDay in Scene.js.
   clearDay: false,
+  // Set by Level1.js: Day mode borrows Level 2's low-sun look (painted sky,
+  // sun shadows, warm grade, daylight facades, lamps off) but keeps Level 1's
+  // own drizzle, puddles and burning-wreck smoke — see warmDay in Scene.js.
+  warmDay: false,
+  // Set by Level1.js to ease the street: fraction of the usual infected
+  // (cap, opening pack, spawn rate, depot guards) and of the damage their
+  // hits deal. 1 = the stock balance, which Levels 2/3 keep.
+  zombieCountMul: 1,
+  zombieDamageMul: 1,
   // Set by a level's config (Level2Config.js): street-row buildings are
   // battle-damaged (broken tops, blown corners, shopfronts) and the
   // blocks named in collapsedBlocks [{ side, z0, z1 }] lie in ruins —

@@ -6,7 +6,6 @@ import {
   createFogMaterial, fogUniforms, createRainMaterial, rainUniforms,
   createPuddleMaterial, puddleUniforms, fireUniforms, toxicUniforms,
 } from './shaders.js';
-import { isMuted, onSoundChange } from './Music.js'; // master mute, shared with the music decks
 
 /* ======================================================================
    Scene.js — RENDERER / SCENE / CAMERA / PHYSICS WORLD / HUD
@@ -71,11 +70,8 @@ export const dom = {
 export function addObstacle(x, z, r) { state.obstacles.push({ x, z, r }); }
 
 /* ---------------------------------------------------------------------
-   AUDIO — synthesized, no extra files (music tracks are separate, see
-   Music.js)
+   AUDIO — synthesized, no extra files
 --------------------------------------------------------------------- */
-const SFX_GAIN = 0.32; // master level for the synthesized effects
-
 export const sfx = {
   ctx: null,
   master: null,
@@ -87,7 +83,7 @@ export const sfx = {
     const AC = window.AudioContext || window.webkitAudioContext;
     this.ctx = new AC();
     this.master = this.ctx.createGain();
-    this.master.gain.value = isMuted() ? 0 : SFX_GAIN;
+    this.master.gain.value = 0.32;
     this.master.connect(this.ctx.destination);
     this.engineOsc = this.ctx.createOscillator();
     this.engineOsc.type = 'sawtooth';
@@ -153,15 +149,6 @@ export const sfx = {
     if (this.engineOsc) this.engineOsc.frequency.setTargetAtTime(42 + speed * 3.2, t, 0.08);
   },
 };
-
-// The sound button (main.js) drives one mute for the whole game — mirror
-// it onto the sfx master gain. setTargetAtTime smooths the step so
-// muting mid-firefight doesn't pop. Before init() there's nothing to
-// adjust; init() itself reads isMuted() for the starting value.
-onSoundChange((m) => {
-  if (!sfx.ctx) return;
-  sfx.master.gain.setTargetAtTime(m ? 0 : SFX_GAIN, sfx.ctx.currentTime, 0.05);
-});
 
 /* ---------------------------------------------------------------------
    1. RENDERER / SCENE / CAMERA
@@ -487,11 +474,26 @@ const TIME_OF_DAY_CONFIG = {
   },
 };
 
+// Day for levels that set state.warmDay (Level 1): Level 2's low-sun
+// afternoon — same sky, sun, shadows, fog range and grade — but the drizzle
+// stays: rain and puddles on, and the burning wrecks' smoke is Level 1's
+// own (no extra distant smoke columns). The ground mist keeps running too,
+// just tinted warm so it doesn't read as a cold white sheet under the sun.
+TIME_OF_DAY_CONFIG.warmDay = {
+  ...TIME_OF_DAY_CONFIG.clearDay,
+  hazeColor: 0xd9c4a6, hazeOpacity: 0.4, hazeCoverage: 0.5, hazeVisible: true,
+  rainOn: true,
+  puddlesOn: true,
+  smokeColumns: false,
+};
+
 export function applyTimeOfDay(mode) {
   state.timeOfDay = TIME_OF_DAY_CONFIG[mode] ? mode : 'night';
-  const clear = state.timeOfDay === 'day' && state.clearDay;
+  const warm = state.timeOfDay === 'day' && state.warmDay && !state.clearDay;
+  const clear = state.timeOfDay === 'day' && (state.clearDay || state.warmDay);
   const moonlit = state.timeOfDay === 'night' && state.moonlitNight;
-  const cfg = clear ? TIME_OF_DAY_CONFIG.clearDay
+  const cfg = warm ? TIME_OF_DAY_CONFIG.warmDay
+    : clear ? TIME_OF_DAY_CONFIG.clearDay
     : moonlit ? TIME_OF_DAY_CONFIG.moonNight
     : TIME_OF_DAY_CONFIG[state.timeOfDay];
   if (clear && !cfg.skyTex) cfg.skyTex = duskSkyTexture();
@@ -661,7 +663,7 @@ function setupClearDay(cfg) {
   scene.environment = pmrem.fromScene(envScene, 0.04, 1, 1000).texture; // far must reach the 420 m sky
   pmrem.dispose();
 
-  clearDay = { sunDir, smoke: makeSmokeColumns(), time: 0 };
+  clearDay = { sunDir, smoke: cfg.smokeColumns === false ? [] : makeSmokeColumns(), time: 0 };
 }
 
 // Smoke columns rising beyond the rooftops — soft billboards stacked and
@@ -958,7 +960,6 @@ export function maybeReady() {
     setTimeout(() => {
       dom.loading.classList.add('hidden');
       dom.hud.classList.remove('hidden');
-      document.body.classList.add('in-level'); // drops the sound chip below the radar (#sound-btn rule in index.html)
       if (readyCallback) readyCallback();
     }, 200);
   }
