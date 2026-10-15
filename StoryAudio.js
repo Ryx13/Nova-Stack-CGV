@@ -1,9 +1,12 @@
+import { isMuted } from './Music.js';
+
 // Small, disposable audio layer. Browsers may keep it silent until a gesture.
 export function createStoryAudio() {
   let ctx;
   const voices = new Set();
   function cue(kind = 'radio') {
     try {
+      if (isMuted()) return; // the sound button silences story cues too
       ctx ||= new (window.AudioContext || window.webkitAudioContext)();
       if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
       const osc = ctx.createOscillator(), gain = ctx.createGain();
