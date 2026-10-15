@@ -751,25 +751,38 @@ export class VendingMachine {
     spot.target = target;
     this._frontLight = spot;
 
-    // Floor pool: a painted radial glow, so the ground in front reads as
-    // lit at any distance for the cost of one transparent quad
+    // Floor spill: the glass front's light on the pavement, painted on one
+    // transparent quad so it reads at any distance. Not a disc: it starts
+    // as wide as the glass at the cabinet's foot, fans out a little and
+    // fades with distance, edges soft — a lit window's throw on the ground.
+    const W = 64, H = 128;
     const c = document.createElement('canvas');
-    c.width = c.height = 128;
+    c.width = W; c.height = H;
     const ctx = c.getContext('2d');
-    const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-    g.addColorStop(0, 'rgba(255,255,255,0.55)');
-    g.addColorStop(0.5, 'rgba(255,255,255,0.18)');
-    g.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, 128, 128);
+    const img = ctx.createImageData(W, H);
+    for (let py = 0; py < H; py++) {
+      const t = py / (H - 1);                         // 0 at the cabinet .. 1 far
+      const fall = Math.pow(1 - t, 1.7) * 0.6;
+      const half = (0.34 + 0.14 * t) * W;              // fans out with distance
+      const soft = (0.06 + 0.14 * t) * W;              // and its edges blur
+      for (let px = 0; px < W; px++) {
+        const e = Math.abs(px + 0.5 - W / 2);
+        const side = Math.min(1, Math.max(0, (half - e) / soft));
+        const k = (py * W + px) * 4;
+        img.data[k] = img.data[k + 1] = img.data[k + 2] = 255;
+        img.data[k + 3] = 255 * fall * side * side * (3 - 2 * side);
+      }
+    }
+    ctx.putImageData(img, 0, 0);
     const tex = new THREE.CanvasTexture(c);
     this._texs.push(tex);
     this._mats.floorGlow = new THREE.MeshBasicMaterial({
       map: tex, color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     });
-    const pool = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.1), this._mats.floorGlow);
+    // Canvas top (v = 1) lands toward -z once laid flat: the cabinet's foot
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.5), this._mats.floorGlow);
     pool.rotation.x = -Math.PI / 2;
-    pool.position.set(-0.05, 0.012, 0.85);
+    pool.position.set(-0.05, 0.012, DEPTH / 2 + 0.75);
     this.root.add(pool);
   }
 

@@ -137,7 +137,8 @@ export const state = {
   // Asset loading progress
   loadFlags: { player: false, zombie: false, car: false },
   readyShown: false,
-  cinematic: false,   // a level intro owns the camera; gameplay holds (Level2Intro.js)
+  cinematic: false,
+  dying: null,        // { t, eaters, camFrom } while overrun, before the death screen (Actions.js)   // a level intro owns the camera; gameplay holds (Level2Intro.js)
 
   // Skip flags — set by Level2Config.js (or similar) BEFORE heavy modules
   // like characters.js evaluate. Checked at module top level to skip

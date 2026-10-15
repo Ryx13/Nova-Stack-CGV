@@ -17,9 +17,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { scene, camera, addStaticBox, pushKillFeed, dom, sfx, KILL_TARGET, STREET_HALF_W, addLight, sunlightOnly } from './Scene.js';
 import { state } from './state.js';
-import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis, playerBody, spawnZombie, loadDeferredAssets } from './characters.js';
+import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis, playerBody, spawnZombie, loadDeferredAssets, updateBlinkingLamps, updateFireLights, syncHandGun, spawnChargers } from './characters.js';
 import { spawnCoin } from './PowerUps.js';
-import { createToxicMaterial } from './shaders.js';
 import { bootLevel, registerLevelTick, levelKeyHooks } from './Actions.js';
 import { VendingMachine, makeIcon } from './VendingMachine.js';
 import { finishRun } from './account.js';
@@ -65,6 +64,10 @@ export function startLevel(mode) {
   buildStreetDressing();
   // Scrubland, mountains and the open sea around it all (custom haze shader)
   registerLevelTick(buildSurroundings());
+  // The dead grid's faulty streetlights (state.liveStreetlights)
+  registerLevelTick(updateBlinkingLamps);
+  // The burning wrecks' flickering firelight (state.bigFires)
+  registerLevelTick(updateFireLights);
   lv2Scene = sceneHandles;
   // Reference-style HUD (objectives, distances, inventory panel).
   lv2HUD = buildLevel2HUD(sceneHandles.escapePoint);
@@ -126,7 +129,6 @@ const rnd = mulberry32(0x5EED02);
 
 // Port palette — the eerie teal that marks the destination.
 const TEAL = 0x2affd5;
-const TEAL_LIGHT = 0x17d5b0;
 // Machine beacon palette — lime marks the start machine (radar), pink
 // the mid-level one (adrenaline). Each machine's position glows in its
 // own color through the fog from far away (see placeVendingMachine).
@@ -377,11 +379,10 @@ function makeFallenZombie(x, z, ry) {
   return g;
 }
 
-/** Vending machine + its collider + ground marker, in the machine's own
-    glow color: the cabinet's front light is thrown in that colour, and a
-    ground ring (the same unfogged, pulsing toxic material as the port
-    beacon) marks the stand-here spot. Nothing is lit above or behind the
-    cabinet — it's opaque, so its light only falls in front. `catalog` is
+/** Vending machine + its collider, in the machine's own glow color: at
+    night the cabinet's front light is thrown in that colour onto the
+    pavement in front of it. Nothing is lit above or behind the cabinet —
+    it's opaque, so its light only falls in front. `catalog` is
     the machine's supplies preset — Level 2 passes its own one-product
     presets (radar / adrenaline) below. */
 function placeVendingMachine(x, z, ry, catalog, glow = RADAR_GLOW) {
@@ -397,15 +398,8 @@ function placeVendingMachine(x, z, ry, catalog, glow = RADAR_GLOW) {
     VendingMachine.WIDTH / 2, VendingMachine.HEIGHT / 2, VendingMachine.DEPTH / 2,
     x, VendingMachine.HEIGHT / 2, z, ry
   );
-  // Ground ring — the stand-here spot. Offset clears the (now bigger)
-  // cabinet's footprint while staying inside the 2.6 m buy range. Not by
-  // day: a glowing ring on a sunlit street reads as a lamp left on.
-  if (sunlightOnly()) return machine;
-  const marker = new THREE.Mesh(new THREE.RingGeometry(1.3, 1.7, 36), createToxicMaterial(glow));
-  marker.rotation.x = -Math.PI / 2;
-  // Local +Z is the cabinet front — drop the marker in front of it.
-  marker.position.set(x + Math.sin(ry) * 2.2, 0.05, z + Math.cos(ry) * 2.2);
-  scene.add(marker);
+  // No ground marker: the light the cabinet throws on the pavement (at
+  // night) and the buy prompt in range are what mark the spot
   return machine;
 }
 
@@ -480,12 +474,6 @@ function buildPort() {
   // Gantry cranes straddling the container rows.
   makeGantryCrane(-21, -197);
   makeGantryCrane(23, -203);
-
-  // One broad teal wash over the yard so the whole port reads "glowing
-  // docks" once the player is close enough to see surfaces again.
-  const wash = new THREE.PointLight(TEAL_LIGHT, 1.3, 30, 2);
-  wash.position.set(0, 8, -196);
-  addLight(scene, wash);
 
   // The pier — walkway over the water to her boat. The south bound wall
   // stops the player around z ≈ -208; the pier visual extends past it so
@@ -837,12 +825,25 @@ function attachAntidote(charRoot) {
 const INTRO_GIRL_WAIT = 4;
 let introWait = 0;
 let introStarted = false;
+/* START AMBUSH — at GO, five zombies burst out between the player and
+   the girl and charge: two right in front, three a little further on,
+   faster than a sprint, so the chase starts by fighting through them. */
+const AMBUSH_SPEED = [9.5, 11];   // m/s; the player sprints at 8.4
+function spawnStartAmbush() {
+  const p = playerBody.position;  // the spawn, facing -z toward her
+  spawnChargers([
+    [p.x - 3, p.z - 6.5], [p.x + 3, p.z - 5.5],                    // very close
+    [p.x - 6.5, p.z - 14], [p.x, p.z - 16.5], [p.x + 5.5, p.z - 15], // close
+  ], AMBUSH_SPEED);
+}
+
 function tickIntro(dt) {
   if (!state.readyShown || !state.cinematic) return;
   // Gameplay (which syncs the player model to its body) is frozen: stand
   // the model on its spawn and keep its idle breathing meanwhile
   playerVis.group.position.set(playerBody.position.x, 0, playerBody.position.z);
   if (playerVis.mixer) playerVis.mixer.update(dt);
+  syncHandGun(); // and the gun in their hand, which gameplay normally keeps there
   if (!introStarted) {
     introWait += dt;
     if (!girl && introWait < INTRO_GIRL_WAIT) return;
@@ -853,6 +854,7 @@ function tickIntro(dt) {
       girlFacing: new THREE.Vector3(next.x - wp.x, 0, next.z - wp.z).normalize(),
       portPos: lv2EscapePoint,
       playerPos: playerVis.group.position.clone(),
+      onDone: spawnStartAmbush,
     });
     return;
   }
@@ -1231,7 +1233,7 @@ function updateMission(dt) {
   // toward the win-screen time stat.
   if (!state.readyShown || state.cinematic) return;
   if (!missionStartTime) missionStartTime = performance.now();
-  if (state.paused) return;
+  if (state.paused || state.dying) return; // overrun: the death scene has the floor
   if (loseCinematic) { updateLoseCinematic(dt); return; }
   if (state.girlCaught || state.isDead) return; // ended either way
   if (!playerVis || !state.girlPos) return;

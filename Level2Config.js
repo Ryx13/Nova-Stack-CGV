@@ -27,6 +27,28 @@ state.lightBoot = true;
 // stay, still), and the streetlights are off — see applyTimeOfDay in
 // Scene.js and makeStreetlight in characters.js.
 state.clearDay = true;
+// Night is moonlit: no city glow, a low moon over the port and cool
+// moonlight from it (moonNight in Scene.js's time-of-day presets).
+state.moonlitNight = true;
+// ...and the buildings with it: along the street ~38% have collapsed,
+// ~26% are wrecked dark shells with one lit window, a few stand dark with
+// two, and ~28% are the original blocks with their own windows; each
+// added lit window throws a shaft of light (loadBuildings / addLitWindows
+// in characters.js; the back city does the same in Level2Surroundings.js).
+state.deadGridNight = true;
+// Night: the grid is mostly dead. Of the 21 lamp posts only these 5
+// still have power (each one a SpotLight, the costliest thing in the
+// night shader), spread ~48 m apart down the street and alternating
+// sides, the last one by the port; the 3 with blink: true are faulty
+// and stutter. Every other post
+// stands dark — see makeStreetlight / updateBlinkingLamps in characters.js.
+state.liveStreetlights = [
+  { side: -1, z: 24 },               // the spawn
+  { side: 1, z: -24, blink: true },
+  { side: -1, z: -72 },
+  { side: 1, z: -120, blink: true }, // edge of the collapse zone
+  { side: -1, z: -192, blink: true }, // the last post, by the quay
+];
 // The street is battle-damaged (broken tops, blown corners, shopfronts),
 // and the two blocks flanking the collapse zone (z -120 → -165) came down:
 // the east one over the zone's own rubble piles, the west one opposite —
@@ -50,4 +72,10 @@ state.collapsedBlocks = [
 // toward the mountains (Level2Surroundings.js) in place of the stock
 // skyline boxes.
 state.backCity = true;
+// Burning wrecks are fully alight: flames along the whole car and a
+// strong flickering light (at night — by day the sun is the only light)
+state.bigFires = true;
+// The runner zombies (model-rigged.glb) are three times as fast here:
+// ~13-19 m/s, beyond a sprint (8.4) and even adrenaline (12.2)
+state.runnerSpeedMul = 3;
 state.burningCarModel = { url: 'assets/old_rusty_car_2.glb', length: 4.4, strip: ['Plane001', 'Object002'] };

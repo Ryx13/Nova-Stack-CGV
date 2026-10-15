@@ -12,7 +12,10 @@
      sides and behind the start, lower and sparser toward the foothills,
      some broken, some collapsed and smoking. Background only: merged
      into a few meshes, no interiors; the ones within walking reach get
-     a collider.
+     a collider. At night the grid is dead: most blocks are rubble and
+     stumps with black windows, and the few towers still standing have
+     two to four lit windows each, every one throwing a shaft of light
+     down toward the street.
 
    The playable area (|x| < 80, z -210..70 — the world bounds) stays flat
    and just under the walking surface, so nothing pokes through the
@@ -30,7 +33,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { state } from './state.js';
 import {
   dirtTex, concreteTex, dayFacades, windowTexVariants, planarFacadeUVs, brokenBox,
-  FACADE_TILE_W, FACADE_TILE_H, spawnFireEffect,
+  FACADE_TILE_W, FACADE_TILE_H, spawnFireEffect, addLitWindows, addLitWindowMeshes,
 } from './characters.js';
 
 const SEA_LEVEL = 0.05;
@@ -271,8 +274,13 @@ function buildBackCity() {
   const rnd = seeded(0xC17E5);
   const clearDay = state.timeOfDay === 'day' && state.clearDay;
   const night = state.timeOfDay === 'night';
-  const tileW = clearDay ? FACADE_TILE_W : 4, tileH = clearDay ? FACADE_TILE_H : 4;
-  const VARIANTS = clearDay ? 4 : windowTexVariants.length;
+  // Real-proportion facades by day and at night (the night one only
+  // darker); the dense lit-window grid is left to other times of day
+  const real = clearDay || night;
+  const tileW = real ? FACADE_TILE_W : 4, tileH = real ? FACADE_TILE_H : 4;
+  const VARIANTS = real ? 4 : windowTexVariants.length;
+  const lit = { windows: [], rays: [] };
+  let towers = 0;
   // Buckets per band (0 near: casts shadows, 1 far: doesn't) x facade variant
   const walls = [0, 1].map(() => Array.from({ length: VARIANTS }, bucket));
   const roofs = [0, 1].map(bucket);
@@ -281,15 +289,24 @@ function buildBackCity() {
   const tint = new THREE.Color(), roofTint = new THREE.Color();
 
   // One building at (x, z), `out` metres out from the main street's rows
-  const place = (x, z, out) => {
+  // `face`: the outward normal of the side facing the street
+  const place = (x, z, out, face) => {
     if (z < coastZ(x) + 18 || keptClear(x, z, 14)) return;
     const f = 1 - smoothstep(0, CITY_OUT, out);              // 1 by the street .. 0 at the edge
     if (rnd() > 0.35 + 0.65 * f) return;                      // sparser further out
     const w = 9 + rnd() * 14, d = 9 + rnd() * 14;
     let h = 7 + (10 + rnd() * 34) * f * f + rnd() * 5;
     const roll = rnd();
-    const collapsed = roll < 0.12;
-    const broken = !collapsed && roll < 0.45;
+    let collapsed = roll < 0.12;
+    let broken = !collapsed && roll < 0.45;
+    let tower = false;
+    if (night) {
+      // Mostly flattened; a few near towers survive
+      tower = out < 150 && towers < 14 && rnd() < 0.14;
+      collapsed = !tower && roll < 0.6;
+      broken = !tower && !collapsed;
+      if (tower) { towers++; h = 24 + rnd() * 20; } else if (broken) h = Math.min(h, 6 + rnd() * 8);
+    }
     if (collapsed) h = 3 + rnd() * 5;
     // Sunk a metre below the lowest ground under it
     const base = Math.min(heightAt(x - w / 2, z - d / 2), heightAt(x + w / 2, z + d / 2), heightAt(x, z)) - 1;
@@ -306,11 +323,13 @@ function buildBackCity() {
       };
     }
     const geo = brokenBox(w, total, d, 0, dropAt);
-    geo.rotateY((rnd() - 0.5) * 0.12);
+    const rot = (rnd() - 0.5) * 0.12;
+    if (!tower) geo.rotateY(rot); // towers stay square so their lit windows sit on the facade
     geo.translate(x, base, z);
     planarFacadeUVs(geo, tileW, tileH);
     const l = 0.5 + rnd() * 0.25;
-    tint.setHSL(0.06 + rnd() * 0.05, 0.1 + rnd() * 0.1, clearDay ? l : l * 0.7);
+    tint.setHSL(0.06 + rnd() * 0.05, 0.1 + rnd() * 0.1, clearDay ? l : l * (night ? 0.45 : 0.7));
+    if (tower) addLitWindows(lit, { cx: x, cz: z, w, d, n: face, rnd, count: 2 + ((rnd() * 3) | 0), maxY: h - 1.5 });
     roofTint.setHSL(0.07, 0.05, 0.28 + rnd() * 0.1);
     const band = out < 70 ? 0 : 1;
     splitShell(geo, tint, roofTint, walls[band][(rnd() * VARIANTS) | 0], roofs[band]);
@@ -330,7 +349,7 @@ function buildBackCity() {
   for (const side of [-1, 1]) {
     for (let z = 58; z > -200; z -= 30 + rnd() * 12) {
       for (let ax = 54; ax < PLAY.x + CITY_OUT; ax += 26 + rnd() * 12) {
-        place(side * (ax + rnd() * 4), z + (rnd() - 0.5) * 6, ax - 30);
+        place(side * (ax + rnd() * 4), z + (rnd() - 0.5) * 6, ax - 30, new THREE.Vector3(-side, 0, 0));
       }
     }
   }
@@ -339,11 +358,11 @@ function buildBackCity() {
   for (let z = 92; z < PLAY.zN + CITY_OUT * 0.8; z += 30 + rnd() * 12) {
     for (let x = -span; x < span; x += 26 + rnd() * 12) {
       if (Math.abs(x) < 14) continue; // the road out stays open
-      place(x + rnd() * 4, z, Math.max(z - 40, Math.abs(x) - 30));
+      place(x + rnd() * 4, z, Math.max(z - 40, Math.abs(x) - 30), new THREE.Vector3(0, 0, -1));
     }
   }
 
-  const wallMats = Array.from({ length: VARIANTS }, (_, i) => (clearDay
+  const wallMats = Array.from({ length: VARIANTS }, (_, i) => (real
     ? new THREE.MeshStandardMaterial({ map: dayFacades()[i], vertexColors: true, roughness: 0.95 })
     : new THREE.MeshStandardMaterial({
       map: windowTexVariants[i], vertexColors: true, roughness: 1,
@@ -362,7 +381,9 @@ function buildBackCity() {
     add(roofs[band], roofMat);
   });
   smokeSpots.forEach((p) => spawnFireEffect(p, 2.4));
+  addLitWindowMeshes(lit);
 }
+
 
 /** Builds the terrain, the sea and the back city. Call after the static merge (custom
     shader — not mergeable). Returns the per-frame tick. */

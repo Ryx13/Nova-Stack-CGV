@@ -213,6 +213,27 @@ const nightSkyCanvas = makeCanvas(8, 64, (ctx, w, h) => {
 });
 const nightSkyTex = new THREE.CanvasTexture(nightSkyCanvas);
 
+// MOONLIT NIGHT sky (state.moonlitNight — Level 2's dead grid): no city
+// glow to paint the haze amber, so it runs deep navy at the zenith down
+// to a moonlit slate-blue at the horizon
+const moonNightSkyCanvas = makeCanvas(8, 64, (ctx, w, h) => {
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, '#060912');
+  g.addColorStop(0.5, '#121a2a');
+  g.addColorStop(0.8, '#253149');
+  g.addColorStop(1, '#34415a');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+});
+const moonNightSkyTex = new THREE.CanvasTexture(moonNightSkyCanvas);
+// Where the moon hangs on a moonlit night: low over the far end of the
+// street, ~15 degrees right of the spawn's forward (-z), ~24 degrees up —
+// in frame from the start without looking up. The moonlight comes from it.
+const MOON_DIR = new THREE.Vector3(
+  Math.sin(THREE.MathUtils.degToRad(15)) * Math.cos(THREE.MathUtils.degToRad(24)),
+  Math.sin(THREE.MathUtils.degToRad(24)),
+  -Math.cos(THREE.MathUtils.degToRad(15)) * Math.cos(THREE.MathUtils.degToRad(24)),
+);
+
 // DAY sky gradient — new, overcast/drizzly blue-grey so the Day mode
 // rain and mist actually make sense with what's overhead.
 const daySkyCanvas = makeCanvas(8, 64, (ctx, w, h) => {
@@ -397,6 +418,23 @@ const TIME_OF_DAY_CONFIG = {
     rainOn: false,
     puddlesOn: false,
   },
+  // Night for levels that set state.moonlitNight (Level 2): the grid is
+  // dead, so no amber light pollution — a cool moonlit night instead.
+  // The "sun" light becomes the moon (dim, blue-white, from MOON_DIR) and
+  // the fills are tinted the same way, so shade reads as blue, not black.
+  moonNight: {
+    skyTex: moonNightSkyTex,
+    bgColor: 0x1a2130,
+    fogColor: 0x1f2736,
+    fogDensity: 0.0085,
+    hemiSky: 0x5d6f92, hemiGround: 0x15171c, hemiIntensity: 0.72,
+    sunColor: 0xb4c6ea, sunIntensity: 1.05, sunVisible: false,
+    celestial: true,
+    ambientColor: 0x1f2635, ambientIntensity: 0.3,
+    hazeColor: 0x52607a, hazeOpacity: 0.35, hazeCoverage: 0.35,
+    rainOn: false,
+    puddlesOn: false,
+  },
   day: {
     skyTex: daySkyTex,
     bgColor: 0xaebccb,
@@ -438,7 +476,10 @@ const TIME_OF_DAY_CONFIG = {
 export function applyTimeOfDay(mode) {
   state.timeOfDay = TIME_OF_DAY_CONFIG[mode] ? mode : 'night';
   const clear = state.timeOfDay === 'day' && state.clearDay;
-  const cfg = clear ? TIME_OF_DAY_CONFIG.clearDay : TIME_OF_DAY_CONFIG[state.timeOfDay];
+  const moonlit = state.timeOfDay === 'night' && state.moonlitNight;
+  const cfg = clear ? TIME_OF_DAY_CONFIG.clearDay
+    : moonlit ? TIME_OF_DAY_CONFIG.moonNight
+    : TIME_OF_DAY_CONFIG[state.timeOfDay];
   if (clear && !cfg.skyTex) cfg.skyTex = duskSkyTexture();
 
   sky.material.map = cfg.skyTex;
@@ -468,6 +509,12 @@ export function applyTimeOfDay(mode) {
   sunVisual.visible = cfg.sunVisible;
   stars.forEach((s) => { s.visible = cfg.celestial; });
   moonVisual.visible = cfg.celestial;
+  if (moonlit) {
+    // Moon low over the street's far end, and the moonlight from there
+    moonVisual.position.copy(MOON_DIR).multiplyScalar(SUN_DISTANCE);
+    moonVisual.scale.set(56, 56, 1);
+    sun.position.copy(sun.target.position).addScaledVector(MOON_DIR, 160);
+  }
   renderer.toneMappingExposure = cfg.exposure ?? 0.92;
   dom.canvas.style.filter = cfg.grade || '';
   if (clear) setupClearDay(cfg);
@@ -476,8 +523,10 @@ export function applyTimeOfDay(mode) {
   fogUniforms.uOpacity.value = cfg.hazeOpacity;
   fogUniforms.uCoverage.value = cfg.hazeCoverage;
   fog.visible = cfg.hazeVisible !== false;
-  // extractLight is built at module load, before the mode is known
-  if (sunlightOnly()) scene.remove(extractLight);
+  // extractLight is built at module load, before the mode is known. Only
+  // the depot mission ever turns it up, so with no depot (state.skipDepot,
+  // Level 2) it would sit at zero yet still cost every lit pixel a light
+  if (sunlightOnly() || state.skipDepot) scene.remove(extractLight);
   else if (!extractLight.parent) scene.add(extractLight);
   rain.visible = cfg.rainOn;
   puddleUniforms.uRipple.value = cfg.puddleRipple ?? 1;
@@ -1026,7 +1075,12 @@ export function doDeath() {
   sfx.setEngine(0, false);
   document.exitPointerLock();
   state.killStreak = 0;
-  dom.deathStats.textContent = `Infected eliminated: ${state.kills} · Coins: ${state.coins}`;
+  // Say what happened: overrun, how far the infection got, how long they lasted
+  const title = dom.death.querySelector('.end-title');
+  if (title) title.textContent = 'OVERRUN';
+  const secs = Math.round(state.runTime || 0);
+  dom.deathStats.innerHTML = `Bitten past saving: the infection hit ${state.deathInfection ?? '99.99%'} and the horde dragged you down.`
+    + `<br>Infected eliminated: ${state.kills} · Coins: ${state.coins} · Survived ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
   dom.death.classList.remove('hidden');
   finishRun('loss', dom.death);
 }
