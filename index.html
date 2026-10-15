@@ -592,6 +592,19 @@
   </div>
 </div>
 
+<!-- One master sound switch for every screen — wired in main.js, state
+     persisted in Music.js (deadway.sound.muted). Keyboard: M. -->
+<button id="sound-btn" type="button" aria-label="Toggle sound" aria-pressed="false" title="Toggle sound (M)">
+  <svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true">
+    <path fill="currentColor" d="M4 9v6h4l5 4V5L8 9H4z"/>
+    <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M16.6 8.8a4.6 4.6 0 0 1 0 6.4M18.9 6.4a8 8 0 0 1 0 11.2"/>
+  </svg>
+  <svg class="icon-off" viewBox="0 0 24 24" aria-hidden="true">
+    <path fill="currentColor" d="M4 9v6h4l5 4V5L8 9H4z"/>
+    <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M16.6 9.6l5 4.8M21.6 9.6l-5 4.8"/>
+  </svg>
+</button>
+
 <canvas id="game-canvas"></canvas>
 
 <div id="hud" class="hidden">
