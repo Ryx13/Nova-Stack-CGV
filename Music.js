@@ -52,8 +52,10 @@ const fades = new Map(); // deck -> { from, to, start, dur, onDone }
 let fadeTimer = null;
 
 function fadeTo(deck, to, seconds, onDone) {
+  const existing = fades.get(deck);
+  if (existing && Math.abs(existing.to - to) < 0.001) return; // already heading there
   const from = deck.volume;
-  if (!fades.has(deck) && Math.abs(from - to) < 0.001) {
+  if (!existing && Math.abs(from - to) < 0.001) {
     deck.volume = to;
     if (onDone) onDone();
     return;
