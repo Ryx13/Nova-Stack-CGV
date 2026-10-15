@@ -23,7 +23,7 @@ import { playStoryboard, playLevelTransition } from './Intro.js';
 import { initAccountUI, sessionReady, showAuth, takeResumeRequest } from './account.js';
 import { getSession } from './cloud.js';
 import { showCharacterSelect, hideCharacterSelect, disposeCharacterSelect } from './characterSelect.js';
-import { initMusic, setMusicContext, isMuted, toggleMuted, onSoundChange } from './Music.js';
+import { initMusic, setMusicContext, isMuted, isSoundPending, handleSoundToggle, onSoundChange } from './Music.js';
 
 const introScreen = document.getElementById('start-screen');
 // The splash art lives on its own layer (#splash-bg) so it can carry the
@@ -198,7 +198,7 @@ document.addEventListener('keydown', (e) => {
   if (e.code !== 'KeyM' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
   const t = e.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-  toggleMuted();
+  handleSoundToggle();
 });
 
 function boot() {
@@ -221,16 +221,21 @@ function boot() {
 --------------------------------------------------------------------- */
 function initSoundButton() {
   const btn = document.getElementById('sound-btn');
-  const paint = (m) => {
+  // The chip reads "muted" both while the master switch is muted and while
+  // the music is stuck in the silent pre-roll — it must not claim sound is
+  // on while nothing is audible, or the natural press-to-hear-something
+  // would toggle the game to muted instead (and persist it across reloads).
+  const paint = () => {
     if (!btn) return;
-    btn.classList.toggle('muted', m);
-    btn.setAttribute('aria-pressed', String(m));
-    btn.title = m ? 'Unmute (M)' : 'Mute (M)';
+    const off = isMuted() || isSoundPending();
+    btn.classList.toggle('muted', off);
+    btn.setAttribute('aria-pressed', String(off));
+    btn.title = off ? 'Unmute (M)' : 'Mute (M)';
   };
-  paint(isMuted());
+  paint();
   onSoundChange(paint);
   if (btn) btn.addEventListener('click', () => {
-    toggleMuted();
+    handleSoundToggle();
     // Drop focus so Space/Enter keep doing their game jobs (jump etc.)
     // instead of re-triggering this button from the keyboard.
     btn.blur();
