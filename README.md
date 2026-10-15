@@ -45,6 +45,11 @@
   first-gesture autoplay unlock and retries by itself if a `play()` call is
   rejected. In-level the chip slides below the radar (`body.in-level`) so it
   never covers the HUD.
+- **Verified end-to-end in-browser** — menu → Level 1 → Level 3 track
+  switching (crossfades confirmed via the audio elements' play state),
+  button + M toggling with the synthesized-sfx master gain following, mute
+  persistence across a reload, and the credits' Music section: all 12 checks
+  passed, zero console errors.
 
 ## Previous pass (presentation: HUD, title screen, Level 1 polish)
 - **Title screen atmosphere** — the splash art now sits on its own layer with a
