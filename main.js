@@ -8,7 +8,10 @@ import { playStoryboard, playLevelTransition } from './Intro.js';
 // is picked, well after the intro screen has already been shown — and
 // (2) advancing from the intro screen to the character-select screen
 // (characterSelect.js), then level-select, then the mode-select screen
-// (Day/Night).
+// (Day/Night). It also boots the background-music director (Music.js) —
+// setting the 'menu' context here and the per-level context in
+// launchLevel() — and the fixed sound button / M shortcut that drive
+// its master mute.
 // Level selection itself dynamically imports only the chosen level's
 // module, rather than eagerly loading all three (and therefore all of
 // Scene/characters/Actions/PowerUps/shaders) up front. It also drives
@@ -226,7 +229,12 @@ function initSoundButton() {
   };
   paint(isMuted());
   onSoundChange(paint);
-  if (btn) btn.addEventListener('click', () => toggleMuted());
+  if (btn) btn.addEventListener('click', () => {
+    toggleMuted();
+    // Drop focus so Space/Enter keep doing their game jobs (jump etc.)
+    // instead of re-triggering this button from the keyboard.
+    btn.blur();
+  });
 }
 
 /* ---------------------------------------------------------------------
