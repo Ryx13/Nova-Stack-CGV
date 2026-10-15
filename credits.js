@@ -179,6 +179,32 @@ export const CREDITS = [
     ],
   },
   {
+    section: 'Music',
+    items: [
+      {
+        name: 'Dark Ambience Loop',
+        what: 'Background loop for Levels 1 and 2 (assets/music/dark-ambience-loop.mp3).',
+        author: "Iwan 'qubodup' Gabovitch",
+        source: 'https://opengameart.org/content/dark-ambience-loop',
+        licence: 'CC BY 3.0',
+      },
+      {
+        name: 'Demon Lord',
+        what: 'Level 3 theme — the broadcast tower and its endgame (assets/music/demon-lord.mp3).',
+        author: 'Scrabbit',
+        source: 'https://opengameart.org/content/demon-lord',
+        licence: 'CC BY 4.0',
+      },
+      {
+        name: "GFZ Hell level, from 'Unreleased Zombie soundtrack'",
+        what: 'Title screen, menus, story sequences and everything else outside the three levels (assets/music/gfz-hell.mp3).',
+        author: 'Emma M. Andersson (Emma_MA)',
+        source: 'https://opengameart.org/content/unreleased-zombie-soundtrack',
+        licence: 'CC BY 3.0',
+      },
+    ],
+  },
+  {
     section: 'Shader code & techniques adapted',
     items: [
       {
