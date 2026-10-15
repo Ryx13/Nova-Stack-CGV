@@ -401,8 +401,8 @@
   .auth-fine{font-size:11.5px;color:#5a564c;margin-top:14px;line-height:1.4;}
 
   /* ---------- ACCOUNT CHIP ---------- */
-  #account-chip{position:absolute;top:16px;right:18px;z-index:6;display:flex;align-items:center;gap:10px;
-    background:rgba(0,0,0,.6);border:1px solid var(--line);padding:6px 8px 6px 12px;font-size:14px;}
+  #account-chip{position:absolute;top:16px;right:68px;z-index:6;display:flex;align-items:center;gap:10px;
+    background:rgba(0,0,0,.6);border:1px solid var(--line);padding:6px 8px 6px 12px;font-size:14px;} /* right offset clears the #sound-btn chip */
   #account-chip small{color:#8a8477;}
   .ac-dot{width:8px;height:8px;border-radius:50%;background:#666;}
   .ac-dot.ok{background:#5fe07f;box-shadow:0 0 6px #5fe07f;}
@@ -422,6 +422,13 @@
     transition:border-color .15s,color .15s,background .15s;}
   #sound-btn:hover,#sound-btn:focus-visible{border-color:var(--amber);color:var(--amber);outline:none;}
   #sound-btn svg{width:19px;height:19px;display:block;}
+  #sound-btn .icon-off{display:none;}
+  #sound-btn.muted{color:#8a8477;}
+  #sound-btn.muted .icon-on{display:none;}
+  #sound-btn.muted .icon-off{display:block;}
+  /* In-level the radar owns the top-right corner — drop the chip below it
+     (the class is set when the HUD appears, see Scene.js maybeReady). */
+  body.in-level #sound-btn{top:176px;right:22px;}
 
   /* ---------- LEVEL SELECT STATS ---------- */
   #level-buttons button{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:170px;}
