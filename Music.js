@@ -35,6 +35,9 @@ const decks = new Map(); // context key -> HTMLAudioElement (created on first us
 let currentKey = null;   // the context we want playing right now
 let unlocked = false;    // has a user gesture let audio start yet?
 let unlockArmed = false;
+let muted = false;       // persisted master switch for music + sfx
+
+const LS_KEY = 'deadway.sound.muted'; // shared with the sound button in main.js
 
 /* Volume fades — switching a level should never hard-cut the music. One
    shared 40ms ticker services every active fade and parks itself once
@@ -91,6 +94,7 @@ function applyContext() {
     if (k === currentKey || d.paused) continue;
     fadeTo(d, 0, FADE_SECONDS, () => d.pause());
   }
+  if (muted) return; // context remembered, but silenced until unmuted
   const d = deckFor(currentKey);
   const p = d.play(); // resumes mid-track where it was last faded out
   if (p) p.catch(() => {}); // still blocked — the unlock listener retries
@@ -111,7 +115,36 @@ function armUnlock() {
 }
 
 export function initMusic() {
+  try { muted = localStorage.getItem(LS_KEY) === '1'; } catch { /* private mode */ }
   armUnlock();
+}
+
+/* ---------------------------------------------------------------------
+   MUTE — one switch for the whole game's audio, persisted so a muted
+   player stays muted across reloads. Scene.js and StoryAudio.js read
+   isMuted() so the synthesized sfx honour it as well.
+--------------------------------------------------------------------- */
+export function isMuted() { return muted; }
+
+export function setMuted(v) {
+  v = !!v;
+  if (v === muted) return;
+  muted = v;
+  try { localStorage.setItem(LS_KEY, v ? '1' : '0'); } catch { /* ignore */ }
+  applyMute();
+}
+
+export function toggleMuted() { setMuted(!muted); return muted; }
+
+function applyMute() {
+  if (!unlocked) return;
+  if (muted) {
+    for (const [, d] of decks) {
+      if (!d.paused) fadeTo(d, 0, 0.3, () => d.pause());
+    }
+  } else {
+    applyContext(); // fade the current context back in
+  }
 }
 
 /* Called by main.js (menu / launchLevel) to pick the soundtrack for the
