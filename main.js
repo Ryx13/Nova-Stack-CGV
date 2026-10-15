@@ -155,6 +155,8 @@ async function launchLevel(levelId, mode) {
   if (!loadLevel) return;
   if (loading) loading.classList.remove('hidden');
   disposeCharacterSelect(); // the level brings its own renderer
+  // Levels 1 and 2 share the Dark Ambience loop; Level 3 gets Demon Lord.
+  setMusicContext(`level${levelId}`);
   try {
     const levelModule = await loadLevel();
     levelModule.startLevel(mode);
