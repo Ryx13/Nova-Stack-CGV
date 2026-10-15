@@ -23,7 +23,7 @@ import { playStoryboard, playLevelTransition } from './Intro.js';
 import { initAccountUI, sessionReady, showAuth, takeResumeRequest } from './account.js';
 import { getSession } from './cloud.js';
 import { showCharacterSelect, hideCharacterSelect, disposeCharacterSelect } from './characterSelect.js';
-import { initMusic, setMusicContext, isMuted, isSoundPending, handleSoundToggle, onSoundChange } from './Music.js';
+import { initMusic, setMusicContext, isMuted, handleSoundToggle, onSoundChange } from './Music.js';
 
 const introScreen = document.getElementById('start-screen');
 // The splash art lives on its own layer (#splash-bg) so it can carry the
@@ -221,13 +221,13 @@ function boot() {
 --------------------------------------------------------------------- */
 function initSoundButton() {
   const btn = document.getElementById('sound-btn');
-  // The chip reads "muted" both while the master switch is muted and while
-  // the music is stuck in the silent pre-roll — it must not claim sound is
-  // on while nothing is audible, or the natural press-to-hear-something
-  // would toggle the game to muted instead (and persist it across reloads).
+  // The chip reflects the master mute only. The silent pre-roll keeps
+  // the normal look on purpose: a slashed chip at load read as "the game
+  // defaults to mute", while the first press turns the waiting music ON
+  // anyway (handleSoundToggle), so the look stays truthful to the switch.
   const paint = () => {
     if (!btn) return;
-    const off = isMuted() || isSoundPending();
+    const off = isMuted();
     btn.classList.toggle('muted', off);
     btn.setAttribute('aria-pressed', String(off));
     btn.title = off ? 'Unmute (M)' : 'Mute (M)';
