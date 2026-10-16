@@ -43,9 +43,10 @@ cutting exactly at 25 m.
   sight glow's emissive is masked by her texture so the pink tints her
   instead of flooding her into a silhouette
 - **Economy** — two front-lit vending machines with ground rings (radar @ z +10, lime;
-  adrenaline @ z −90, pink), E-key purchases, coins from kills + persistent
+  adrenaline 80 coins a shot, in the west side lot @ z −53, pink), E-key purchases
+  (adrenaline asks how many shots: number keys 1–3), coins from kills + persistent
   clusters; radar upgrade reveals her on radar/compass + live distance row,
-  adrenaline (G) gives ×1.45 speed for 10 s
+  adrenaline (G) gives ×1.45 speed for 3 s
 - **World** — port set piece with teal teleport beacon, street blockage
   squeeze, collapse zone, final-approach chokepoints, escalating zombie
   spawns (6 s → 1.2 s)
