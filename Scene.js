@@ -6,6 +6,7 @@ import {
   createFogMaterial, fogUniforms, createRainMaterial, rainUniforms,
   createPuddleMaterial, puddleUniforms, fireUniforms, toxicUniforms,
 } from './shaders.js';
+import { isMuted, onSoundChange } from './Music.js'; // master mute, shared with the music decks
 
 /* ======================================================================
    Scene.js — RENDERER / SCENE / CAMERA / PHYSICS WORLD / HUD
@@ -70,8 +71,11 @@ export const dom = {
 export function addObstacle(x, z, r) { state.obstacles.push({ x, z, r }); }
 
 /* ---------------------------------------------------------------------
-   AUDIO — synthesized, no extra files
+   AUDIO — synthesized, no extra files (music tracks are separate, see
+   Music.js)
 --------------------------------------------------------------------- */
+const SFX_GAIN = 0.32; // master level for the synthesized effects
+
 export const sfx = {
   ctx: null,
   master: null,
@@ -83,7 +87,7 @@ export const sfx = {
     const AC = window.AudioContext || window.webkitAudioContext;
     this.ctx = new AC();
     this.master = this.ctx.createGain();
-    this.master.gain.value = 0.32;
+    this.master.gain.value = isMuted() ? 0 : SFX_GAIN;
     this.master.connect(this.ctx.destination);
     this.engineOsc = this.ctx.createOscillator();
     this.engineOsc.type = 'sawtooth';
@@ -149,6 +153,15 @@ export const sfx = {
     if (this.engineOsc) this.engineOsc.frequency.setTargetAtTime(42 + speed * 3.2, t, 0.08);
   },
 };
+
+// The sound button (main.js) drives one mute for the whole game — mirror
+// it onto the sfx master gain. setTargetAtTime smooths the step so
+// muting mid-firefight doesn't pop. Before init() there's nothing to
+// adjust; init() itself reads isMuted() for the starting value.
+onSoundChange((m) => {
+  if (!sfx.ctx) return;
+  sfx.master.gain.setTargetAtTime(m ? 0 : SFX_GAIN, sfx.ctx.currentTime, 0.05);
+});
 
 /* ---------------------------------------------------------------------
    1. RENDERER / SCENE / CAMERA
@@ -960,6 +973,7 @@ export function maybeReady() {
     setTimeout(() => {
       dom.loading.classList.add('hidden');
       dom.hud.classList.remove('hidden');
+      document.body.classList.add('in-level'); // drops the sound chip below the radar (#sound-btn rule in index.html)
       if (readyCallback) readyCallback();
     }, 200);
   }
