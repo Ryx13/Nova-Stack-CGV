@@ -2049,7 +2049,7 @@ viewmodelGun.position.set(0.22, -0.2, -0.42);
 viewmodelGun.visible = false;
 camera.add(viewmodelGun);
 
-const PLAYER_TARGET_HEIGHT = 1.9;
+const PLAYER_TARGET_HEIGHT = 1.97; // a touch over 1.9 so they don't look small beside the truck
 const PLAYER_FOOT_ADJUST = 0.05; // was 1.0 — that's a full meter of vertical
                                   // offset applied to the rig's LOCAL position
                                   // inside playerVis.group every time
@@ -2406,7 +2406,7 @@ function buildCarMesh() {
 }
 
 export const carVis = state.skipCar ? null : buildCarMesh();
-const TRUCK_TARGET_LENGTH = 5.2;
+const TRUCK_TARGET_LENGTH = 4.8; // ~8% under 5.2: the model's roof sat ~2.4 m up, dwarfing the characters
 if (!state.skipCar) new GLTFLoader().load('assets/zombie_pickup_truck.glb', (gltf) => {
   const obj = gltf.scene;
   obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
@@ -2426,7 +2426,8 @@ if (!state.skipCar) new GLTFLoader().load('assets/zombie_pickup_truck.glb', (glt
 }, undefined, () => { state.loadFlags.car = true; markLoaded('car'); });
 
 const __carPhysics = state.skipCar ? null : (() => {
-  const chassisShape = new CANNON.Box(new CANNON.Vec3(1.05, 0.5, 2.6));
+  // Collision box follows the smaller truck model (4.8 m); wheels stay put for handling
+  const chassisShape = new CANNON.Box(new CANNON.Vec3(0.97, 0.5, 2.4));
   const _chassisBody = new CANNON.Body({ mass: 1650, material: matChassis, linearDamping: 0.12, angularDamping: 0.35 });
   _chassisBody.addShape(chassisShape, new CANNON.Vec3(0, 0.5, 0));
   _chassisBody.position.set(carSpawn.x, 1.05, carSpawn.z);
