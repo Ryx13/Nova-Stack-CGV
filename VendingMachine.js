@@ -12,9 +12,12 @@
        rotationY: -Math.PI / 2,                   // cabinet front faces local +Z
        catalog: saferoomSupplyCatalog,             // omit for a blank machine, no stock
        glowColor: 0x33ff55,                       // optional: colour of the light it throws
+       innerGlow: 0x33ff55,                       // optional: colour of the glow inside the cabinet
+       soldOutShelves: false,                     // optional: label empty shelves SOLD OUT
        frontLight: true,                          // optional: false = no light or floor glow (sunlit scenes)
      });
 
+     vending.takeCard('support'); // a sale: last card on that shelf goes
      vending.update(dt);   // once per frame from the host's own loop
      vending.dispose();    // on teardown — frees every geometry/material
 
@@ -211,7 +214,7 @@ export class VendingMachine {
   static HEIGHT = HEIGHT * SCALE;
   static DEPTH = DEPTH * SCALE;
 
-  constructor({ scene, position = new THREE.Vector3(0, 0, 0), rotationY = 0, catalog, glowColor = 0x33ff55, frontLight = true } = {}) {
+  constructor({ scene, position = new THREE.Vector3(0, 0, 0), rotationY = 0, catalog, glowColor = 0x33ff55, innerGlow = 0x33ff55, soldOutShelves = false, frontLight = true } = {}) {
     if (!scene) throw new Error('VendingMachine: options.scene (THREE.Scene) is required');
     this.scene = scene;
     // Each instance owns its own categories array (built from the shared
@@ -224,6 +227,8 @@ export class VendingMachine {
     this._cardMats = [];
     this._keyLabelMats = [];
     this._catalogCards = [];
+    this._soldOutShelves = soldOutShelves;
+    this._soldOutLabels = [];
 
     this.root = new THREE.Group();
     this.root.name = 'vendingMachine';
@@ -243,18 +248,18 @@ export class VendingMachine {
       body:     new THREE.MeshStandardMaterial({ map: bodyTex,     metalness: 0.5,  roughness: 0.62 }),
       // Front frame + glass catch a little of the interior glow, so the
       // face reads lit while the top, sides and back stay dark
-      frame:    new THREE.MeshStandardMaterial({ map: frameTex,    metalness: 0.55, roughness: 0.58, emissive: 0x33ff55, emissiveMap: frameTex, emissiveIntensity: 0.6 }),
-      // Interior and shelves glow faintly green themselves: the lit look
+      frame:    new THREE.MeshStandardMaterial({ map: frameTex,    metalness: 0.55, roughness: 0.58, emissive: innerGlow, emissiveMap: frameTex, emissiveIntensity: 0.6 }),
+      // Interior and shelves glow faintly (innerGlow) themselves: the lit look
       // of a stocked cabinet without any light source inside it
-      interior: new THREE.MeshStandardMaterial({ map: interiorTex, metalness: 0.2,  roughness: 0.9, emissive: 0x33ff55, emissiveIntensity: 0.10 }),
-      shelf:    new THREE.MeshStandardMaterial({ map: shelfTex,    metalness: 0.35, roughness: 0.65, emissive: 0x33ff55, emissiveIntensity: 0.22 }),
+      interior: new THREE.MeshStandardMaterial({ map: interiorTex, metalness: 0.2,  roughness: 0.9, emissive: innerGlow, emissiveIntensity: 0.10 }),
+      shelf:    new THREE.MeshStandardMaterial({ map: shelfTex,    metalness: 0.35, roughness: 0.65, emissive: innerGlow, emissiveIntensity: 0.22 }),
       door:     new THREE.MeshStandardMaterial({ map: doorTex,     metalness: 0.45, roughness: 0.6 }),
-      glass:    new THREE.MeshStandardMaterial({ color: 0xaec6b4, metalness: 0.1, roughness: 0.05, transparent: true, opacity: 0.14, depthWrite: false, emissive: 0x33ff55, emissiveIntensity: 0.35 }),
+      glass:    new THREE.MeshStandardMaterial({ color: 0xaec6b4, metalness: 0.1, roughness: 0.05, transparent: true, opacity: 0.14, depthWrite: false, emissive: innerGlow, emissiveIntensity: 0.35 }),
       bezel:    new THREE.MeshStandardMaterial({ color: 0x14160f, metalness: 0.4,  roughness: 0.7 }),
       screen:   new THREE.MeshStandardMaterial({ color: 0x0b0d09, metalness: 0.2, roughness: 0.45 }),
       key:      new THREE.MeshStandardMaterial({ color: 0x232821, metalness: 0.2,  roughness: 0.7 }),
       bolt:     new THREE.MeshStandardMaterial({ color: 0x565b52, metalness: 0.85, roughness: 0.35 }),
-      shelfTrim: new THREE.MeshStandardMaterial({ color: 0x1a3a1a, emissive: 0x33ff55, emissiveIntensity: 3.0 }),
+      shelfTrim: new THREE.MeshStandardMaterial({ color: 0x1a3a1a, emissive: innerGlow, emissiveIntensity: 3.0 }),
       led:       new THREE.MeshStandardMaterial({ color: 0x115522, emissive: 0x33ff55, emissiveIntensity: 2.8 }),
       cardHighlight: new THREE.LineBasicMaterial({ color: 0xd9ff8a, toneMapped: false }),
     };
@@ -462,9 +467,57 @@ export class VendingMachine {
         highlight.position.set(x, y, cardZ + 0.002);
         highlight.visible = false;
         this.root.add(highlight);
-        this._catalogCards.push({ categoryIndex, productIndex, highlight });
+        this._catalogCards.push({ categoryIndex, productIndex, highlight, card });
       });
+      if (!category.products.length) this._showSoldOut(categoryIndex);
     });
+  }
+
+  /** A sale: takes the last card off a category's shelf and the screen.
+      Returns false when that shelf is already empty. */
+  takeCard(categoryId) {
+    const ci = this._categories.findIndex((c) => c.id === categoryId);
+    const category = this._categories[ci];
+    if (!category || !category.products.length) return false;
+    const pi = category.products.length - 1;
+    category.products.pop();
+    const idx = this._catalogCards.findIndex((c) => c.categoryIndex === ci && c.productIndex === pi);
+    if (idx >= 0) {
+      const { card, highlight } = this._catalogCards[idx];
+      this.root.remove(card, highlight);
+      card.geometry.dispose();
+      highlight.geometry.dispose();
+      this._catalogCards.splice(idx, 1);
+    }
+    const sel = this._display.selection;
+    if (sel && sel.categoryIndex === ci && sel.productIndex === pi) this._display.selection = null;
+    if (!category.products.length) this._showSoldOut(ci);
+    this._renderDisplay();
+    this._syncCatalogCardSelection();
+    return true;
+  }
+
+  // "SOLD OUT" across an empty shelf (only with the soldOutShelves option)
+  _showSoldOut(categoryIndex) {
+    if (!this._soldOutShelves || this._soldOutLabels[categoryIndex]) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 96;
+    const ctx = canvas.getContext('2d');
+    ctx.strokeStyle = 'rgba(200,70,60,0.85)'; ctx.lineWidth = 5;
+    ctx.strokeRect(70, 14, 372, 68);
+    ctx.fillStyle = 'rgba(220,90,75,0.92)';
+    ctx.font = 'bold 50px "Courier New", monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('SOLD OUT', 256, 50);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    this._texs.push(texture);
+    const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, toneMapped: false });
+    this._cardMats.push(material);
+    const label = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.094), material);
+    label.position.set(-0.105, [1.775, 1.425, 1.075, 0.725][categoryIndex], 0.244);
+    this.root.add(label);
+    this._soldOutLabels[categoryIndex] = label;
   }
 
   _syncCatalogCardSelection() {

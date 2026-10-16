@@ -4,6 +4,7 @@ import { state } from './state.js';
 import { createStreetAtmosphere } from './StreetAtmosphere.js';
 import { updateLocomotion } from './Movement.js';
 import { markStaticSince } from './mergeStatic.js';
+import { retryLevel } from './account.js';
 import {
   scene, world, camera, renderer, dom, sfx, sky,
   pushKillFeed, doDeath, doWin, checkExtraction, updateExtractRing,
@@ -1054,20 +1055,26 @@ function initInputHandlers() {
   // Quit to the title screen: a fresh page load is the clean teardown (the
   // level owns a renderer, physics world and timers). Asks twice so a
   // stray click doesn't throw away a run.
-  const menuBtn = document.getElementById('pause-menu-btn');
-  if (menuBtn) {
-    let armed = null;
-    menuBtn.addEventListener('click', () => {
-      if (armed) { location.reload(); return; }
-      menuBtn.textContent = 'Quit this run? Click again';
-      menuBtn.classList.add('armed');
-      armed = setTimeout(() => {
-        armed = null;
-        menuBtn.textContent = '← Main Menu';
-        menuBtn.classList.remove('armed');
-      }, 3000);
-    });
-  }
+  // Restart relaunches the same level and day/night mode (retryLevel),
+  // with the same ask-twice guard.
+  armTwoClick(document.getElementById('pause-menu-btn'), 'Quit this run? Click again', () => location.reload());
+  armTwoClick(document.getElementById('pause-restart-btn'), 'Restart this level? Click again', retryLevel);
+}
+
+function armTwoClick(btn, confirmText, action) {
+  if (!btn) return;
+  const label = btn.textContent;
+  let armed = null;
+  btn.addEventListener('click', () => {
+    if (armed) { action(); return; }
+    btn.textContent = confirmText;
+    btn.classList.add('armed');
+    armed = setTimeout(() => {
+      armed = null;
+      btn.textContent = label;
+      btn.classList.remove('armed');
+    }, 3000);
+  });
 }
 
 /* ---------------------------------------------------------------------

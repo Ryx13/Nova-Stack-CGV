@@ -8,7 +8,10 @@ import { playStoryboard, playLevelTransition } from './Intro.js';
 // is picked, well after the intro screen has already been shown — and
 // (2) advancing from the intro screen to the character-select screen
 // (characterSelect.js), then level-select, then the mode-select screen
-// (Day/Night).
+// (Day/Night). It also boots the background-music director (Music.js) —
+// setting the 'menu' context here and the per-level context in
+// launchLevel() — and the fixed sound button / M shortcut that drive
+// its master mute.
 // Level selection itself dynamically imports only the chosen level's
 // module, rather than eagerly loading all three (and therefore all of
 // Scene/characters/Actions/PowerUps/shaders) up front. It also drives
@@ -20,6 +23,7 @@ import { playStoryboard, playLevelTransition } from './Intro.js';
 import { initAccountUI, sessionReady, showAuth, takeResumeRequest } from './account.js';
 import { getSession } from './cloud.js';
 import { showCharacterSelect, hideCharacterSelect, disposeCharacterSelect } from './characterSelect.js';
+import { initMusic, setMusicContext, isMuted, handleSoundToggle, onSoundChange } from './Music.js';
 
 const introScreen = document.getElementById('start-screen');
 // The splash art lives on its own layer (#splash-bg) so it can carry the
@@ -154,6 +158,8 @@ async function launchLevel(levelId, mode) {
   if (!loadLevel) return;
   if (loading) loading.classList.remove('hidden');
   disposeCharacterSelect(); // the level brings its own renderer
+  // Levels 1 and 2 share the Dark Ambience loop; Level 3 gets Demon Lord.
+  setMusicContext(`level${levelId}`);
   try {
     const levelModule = await loadLevel();
     levelModule.startLevel(mode);
@@ -186,14 +192,54 @@ if (document.readyState === 'loading') {
   boot();
 }
 
+/* M toggles the master sound switch from anywhere — gameplay, menus, end
+   screens — except while typing into an account text field. */
+document.addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyM' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  handleSoundToggle();
+});
+
 function boot() {
   if (new URLSearchParams(location.search).has('debug')) document.body.classList.add('debug');
+  initMusic();
+  setMusicContext('menu'); // everything outside the three levels shares one track
   initAccountUI();
   initIntroScreen();
   initLevelSelect();
   initModeSelect();
+  initSoundButton();
   startEmberDrift();
   handleResume();
+}
+
+/* ---------------------------------------------------------------------
+   SOUND BUTTON — repaints the fixed chip from Music.js's state and
+   toggles the master switch on click. Lives in main.js so the chip
+   exists on every screen, gameplay included.
+--------------------------------------------------------------------- */
+function initSoundButton() {
+  const btn = document.getElementById('sound-btn');
+  // The chip reflects the master mute only. The silent pre-roll keeps
+  // the normal look on purpose: a slashed chip at load read as "the game
+  // defaults to mute", while the first press turns the waiting music ON
+  // anyway (handleSoundToggle), so the look stays truthful to the switch.
+  const paint = () => {
+    if (!btn) return;
+    const off = isMuted();
+    btn.classList.toggle('muted', off);
+    btn.setAttribute('aria-pressed', String(off));
+    btn.title = off ? 'Unmute (M)' : 'Mute (M)';
+  };
+  paint();
+  onSoundChange(paint);
+  if (btn) btn.addEventListener('click', () => {
+    handleSoundToggle();
+    // Drop focus so Space/Enter keep doing their game jobs (jump etc.)
+    // instead of re-triggering this button from the keyboard.
+    btn.blur();
+  });
 }
 
 /* ---------------------------------------------------------------------

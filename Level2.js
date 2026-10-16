@@ -392,6 +392,9 @@ function placeVendingMachine(x, z, ry, catalog, glow = RADAR_GLOW) {
     rotationY: ry,
     catalog,
     glowColor: glow,
+    // The adrenaline cabinet glows pink inside too; radar keeps the stock green
+    ...(glow === ADRENALINE_GLOW ? { innerGlow: ADRENALINE_GLOW } : {}),
+    soldOutShelves: true, // one-product machines: the other shelves read looted
     frontLight: !sunlightOnly(),
   });
   addStaticBox(
@@ -648,17 +651,17 @@ function buildLevel2Scene() {
   buildCollapseZone();
   buildZoneDressing();
   // Same spot characters.js' light-boot branch left empty when it
-  // dropped the posed-zombie GLB prop (west curb, opposite the adrenaline
-  // machine's beacon).
+  // dropped the posed-zombie GLB prop (west curb, z -95).
   makeFallenZombie(-(STREET_HALF_W + 3.2), -95, Math.PI / 2 - 0.2);
 
   const machines = {
     // West sidewalk, fronts facing the street (rotationY = +π/2).
     // Radar machine sits 20 m ahead of the player start (z +10) so its
-    // lime beacon is visible from spawn; adrenaline stays mid-level
-    // (centre, z -90) with the pink beacon.
+    // lime beacon is visible from spawn. Adrenaline is off the main road,
+    // at the back of the west side lot (z -55), facing out toward the
+    // street so its pink glow shows down the opening.
     radar: placeVendingMachine(-13.4, 10, Math.PI / 2, radarCatalog, RADAR_GLOW),
-    adrenaline: placeVendingMachine(-13.4, -90, Math.PI / 2, adrenalineCatalog, ADRENALINE_GLOW),
+    adrenaline: placeVendingMachine(-39.5, -53, Math.PI / 2, adrenalineCatalog, ADRENALINE_GLOW),
   };
 
   // Persistent coin clusters along the route — the machine economy's
@@ -709,7 +712,7 @@ const GIRL_WAYPOINTS = [
   { x: 7.5, y: 0,    z: -57 },   // blockage east-curb gap
   { x: 6,   y: 0,    z: -64 },
   { x: 2,   y: 0,    z: -80 },
-  { x: -2,  y: 0,    z: -95 },   // past the adrenaline machine
+  { x: -2,  y: 0,    z: -95 },
   { x: 0,   y: 0,    z: -110 },
   { x: -3,  y: 0,    z: -125 },  // collapse-zone street weave
   { x: 1,   y: 0,    z: -140 },
@@ -854,6 +857,8 @@ function tickIntro(dt) {
       girlFacing: new THREE.Vector3(next.x - wp.x, 0, next.z - wp.z).normalize(),
       portPos: lv2EscapePoint,
       playerPos: playerVis.group.position.clone(),
+      machines: lv2Scene.machines,
+      prices: { radar: RADAR_PRICE, adrenaline: ADRENALINE_PRICE },
       onDone: spawnStartAmbush,
     });
     return;
@@ -910,7 +915,7 @@ function updateGirl(dt) {
 
 
 const RADAR_PRICE = 25;
-const ADRENALINE_PRICE = 45;
+const ADRENALINE_PRICE = 80;
 const ADRENALINE_START_STOCK = 3;
 
 // One-product "support" presets — what each machine shows on its shelf.
@@ -931,23 +936,23 @@ const radarCatalog = {
   }],
 };
 
-const adrenalineCatalog = {
-  support: [{
-    id: 'adrenaline', itemId: 'adrenaline', name: 'ADRENALINE SHOT',
-    category: 'support', price: ADRENALINE_PRICE, stock: ADRENALINE_START_STOCK,
-    icon: makeIcon(96, 48, (ctx) => {
-      ctx.strokeStyle = '#99aa88'; ctx.lineWidth = 2;
-      // syringe, drawn diagonally: barrel, plunger, needle
-      ctx.strokeRect(34, 18, 18, 8);
-      ctx.beginPath(); ctx.moveTo(34, 22); ctx.lineTo(26, 22); ctx.stroke();
-      ctx.strokeRect(21, 19, 5, 6);
-      ctx.beginPath(); ctx.moveTo(52, 22); ctx.lineTo(64, 22); ctx.stroke();
-      // dose marks on the barrel
-      ctx.beginPath(); ctx.moveTo(39, 18); ctx.lineTo(39, 26); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(46, 18); ctx.lineTo(46, 26); ctx.stroke();
-    }),
-  }],
+// One card per shot in stock; each sale takes one off the shelf
+const adrenalineCard = {
+  id: 'adrenaline', itemId: 'adrenaline', name: 'ADRENALINE SHOT',
+  category: 'support', price: ADRENALINE_PRICE, stock: 1,
+  icon: makeIcon(96, 48, (ctx) => {
+    ctx.strokeStyle = '#99aa88'; ctx.lineWidth = 2;
+    // syringe, drawn diagonally: barrel, plunger, needle
+    ctx.strokeRect(34, 18, 18, 8);
+    ctx.beginPath(); ctx.moveTo(34, 22); ctx.lineTo(26, 22); ctx.stroke();
+    ctx.strokeRect(21, 19, 5, 6);
+    ctx.beginPath(); ctx.moveTo(52, 22); ctx.lineTo(64, 22); ctx.stroke();
+    // dose marks on the barrel
+    ctx.beginPath(); ctx.moveTo(39, 18); ctx.lineTo(39, 26); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(46, 18); ctx.lineTo(46, 26); ctx.stroke();
+  }),
 };
+const adrenalineCatalog = { support: Array.from({ length: ADRENALINE_START_STOCK }, () => adrenalineCard) };
 
 /** Purchase prompt text for a machine in range. */
 function machinePromptText(def) {
@@ -955,7 +960,54 @@ function machinePromptText(def) {
     return state.hasRadarUpgrade ? 'Radar already installed' : `Buy RADAR (${def.price} coins)`;
   }
   if (adrenalineStock <= 0) return 'ADRENALINE — sold out';
-  return `Buy ADRENALINE (${def.price} coins)`;
+  if (shotPicker) {
+    const opts = [];
+    for (let n = 1; n <= shotPicker.max; n++) opts.push(`${n} = ${n * def.price}`);
+    return `How many shots? Press ${opts.join(' · ')} coins — E to cancel`;
+  }
+  return `Buy ADRENALINE (${def.price} coins each)`;
+}
+
+/* Adrenaline quantity picker. E at the machine opens it; a number key
+   buys that many shots, E again (or walking away) closes it. While it is
+   open the number keys belong to it. */
+let shotPicker = null; // { def, max } while open
+
+function openShotPicker(def) {
+  if (adrenalineStock <= 0) { pushKillFeed('Adrenaline sold out'); return; }
+  if (state.coins < def.price) { pushKillFeed(`Not enough coins — need ${def.price}`); return; }
+  const max = Math.min(adrenalineStock, 9);
+  if (max === 1) { buyShots(def, 1); return; }
+  shotPicker = { def, max };
+}
+
+function closeShotPicker() { shotPicker = null; }
+
+function onShotPickerKey(e) {
+  if (!shotPicker) return;
+  const m = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+  if (!m) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  const n = Number(m[1]);
+  if (n > shotPicker.max) return;
+  const def = shotPicker.def;
+  closeShotPicker();
+  buyShots(def, n);
+}
+window.addEventListener('keydown', onShotPickerKey, true);
+
+function buyShots(def, n) {
+  if (adrenalineStock < n) { pushKillFeed(`Only ${adrenalineStock} left in stock`); return; }
+  const cost = def.price * n;
+  if (state.coins < cost) { pushKillFeed(`Not enough coins — ${n} shots cost ${cost}`); return; }
+  state.coins -= cost;
+  adrenalineStock -= n;
+  state.adrenalineCharges += n;
+  for (let i = 0; i < n; i++) def.machine.takeCard('support');
+  sfx.pickup();
+  pushKillFeed(`${n} adrenaline shot${n > 1 ? 's' : ''} bought — press G to use (${adrenalineStock} left in stock)`);
+  if (lv2HUD) lv2HUD.setItemCount('adrenaline', state.adrenalineCharges);
 }
 
 /** Validate + apply a purchase. All feedback through the killfeed —
@@ -966,18 +1018,14 @@ function buyFromMachine(def) {
     if (state.coins < def.price) { pushKillFeed(`Not enough coins — need ${def.price}`); return; }
     state.coins -= def.price;
     state.hasRadarUpgrade = true;
+    def.machine.takeCard('support');
     sfx.pickup();
     pushKillFeed('RADAR installed — girl tracked on radar & compass');
     if (lv2HUD) lv2HUD.setItemCount('radar', 1);
+  } else if (shotPicker) {
+    closeShotPicker(); // E again cancels
   } else {
-    if (adrenalineStock <= 0) { pushKillFeed('Adrenaline sold out'); return; }
-    if (state.coins < def.price) { pushKillFeed(`Not enough coins — need ${def.price}`); return; }
-    state.coins -= def.price;
-    adrenalineStock--;
-    state.adrenalineCharges++;
-    sfx.pickup();
-    pushKillFeed(`Adrenaline acquired — press G to activate (${adrenalineStock} left in stock)`);
-    if (lv2HUD) lv2HUD.setItemCount('adrenaline', state.adrenalineCharges);
+    openShotPicker(def);
   }
 }
 
@@ -1004,7 +1052,7 @@ function handleKeyE() {
     girl once the radar is bought — the locked design) and the live
     girl-distance row fed through lv2HUD.setGirlDistance. */
 function updateVendingInteraction() {
-  if (!lv2Machines || state.isDead || state.paused || state.girlCaught || state.cinematic) return;
+  if (!lv2Machines || state.isDead || state.paused || state.girlCaught || state.cinematic) { closeShotPicker(); return; }
   // Compass retarget: PORT is the visible goal from the start; GIRL only
   // after the radar purchase. girlPos is a live Vector3 reference, so the
   // override stays current as she moves without resetting it per frame.
@@ -1021,6 +1069,7 @@ function updateVendingInteraction() {
     const d = playerVis.group.position.distanceTo(def.machine.root.position);
     if (d < 2.6 && d < bestD) { bestD = d; best = def; }
   }
+  if (shotPicker && best !== shotPicker.def) closeShotPicker();
   if (best) {
     dom.prompt.classList.remove('hidden');
     dom.prompt.querySelector('b').textContent = 'E';
@@ -1031,14 +1080,14 @@ function updateVendingInteraction() {
 }
 
 
-const ADRENALINE_DURATION = 10; // seconds — full duration per the design
+const ADRENALINE_DURATION = 3; // seconds — a short burst you have to time
 
 /** G key — activate a stored charge. */
 function handleKeyG() {
   if (state.isDead || state.paused || state.girlCaught) return;
   if (state.adrenalineActive) { pushKillFeed('Adrenaline already running'); return; }
   if (state.adrenalineCharges <= 0) {
-    pushKillFeed('No adrenaline — the machine in the town centre sells it');
+    pushKillFeed('No adrenaline — the machine down the west side street sells it');
     return;
   }
   state.adrenalineCharges--;
