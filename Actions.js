@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { state } from './state.js';
 import { createStreetAtmosphere } from './StreetAtmosphere.js';
-import { updateLocomotion } from './Movement.mjs';
+import { updateLocomotion } from './Movement.js';
 import { markStaticSince } from './mergeStatic.js';
 import {
   scene, world, camera, renderer, dom, sfx, sky,

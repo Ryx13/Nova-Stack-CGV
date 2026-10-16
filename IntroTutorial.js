@@ -12,7 +12,7 @@
 //      correct way to combine the two and matches this file's own
 //      sin(yaw)/cos(yaw) movement convention.
 import * as THREE from 'three';
-import { updateLocomotion } from './Movement.mjs';
+import { updateLocomotion } from './Movement.js';
 import { createStoryAudio } from './StoryAudio.js';
 import { createNarrative } from './Narrative.js';
 import { createTutorialAvatar } from './TutorialAvatar.js';
