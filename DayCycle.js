@@ -38,12 +38,12 @@ import { mistEnabled } from './HeightMist.js';
 const DAY = [
   { c: 0, top: 0x1d2740, hor: 0x6e5866, bot: 0x2a2630, glow: 0xe07a50, gs: 0.35,
     fog: 0x3a3d48, fogD: 0.011, sunCol: 0xff9a6a, sun: 0, el: -8, az: 75, disc: 0,
-    hemiSky: 0x5a6a8a, hemiGnd: 0x1a1818, hemi: 0.55, ambCol: 0x2e3440, amb: 0.3, exp: 0.95,
+    hemiSky: 0x7a88a6, hemiGnd: 0x2a2826, hemi: 1.1, ambCol: 0x48505e, amb: 0.55, exp: 1.05,
     mist: 0x6a7080, mistA: 0.45, rain: 0, stars: 0.45, moon: 0 },
   // Level 1, nearing extraction: first light, the sun just below the rooftops
   { c: 0.8, top: 0x3e5478, hor: 0xe8a070, bot: 0x3a3436, glow: 0xffa060, gs: 0.75,
     fog: 0x7a6c6a, fogD: 0.008, sunCol: 0xff8a50, sun: 0.35, el: -1,
-    hemiSky: 0x8a96b0, hemiGnd: 0x2a2420, hemi: 0.6, ambCol: 0x4a4a52, amb: 0.32, mist: 0x9a8c88, mistA: 0.4, stars: 0.05 },
+    hemiSky: 0x9aa4bc, hemiGnd: 0x3a3430, hemi: 1.0, ambCol: 0x5a5a62, amb: 0.5, mist: 0x9a8c88, mistA: 0.4, stars: 0.05 },
   // Level 1 ends / Level 2 begins: sunrise
   { c: 1, top: 0x6584ab, hor: 0xf6c08c, bot: 0x5a4c44, glow: 0xffb878, gs: 0.95,
     fog: 0xc2a088, fogD: 0.0055, sunCol: 0xffb070, sun: 1.8, el: 3, disc: 0.9,
@@ -63,16 +63,16 @@ const DAY = [
   // Level 3 ends: thick sea fog and drizzle
   { c: 3, top: 0xa4acb2, hor: 0xb4bbbf, bot: 0x9a9fa2, glow: 0xe8eaea, gs: 0.05,
     fog: 0x9aa2a8, fogD: 0.03, sunCol: 0xe6e8ea, sun: 0.45, el: 40, az: 130, disc: 0,
-    hemiSky: 0xdfe7ee, hemi: 0.95, amb: 0.42, exp: 0.92, mist: 0xe8ecef, mistA: 0.65, rain: 0.8 },
+    hemiSky: 0xdfe7ee, hemi: 1.1, amb: 0.5, exp: 1.0, mist: 0xe8ecef, mistA: 0.65, rain: 0.8 },
 ];
 const NIGHT = [
   // Level 1 begins: last light, the sun setting behind you
   { c: 0, top: 0x3a4466, hor: 0xe08a5a, bot: 0x6a4a40, glow: 0xff8a50, gs: 0.7,
     fog: 0x5e4e4a, fogD: 0.009, sunCol: 0xff9a5a, sun: 0.9, el: 4, az: -100, disc: 0.7,
-    hemiSky: 0xb7c8dc, hemiGnd: 0x35332d, hemi: 0.7, ambCol: 0x68717e, amb: 0.4, exp: 0.92,
+    hemiSky: 0xb7c8dc, hemiGnd: 0x45433d, hemi: 1.0, ambCol: 0x68717e, amb: 0.55, exp: 1.05,
     mist: 0xb9a49a, mistA: 0.45, rain: 0, stars: 0.15, moon: 0 },
   { c: 0.55, top: 0x3a3944, hor: 0x8a6a5c, bot: 0xb89474, glow: 0xb05a3a, gs: 0.2,
-    fog: 0x6e6258, sunCol: 0xff7a40, sun: 0, el: -4, disc: 0, hemi: 0.8, amb: 0.42, stars: 0.7 },
+    fog: 0x6e6258, sunCol: 0xff7a40, sun: 0, el: -4, disc: 0, hemi: 1.15, amb: 0.6, stars: 0.7 },
   // Dark: the light swings round to the moon while it's at zero
   { c: 0.6, sunCol: 0xb4c6ea, el: 24, az: 15 },
   // Level 1 ends: the streetlit night, the city glow amber at the horizon
@@ -85,14 +85,14 @@ const NIGHT = [
   { c: 2 },
   // Level 3: sea fog before dawn, thickening as you work through the switches
   { c: 2.45, top: 0x1e2636, hor: 0x34415a, bot: 0x3e4b5e, glow: 0x9fb4d8, gs: 0.06,
-    fog: 0x182535, fogD: 0.012, sun: 0.55, hemi: 0.6, amb: 0.25, mist: 0x35475a, mistA: 0.45, stars: 0.3, moon: 0.4 },
+    fog: 0x182535, fogD: 0.012, sun: 0.55, hemi: 1.1, amb: 0.5, exp: 1.05, mist: 0x35475a, mistA: 0.45, stars: 0.3, moon: 0.4 },
   { c: 2.85, top: 0x3a4452, hor: 0x4c5664, bot: 0x4a5260, glow: 0xc08a6a, gs: 0.12,
     fog: 0x2c3644, fogD: 0.022, sun: 0, mist: 0x4a586a, mistA: 0.6, rain: 0.25, stars: 0, moon: 0 },
   { c: 2.88, sunCol: 0xffb070, el: -3, az: 75 },
   // Level 3 ends: the cure broadcasts and the sun breaks through
   { c: 3, top: 0x5a6f92, hor: 0xf4b07a, bot: 0x7a6050, glow: 0xffb070, gs: 0.95,
     fog: 0xb48c74, fogD: 0.008, sun: 2, el: 4, disc: 0.9, hemiSky: 0xc8b8a8, hemiGnd: 0x3a3028,
-    hemi: 0.6, ambCol: 0x5a5048, amb: 0.32, exp: 0.95, mist: 0xd9b8a0, mistA: 0.3, rain: 0 },
+    hemi: 0.9, ambCol: 0x5a5048, amb: 0.45, exp: 1.0, mist: 0xd9b8a0, mistA: 0.3, rain: 0 },
 ];
 const COLOURS = ['top', 'hor', 'bot', 'glow', 'fog', 'sunCol', 'hemiSky', 'hemiGnd', 'ambCol', 'mist'];
 // Overall brightness, on top of the timelines: EXPOSURE lifts the whole
