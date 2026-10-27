@@ -129,22 +129,20 @@ function buildBoat() {
 }
 
 // The port across the bay: Level 2's container yard, cranes, warehouses
-// and the town behind it, as layered silhouettes. One merged mesh with
-// per-layer vertex colours, plus three sets of lights.
+// and the town behind it, as layered silhouettes. One merged mesh per
+// layer, its colour a darkened copy of the fog's that follows the fog as
+// the weather turns (DayCycle.js), plus three sets of lights.
 function buildFarShore(glowTex) {
   const rnd = seeded(0xBA75);
-  const fog = scene.fog ? scene.fog.color : new THREE.Color(0x182535);
-  const shade = (k) => fog.clone().lerp(new THREE.Color(0x05070a), k); // k: how far from the haze
-  const parts = [];
-  const add = (w, h, d, x, y, z, color) => {
+  // k: how much darker than the haze — nearer layers stand out more
+  const layers = { port: { k: 0.55, parts: [] }, town: { k: 0.32, parts: [] }, ships: { k: 0.62, parts: [] } };
+  const port = layers.port, town = layers.town, ships = layers.ships;
+  const add = (w, h, d, x, y, z, layer) => {
     const g = new THREE.BoxGeometry(w, h, d).toNonIndexed().translate(x, y + h / 2, z);
-    const col = new Float32Array(g.attributes.position.count * 3);
-    for (let i = 0; i < col.length; i += 3) color.toArray(col, i);
-    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     g.deleteAttribute('uv'); g.deleteAttribute('normal');
-    parts.push(g);
+    layer.parts.push(g);
   };
-  const SHORE = 340, port = shade(0.55), town = shade(0.32), ships = shade(0.62);
+  const SHORE = 340;
   add(1400, 3, 40, 0, WATER_Y, SHORE + 20, port);                     // the far quay
   for (let i = 0; i < 46; i++) {                                       // container stacks
     const x = -170 + rnd() * 340, z = SHORE + 4 + rnd() * 14, tiers = 1 + ((rnd() * 3) | 0);
@@ -160,27 +158,42 @@ function buildFarShore(glowTex) {
   for (let i = 0; i < 34; i++) add(14 + rnd() * 20, 10 + rnd() * 32, 16 + rnd() * 10, -320 + rnd() * 640, 2, SHORE + 70 + rnd() * 70, town); // the town
   add(48, 8, 9, -150, WATER_Y, SHORE - 50, ships); add(16, 7, 8, -158, WATER_Y + 8, SHORE - 50, ships); // moored ships
   add(36, 7, 8, 160, WATER_Y, SHORE - 64, ships); add(12, 6, 7, 166, WATER_Y + 7, SHORE - 64, ships);
-  const shore = new THREE.Mesh(mergeGeometries(parts), new THREE.MeshBasicMaterial({ vertexColors: true, fog: false }));
-  scene.add(shore);
+  for (const layer of Object.values(layers)) {
+    layer.material = new THREE.MeshBasicMaterial({ fog: false });
+    scene.add(new THREE.Mesh(mergeGeometries(layer.parts), layer.material));
+  }
+  const black = new THREE.Color(0x05070a);
+  const lights = [];
+  // The shore sinks into the haze as the fog thickens, the lights last
+  const shade = () => {
+    if (!scene.fog) return;
+    const d = scene.fog.density;
+    const seen = 1 - THREE.MathUtils.smoothstep(d, 0.006, 0.018);
+    for (const layer of Object.values(layers)) layer.material.color.copy(scene.fog.color).lerp(black, layer.k * seen);
+    const lit = 1 - THREE.MathUtils.smoothstep(d, 0.012, 0.028);
+    for (const l of lights) l.points.material.opacity = l.opacity * lit;
+  };
 
   // Lights: red crane-top warnings that blink, amber yard lamps, town windows
   const night = state.timeOfDay === 'night';
-  const points = (list, color, size, opacity) => {
+  const points = (list, color, size, opacity, steady = true) => {
     const geo = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(list.flat()), 3));
     const p = new THREE.Points(geo, new THREE.PointsMaterial({
       map: glowTex, color, size, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
     }));
     scene.add(p);
+    if (steady) lights.push({ points: p, opacity }); // the blinking ones fade in the tick
     return p;
   };
-  const warnings = points(cranes.flatMap((cx) => [[cx - 6, 37, SHORE + 6], [cx + 6, 37, SHORE + 6], [cx, 38.5, SHORE - 44]]), 0xff3020, 7, 0.9);
+  const warnings = points(cranes.flatMap((cx) => [[cx - 6, 37, SHORE + 6], [cx + 6, 37, SHORE + 6], [cx, 38.5, SHORE - 44]]), 0xff3020, 7, 0.9, false);
   const yard = [];
   for (let x = -160; x <= 160; x += 20 + rnd() * 10) yard.push([x, 9 + rnd() * 3, SHORE + 2 + rnd() * 10]);
   points(yard, 0xffb066, night ? 9 : 5, night ? 0.75 : 0.25);
   const windows = [];
   for (let i = 0; i < 70; i++) windows.push([-300 + rnd() * 600, 6 + rnd() * 26, SHORE + 70 + rnd() * 60]);
   points(windows, 0xffe2a8, 4, night ? 0.55 : 0.12);
-  return warnings;
+  const warningsLit = () => 1 - THREE.MathUtils.smoothstep(scene.fog ? scene.fog.density : 0, 0.016, 0.034);
+  return { warnings, shade, warningsLit };
 }
 
 /** Builds the bay. Call after bootLevel() (it reads the level's fog).
@@ -190,7 +203,7 @@ export function buildArrivalBay() {
   const sea = buildWater();
   buildQuayAndJetty();
   const boat = buildBoat();
-  const warnings = buildFarShore(glowTex);
+  const { warnings, shade, warningsLit } = buildFarShore(glowTex);
   let t = 0;
   return (dt) => {
     t += dt;
@@ -199,6 +212,7 @@ export function buildArrivalBay() {
     boat.group.rotation.z = Math.sin(t * 0.9) * 0.025;
     boat.group.rotation.x = Math.sin(t * 1.1 + 1) * 0.012;
     boat.mixer?.update(dt);
-    warnings.material.opacity = Math.sin(t * 3) > 0.2 ? 0.95 : 0.15;
+    warnings.material.opacity = (Math.sin(t * 3) > 0.2 ? 0.95 : 0.15) * warningsLit();
+    shade();
   };
 }

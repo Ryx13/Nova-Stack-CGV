@@ -57,6 +57,7 @@ import {buildCureProjector} from './CureProjector.js';
 import {OPENING_CONVERSATION,endingReflection} from './Level3HumanityDialogue.js';
 import {getGirlOutcome} from './StoryProgress.js';
 import {buildArrivalBay} from './Level3Arrival.js';
+import {registerDayProgress} from './DayCycle.js';
 import {preloadHumanRecovery,prepareHumanRecovery,beginHumanRecovery,updateHumanRecovery,survivorFrame,recognizeSurvivor} from './assets/human-recovery/HumanRecovery.js';
 
 const LEVEL_CONFIG = {
@@ -75,6 +76,17 @@ export function startLevel(mode) {
   preloadGuardian().catch(error => console.error('Guardian preload failed', error));
   bootLevel({ ...LEVEL_CONFIG, mode });
   registerLevelTick(buildArrivalBay()); // the bay you crossed, behind the start
+  // Campaign clock (DayCycle.js): the switches, the boss, then the broadcast
+  // itself carries it the last stretch (the night path's sunrise)
+  registerDayProgress(() => {
+    if (!lv3) return 0;
+    if (lv3.phase === 'dispersion' && lv3.dispersion) return 0.88 + 0.12 * Math.min(1, lv3.dispersion.t / 9);
+    if (lv3.phase === 'done') return 1;
+    if (lv3.phase === 'broadcast-ready') return 0.87;
+    if (lv3.phase === 'boss-fallen') return 0.85;
+    if (lv3.phase === 'boss') return 0.75;
+    return 0.2 * lv3.compound.switches.filter((s) => s.activated).length;
+  });
   const compound = buildLevel3Scene();
   for(const object of [compound.towerShell,compound.mast,compound.dish,...compound.switches.map(s=>s.shell)]) object.userData.staticScenery=true;
   console.info('[compound scenery]',mergeStaticScenery(scene));

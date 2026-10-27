@@ -10,6 +10,7 @@ import { addContactShading } from './ContactShading.js';
 import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
 import { retryLevel, setRestartHandler } from './account.js';
 import {levelWeapon,levelWeaponIds,nextWeapon} from './WeaponSlots.js';
+import { startDayCycle, updateDayCycle } from './DayCycle.js';
 import {
   scene, world, camera, renderer, dom, sfx, sky,
   pushKillFeed, doDeath, doWin, checkExtraction, updateExtractRing,
@@ -1229,6 +1230,7 @@ export function bootLevel(levelConfig = {}) {
   // mist tint, rain visibility and puddles are all correct from frame one.
   applyTimeOfDay(levelConfig.mode);
   state.levelId = levelConfig.id || 1;
+  startDayCycle(); // the campaign clock: picks the Day/Night timeline
   state.runTime = 0;
   state.runReported = false;
 
@@ -1382,6 +1384,7 @@ function startAnimationLoop() {
     }
     sky.position.copy(camera.position);
     updateWeatherFX(dt);
+    updateDayCycle(dt);
     streetAtmosphere?.update(dt, state, sfx, camera);
     // state.cinematic: a level's intro owns the camera (Level2Intro.js)
     if (state.dying && !state.paused && !state.narrativeBlocked) {

@@ -14,6 +14,9 @@ import './shaders.js';
 import { bootLevel } from './Actions.js';
 import { state } from './state.js';
 import { startLevel1Intro } from './Level1Intro.js';
+import { registerDayProgress } from './DayCycle.js';
+import { KILL_TARGET } from './Scene.js';
+import { playerBody } from './characters.js';
 
 // Day mode borrows Level 2's low-sun afternoon (sky, sun shadows, warm
 // grade, daylight facades, lamps off) but keeps Level 1's own drizzle,
@@ -30,6 +33,13 @@ const LEVEL_CONFIG = {
   id: 1,
   name: 'Level 1',
 };
+
+// Campaign clock (DayCycle.js): the kills, the sample, and how far down the
+// street toward extraction (spawn z 30, extraction z -196) you've got
+registerDayProgress(() => {
+  const along = Math.min(1, Math.max(0, (30 - playerBody.position.z) / 226));
+  return 0.35 * Math.min(1, state.kills / KILL_TARGET) + (state.ingredientCollected ? 0.25 : 0) + 0.4 * along;
+});
 
 export function startLevel(mode) {
   bootLevel({ ...LEVEL_CONFIG, mode });

@@ -516,7 +516,7 @@ const TIME_OF_DAY_CONFIG = {
   clearDay: {
     skyTex: null, // painted on first use: duskSkyTexture()
     bgColor: 0xb59f86,
-    fogColor: 0xb8a48a, fogNear: 70, fogFar: 460,
+    fogColor: 0xb8a48a, fogDensity: 0.0035, // ~linear 70..460 m: clear near the player, dust far out
     sunColor: 0xffc58a, sunIntensity: 3.4, sunVisible: true,
     sunDirection: [-0.62, 0.42, -0.66], // low in the west-southwest, slanting down the street
     celestial: false,
@@ -566,12 +566,10 @@ export function applyTimeOfDay(mode) {
   sky.material.color.setHex(state.timeOfDay === 'night' && state.quarantineFacility === true ? 0x8293a8 : 0xffffff);
   sky.material.needsUpdate = true;
   scene.background = new THREE.Color(cfg.bgColor);
-  if (clear) {
-    scene.fog = new THREE.Fog(cfg.fogColor, cfg.fogNear, cfg.fogFar);
-  } else {
-    scene.fog.color.setHex(cfg.fogColor);
-    scene.fog.density = cfg.fogDensity;
-  }
+  // Always exponential fog: DayCycle.js changes its colour and density
+  // every frame, and swapping fog types would recompile every material
+  scene.fog.color.setHex(cfg.fogColor);
+  scene.fog.density = cfg.fogDensity;
 
   // Clear days are lit by sun + sky (environment map, set up below); the
   // flat fills would only wash out the shadows, so they're left out of
@@ -793,6 +791,15 @@ function updateClearDay(dt) {
       p.m.material.rotation += dt * 0.02;
     }
   }
+}
+/* Handles for DayCycle.js, which moves the time of day every frame. The sun
+   direction goes through here so the clear-day shadow frustum, which
+   follows the camera, keeps tracking it. */
+export const lighting = { sun, hemiLight, ambientLight, sunVisual, moonVisual };
+export function setSunDirection(dir) {
+  sunVisual.position.copy(dir).multiplyScalar(SUN_DISTANCE);
+  if (clearDay) { clearDay.sunDir.copy(dir); return; }
+  sun.position.copy(sun.target.position).addScaledVector(dir, 200);
 }
 const _sunFocus = new THREE.Vector3(), _sunTmp = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
 const _sunBasisX = new THREE.Vector3(), _sunBasisY = new THREE.Vector3(), _sunBasisZ = new THREE.Vector3();

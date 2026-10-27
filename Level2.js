@@ -24,6 +24,7 @@ import { VendingMachine, makeIcon } from './VendingMachine.js';
 import { finishRun } from './account.js';
 import { createNarrative } from './Narrative.js';
 import { setGirlOutcome } from './StoryProgress.js';
+import { registerDayProgress } from './DayCycle.js';
 import { instantiateCharacter, loadGLB, fitClip, clipsFor, boneByName } from './roster.js';
 import { holdForIntro, playIntro, updateIntro } from './Level2Intro.js';
 import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
@@ -100,6 +101,18 @@ export function startLevel(mode) {
   buildLevel2EndScreens();
   registerLevelTick(updateMission);
   registerLevelReset(resetLevel2);
+  // Campaign clock (DayCycle.js): how far along her route to the boat she is.
+  // Holds its last value once she's gone, so the clock never rewinds.
+  let chase = 0, startDistance = 0;
+  registerDayProgress(() => {
+    if (state.girlCaught || state.portReached) return 1;
+    if (state.girlPos && lv2EscapePoint) {
+      const d = state.girlPos.distanceTo(lv2EscapePoint);
+      startDistance ||= d; // her head-start spot, straight-line to the boat
+      chase = 1 - d / startDistance;
+    }
+    return chase;
+  });
 }
 
 // Handles for the logic phase: { machines, escapePoint } from the
