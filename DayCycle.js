@@ -6,7 +6,7 @@
    ended. The player picks Day or Night once; the choice carries into the
    next level (account.js playNextLevel) and picks the timeline:
 
-     Day    L1 dawn -> sun about to rise · L2 sunrise -> sun up ·
+     Day    L1 dawn -> sun about to rise · L2 sunrise -> late morning ·
             L3 clouds building -> thick sea fog and drizzle
      Night  L1 streetlit night · L2 dead grid, moon over
             the port · L3 sea fog before dawn -> the sun breaks through
@@ -52,20 +52,24 @@ const DAY = [
   // Level 2, a little way into the chase: the sun clears the rooftops, so the
   // street is no longer one long shadow and buildings cast crisp ones
   { c: 1.15, sun: 2.6, el: 12, az: 85, hemi: 0.16, amb: 0.08 },
-  // Level 2 ends / Level 3 begins: the sun up but still low and golden.
-  // Level 2 is lit by its own sky as well, so the fills stay low and the
-  // sky warm, or the whole street washes out white.
-  { c: 2, top: 0x6a8cb4, hor: 0xf0cfa2, bot: 0x7a6656, glow: 0xffc890, gs: 0.7,
-    fog: 0xcfb494, fogD: 0.0035, sunCol: 0xffc488, sun: 2.6, el: 24, az: 95, disc: 0.85,
-    hemiSky: 0xd8c4ac, hemiGnd: 0x40362c, hemi: 0.16, ambCol: 0x5a5048, amb: 0.08, exp: 0.78,
+  // Level 2, halfway: a bright morning, the sun still a little warm
+  { c: 1.5, top: 0x5f8cc0, hor: 0xead6b4, bot: 0x7a6a5a, glow: 0xffd8a8, gs: 0.55,
+    fog: 0xccbca0, sunCol: 0xffd6a8, sun: 2.8, el: 35, az: 105 },
+  // Level 2 ends / Level 3 begins: a clear late morning, the sun high.
+  // Level 2 is lit by its own sky as well, so the fills stay low, the sun
+  // keeps some warmth and the sky stays blue rather than pale, or the
+  // whole street washes out white.
+  { c: 2, top: 0x4f86c4, hor: 0xe0d8c4, bot: 0x7a6e60, glow: 0xffe8c8, gs: 0.45,
+    fog: 0xc8c0aa, fogD: 0.0035, sunCol: 0xffe2b8, sun: 3.0, el: 50, az: 120, disc: 0.85,
+    hemiSky: 0xd8ccb8, hemiGnd: 0x40362c, hemi: 0.16, ambCol: 0x5a5048, amb: 0.08, exp: 0.78,
     mist: 0xe0caa8, mistA: 0 },
   // Level 3, the first switch or so: cloud coming in off the sea
   { c: 2.35, top: 0x8e9cab, hor: 0xc4ccd2, bot: 0x7a7e80, glow: 0xf4f2ec, gs: 0.2,
-    fog: 0xaab3ba, fogD: 0.008, sunCol: 0xf4f0e6, sun: 1.5, el: 36, az: 115, disc: 0.3,
+    fog: 0xaab3ba, fogD: 0.008, sunCol: 0xf4f0e6, sun: 1.5, el: 52, az: 130, disc: 0.3,
     hemiSky: 0xd0d8de, hemi: 0.75, amb: 0.35, mist: 0xc8d0d6, mistA: 0.35 },
   // Level 3 ends: thick sea fog and drizzle
   { c: 3, top: 0xa4acb2, hor: 0xb4bbbf, bot: 0x9a9fa2, glow: 0xe8eaea, gs: 0.05,
-    fog: 0x9aa2a8, fogD: 0.03, sunCol: 0xe6e8ea, sun: 0.45, el: 40, az: 130, disc: 0,
+    fog: 0x9aa2a8, fogD: 0.03, sunCol: 0xe6e8ea, sun: 0.45, el: 55, az: 140, disc: 0,
     hemiSky: 0xdfe7ee, hemi: 1.1, amb: 0.5, exp: 1.0, mist: 0xe8ecef, mistA: 0.65, rain: 0.8 },
 ];
 const NIGHT = [
