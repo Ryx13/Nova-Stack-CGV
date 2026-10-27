@@ -1206,8 +1206,8 @@ async function catchGirl() {
     text: "It's the only thing keeping me me. Every time a dose wears off, I can feel it coming back. If you take it, I turn.",
     continueLabel: 'Call Dr. James' });
   await catchStory?.show({ id: 'girl-james', mode: 'cinematic', speaker: 'DR. JAMES / SECURE CHANNEL', title: 'Bring her with you.',
-    text: 'She held on this long because of it. Once the tower broadcasts the cure, nobody needs a dose. Bring her and the case to the safe room. I can keep her stable until then.',
-    continueLabel: 'Take her back' });
+    text: 'She held on this long because of it. Once the tower broadcasts the cure, nobody needs a dose. Her boat is the only way across the bay to the tower. Take it, and take her with you. One more dose will hold her until then.',
+    continueLabel: 'Take her boat' });
   if (!catchStory) return; // the level restarted mid-scene
   catchStory.dispose(); catchStory = null;
   if (girl) scene.remove(girl.group); // she goes back with you

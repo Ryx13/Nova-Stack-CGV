@@ -187,7 +187,7 @@ function buildTerrain() {
 /* --- Sea ---------------------------------------------------------------- */
 // Tiling ripple normal map: a few crossing sine swells plus noise,
 // differentiated into normals. Painted once on a canvas.
-function rippleNormalTexture(size = 256) {
+export function rippleNormalTexture(size = 256) {
   const h = new Float32Array(size * size);
   const n = makeNoise(0xA11CE);
   const TAU = Math.PI * 2;

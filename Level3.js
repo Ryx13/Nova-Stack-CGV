@@ -56,6 +56,7 @@ import {registerLevelWeapon} from './WeaponSlots.js';
 import {buildCureProjector} from './CureProjector.js';
 import {OPENING_CONVERSATION,endingReflection} from './Level3HumanityDialogue.js';
 import {getGirlOutcome} from './StoryProgress.js';
+import {buildArrivalBay} from './Level3Arrival.js';
 import {preloadHumanRecovery,prepareHumanRecovery,beginHumanRecovery,updateHumanRecovery,survivorFrame,recognizeSurvivor} from './assets/human-recovery/HumanRecovery.js';
 
 const LEVEL_CONFIG = {
@@ -73,6 +74,7 @@ export function startLevel(mode) {
   preloadHumanRecovery().catch(error=>console.error('Human recovery preload failed',error));
   preloadGuardian().catch(error => console.error('Guardian preload failed', error));
   bootLevel({ ...LEVEL_CONFIG, mode });
+  registerLevelTick(buildArrivalBay()); // the bay you crossed, behind the start
   const compound = buildLevel3Scene();
   for(const object of [compound.towerShell,compound.mast,compound.dish,...compound.switches.map(s=>s.shell)]) object.userData.staticScenery=true;
   console.info('[compound scenery]',mergeStaticScenery(scene));

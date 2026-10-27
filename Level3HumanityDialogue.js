@@ -42,6 +42,6 @@ export function endingReflection({ kills = 0, saved = 0, guardianSpared = false,
   const count = value => Number.isFinite(Number(value)) ? Math.max(0, Math.floor(Number(value))) : 0;
   const killed = count(kills);
   const rescued = count(saved);
-  const girl = girlRescued ? ' Back in the safe room, the girl from CAM 03 takes her first breath of clean air without a dose.' : '';
+  const girl = girlRescued ? ' Down at the jetty, the girl from CAM 03 takes her first breath of clean air without a dose.' : '';
   return `You killed ${killed} infected and saved ${rescued}. The guardian was killed. You fought through the ambushes to broadcast the cure.${girl}`;
 }
