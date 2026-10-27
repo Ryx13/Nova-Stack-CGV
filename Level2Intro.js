@@ -67,10 +67,10 @@ function buildShots({ girlPos, girlFacing, portPos, playerPos, playerPose, machi
 
   return [
     {
-      pos: girlCam, look: girlEye, move: 1.3, hold: 3.4,
+      pos: girlCam, look: girlEye, move: 1.3, hold: 4.6,
       tag: '01 · The target',
-      title: 'This is the girl',
-      sub: 'She has the antidote. Catch her before she escapes: get right next to her and press E.',
+      title: 'The girl from CAM 03',
+      sub: "She has your stabilizer. She's half-turned and using it to stay human, so the infected leave her alone. Catch her before her boat leaves: get right next to her and press E.",
       keys: [['E', 'Catch her']],
       mark: { at: girlPos.clone().add(V(0, 2.3, 0)), text: 'GIRL' },
     },

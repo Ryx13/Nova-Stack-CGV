@@ -49,10 +49,10 @@ function buildShots({ playerPos, playerPose, infectedPos }) {
 
   return [
     {
-      pos: playerCam, look: playerEye, move: 1.3, hold: 3.6,
+      pos: playerCam, look: playerEye, move: 1.3, hold: 4.4,
       tag: '01 · The courier',
       title: 'This is you',
-      sub: "The outbreak caught you on a delivery. Dr. James is brewing a cure in the safe room, but he can't leave it, and he's missing one ingredient. You're going to get it.",
+      sub: "The outbreak caught you on a delivery. Dr. James can't leave the safe room, and his cure needs two things: a culture sample from this street, and the stabilizer you dropped. The sample comes first.",
       mark: { at: playerPos.clone().add(V(0, 2.25, 0)), text: 'YOU' },
     },
     {

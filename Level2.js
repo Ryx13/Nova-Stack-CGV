@@ -22,6 +22,8 @@ import { spawnCoin } from './PowerUps.js';
 import { bootLevel, registerLevelTick, registerLevelReset, levelKeyHooks } from './Actions.js';
 import { VendingMachine, makeIcon } from './VendingMachine.js';
 import { finishRun } from './account.js';
+import { createNarrative } from './Narrative.js';
+import { setGirlOutcome } from './StoryProgress.js';
 import { instantiateCharacter, loadGLB, fitClip, clipsFor, boneByName } from './roster.js';
 import { holdForIntro, playIntro, updateIntro } from './Level2Intro.js';
 import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
@@ -1156,7 +1158,7 @@ function buildLevel2EndScreens() {
   winEl.id = 'lv2-winscreen';
   winEl.className = 'end-screen hidden';
   winEl.innerHTML = `
-    <h1 class="end-title">ANTIDOTE SECURED</h1>
+    <h1 class="end-title">STABILIZER RECOVERED</h1>
     <div class="end-sub" id="lv2-win-stats"></div>
     <button onclick="location.reload()">Play Again</button>`;
   document.body.appendChild(winEl);
@@ -1167,7 +1169,7 @@ function buildLevel2EndScreens() {
   loseEl.id = 'lv2-losescreen';
   loseEl.className = 'end-screen hidden';
   loseEl.innerHTML = `
-    <h1 class="end-title">YOU LOST THE ANTIDOTE</h1>
+    <h1 class="end-title">SHE GOT AWAY</h1>
     <div class="end-sub" id="lv2-lose-stats"></div>
     <button onclick="location.reload()">Restart Demo</button>`;
   document.body.appendChild(loseEl);
@@ -1181,8 +1183,10 @@ function chaseSeconds() {
 }
 
 /** WIN — the player occupied her position and pressed E (handleKeyE).
-    Instant screen, same beat as the stock doWin. */
-function catchGirl() {
+    She stops and turns to face you, pleads to keep the stabilizer, and
+    Dr. James has you bring her back to the safe room; then the screen. */
+let catchStory = null;
+async function catchGirl() {
   state.girlCaught = true;
   state.isDead = true;             // freezes the gameplay gate
   state.adrenalineActive = false; // stop the countdown label writer
@@ -1190,9 +1194,25 @@ function catchGirl() {
   sfx.pickup();
   document.exitPointerLock();
   dom.prompt.classList.add('hidden');
-  if (girl) scene.remove(girl.group); // grabbed — she's gone
+  setGirlOutcome('caught');
+  const seconds = chaseSeconds();
+  if (girl) {
+    const g = girl.group, p = playerVis.group.position;
+    g.rotation.y = Math.atan2(p.x - g.position.x, p.z - g.position.z) + GIRL_RIG_YAW_OFFSET;
+    if (girl.idle && girl.run) { girl.run.stop(); girl.idle.reset().play(); girl.mixer?.update(0.01); }
+  }
+  catchStory = createNarrative({ onBlock: (value) => { state.narrativeBlocked = value; state.keys = {}; } });
+  await catchStory.show({ id: 'girl-plea', mode: 'cinematic', speaker: 'THE GIRL', title: "Please don't take it.",
+    text: "It's the only thing keeping me me. Every time a dose wears off, I can feel it coming back. If you take it, I turn.",
+    continueLabel: 'Call Dr. James' });
+  await catchStory?.show({ id: 'girl-james', mode: 'cinematic', speaker: 'DR. JAMES / SECURE CHANNEL', title: 'Bring her with you.',
+    text: 'She held on this long because of it. Once the tower broadcasts the cure, nobody needs a dose. Bring her and the case to the safe room. I can keep her stable until then.',
+    continueLabel: 'Take her back' });
+  if (!catchStory) return; // the level restarted mid-scene
+  catchStory.dispose(); catchStory = null;
+  if (girl) scene.remove(girl.group); // she goes back with you
   lv2WinStats.textContent =
-    `Infected eliminated: ${state.kills} · Coins: ${state.coins} · Antidote secured in ${chaseSeconds()} s`;
+    `Infected eliminated: ${state.kills} · Coins: ${state.coins} · Stabilizer recovered in ${seconds} s`;
   lv2Win.classList.remove('hidden');
   finishRun('win', lv2Win);
 }
@@ -1272,8 +1292,9 @@ function updateLoseCinematic(dt) {
   if (c.t >= 3.6) {
     state.girlPos = null;
     loseCinematic = null;
+    setGirlOutcome('escaped');
     lv2LoseStats.textContent =
-      `Infected eliminated: ${state.kills} · Coins: ${state.coins} · She reached the port in ${chaseSeconds()} s`;
+      `Your stabilizer is heading out to sea, and without it there is no cure. · Infected eliminated: ${state.kills} · Coins: ${state.coins} · She reached the port in ${chaseSeconds()} s`;
     lv2Lose.classList.remove('hidden');
     finishRun('loss', lv2Lose);
   }
@@ -1301,7 +1322,7 @@ function updateMission(dt) {
   if (distToGirl < CATCH_RANGE * 1.6) {
     dom.prompt.classList.remove('hidden');
     dom.prompt.querySelector('b').textContent = 'E';
-    dom.promptText.textContent = distToGirl <= CATCH_RANGE ? 'Grab the antidote' : 'Get closer…';
+    dom.promptText.textContent = distToGirl <= CATCH_RANGE ? 'Stop her' : 'Get closer…';
   }
 
   // One-shot progress beats — the chase's tension clock.
@@ -1338,6 +1359,7 @@ function updateMission(dt) {
     briefing doesn't replay, so the start ambush that follows it is
     sprung straight away. */
 function resetLevel2() {
+  if (catchStory) { catchStory.dispose(); catchStory = null; state.narrativeBlocked = false; }
   loseCinematic = null;
   missionStartTime = 0;
   escalationTimer = ESCALATE_START;

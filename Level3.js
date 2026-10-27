@@ -55,6 +55,7 @@ import { RayCandidates } from './RayCandidates.js';
 import {registerLevelWeapon} from './WeaponSlots.js';
 import {buildCureProjector} from './CureProjector.js';
 import {OPENING_CONVERSATION,endingReflection} from './Level3HumanityDialogue.js';
+import {getGirlOutcome} from './StoryProgress.js';
 import {preloadHumanRecovery,prepareHumanRecovery,beginHumanRecovery,updateHumanRecovery,survivorFrame,recognizeSurvivor} from './assets/human-recovery/HumanRecovery.js';
 
 const LEVEL_CONFIG = {
@@ -737,7 +738,7 @@ function showLevel3EndScreen() {
   lv3WinStats.textContent = `Zombies defeated: ${state.kills} · Infected cured: ${lv3.curedCount || 0} (pulse ${lv3.pulseSaved} / broadcast ${lv3.broadcastCured}) · Coins: ${state.coins}`;
   const route=powerRoute(lv3.story.power);
   lv3Win.querySelector('.finale-outcome').textContent = `The Guardian has fallen. The broadcast is live. ${route?.ending || ''} ${lv3.story.rescued ? 'The technician is waiting at the shelter for the people you brought back.' : 'The shelter signal remains unanswered.'}${lv3.pulseSaved ? ` You saved ${lv3.pulseSaved} infected before the tower came online.` : ''}`;
-  lv3Win.querySelector('.finale-outcome').textContent += ' '+endingReflection({kills:state.kills,saved:lv3.curedCount,intent:lv3.story.intent});
+  lv3Win.querySelector('.finale-outcome').textContent += ' '+endingReflection({kills:state.kills,saved:lv3.curedCount,intent:lv3.story.intent,girlRescued:getGirlOutcome()==='caught'});
   lv3Win.classList.remove('hidden');
   lv3WinStats.textContent += ` · ${lv3.story.rescued ? 'Technician evacuated' : 'Rescue signal unresolved'} · ${lv3.story.power === 'floodlights' ? 'Floodlights restored' : lv3.story.power === 'safety' ? 'Safety systems restored' : 'Supply route opened'}`;
   lv3.story.narrative.dispose();
