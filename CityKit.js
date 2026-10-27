@@ -37,7 +37,7 @@
 ====================================================================== */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { scene, addStaticBox, rowX, STREET_HALF_W } from './Scene.js';
+import { scene, renderer, addStaticBox, rowX, STREET_HALF_W } from './Scene.js';
 import { state } from './state.js';
 import { SIDEWALK, layout } from './CityLayout.js';
 
@@ -77,6 +77,7 @@ function mat(hex, { emissive = 0, emissiveIntensity = 0, roughness = 0.88, metal
     materials.set(key, new THREE.MeshStandardMaterial({
       color: hex, roughness, metalness, flatShading: true, map,
       emissive, emissiveIntensity, emissiveMap: map && emissive ? map : null,
+      envMapIntensity: 0.5, // the sky's bounce light shouldn't wash out the sun's shadows
     }));
   }
   return materials.get(key);
@@ -123,40 +124,39 @@ function verticalSignTexture(name) {
 
 /* --- Mirror glass and sliding doors --------------------------------------
    Some shops (and the office lobbies) have a blue mirror-glass front with
-   sliding doors. The glass gets a sky-blue sheen toward glancing angles
-   and a bright band that sweeps across every pane now and then; the doors
-   slide apart as the player walks up. All of it is one instanced mesh
-   (a draw call for the whole town), built on the first update. */
-const mirrorUniforms = { uGlintTime: { value: 0 } };
-let mirrorMaterial = null;
+   sliding doors that slide apart as the player walks up. The glass really
+   reflects: a reflection probe (a cube camera) renders the scene from just
+   in front of the mirror nearest the player a few times a second, so the
+   mirrors show what's actually in front of them, lit as it is (a vending
+   machine's glowing screen, the streetlights, the player), and anything
+   standing in front blocks what's behind it. Mirrors further off reuse the
+   last capture. All the glass is one instanced mesh, built on the first
+   update. */
+const PROBE_EVERY = 0.3, PROBE_REACH = 45; // s between captures; only near a mirror
+let mirrorMaterial = null, probe = null, probeTimer = 0;
 function mirror() {
   if (mirrorMaterial) return mirrorMaterial;
-  const m = new THREE.MeshStandardMaterial({ color: 0x3f86bd, metalness: 0.85, roughness: 0.08, emissive: 0x0d2740, emissiveIntensity: 1 });
-  const base = THREE.Material.prototype.onBeforeCompile; // keep the global hooks (HeightMist)
-  m.onBeforeCompile = (shader, renderer) => {
-    base.call(m, shader, renderer);
-    shader.uniforms.uGlintTime = mirrorUniforms.uGlintTime;
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vGlintWorld;')
-      .replace('#include <project_vertex>', `#include <project_vertex>
-        vec4 glintWorld = vec4(transformed, 1.0);
-        #ifdef USE_INSTANCING
-          glintWorld = instanceMatrix * glintWorld;
-        #endif
-        vGlintWorld = (modelMatrix * glintWorld).xyz;`);
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vGlintWorld;\nuniform float uGlintTime;')
-      .replace('#include <opaque_fragment>', `
-        float glintFacing = abs(dot(normalize(vViewPosition), normal));
-        float glintSheen = pow(1.0 - glintFacing, 3.0);
-        float glintSweep = fract((vGlintWorld.x + vGlintWorld.z) * 0.08 + vGlintWorld.y * 0.05 - uGlintTime * 0.18);
-        float glintBand = smoothstep(0.06, 0.0, abs(glintSweep - 0.5));
-        outgoingLight += vec3(0.55, 0.8, 1.0) * (glintSheen * 0.7 + glintBand * 0.9);
-        #include <opaque_fragment>`);
-  };
-  m.customProgramCacheKey = () => 'citykit-mirror';
-  mirrorMaterial = m;
-  return m;
+  const target = new THREE.WebGLCubeRenderTarget(128, { type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter });
+  probe = new THREE.CubeCamera(0.3, 160, target);
+  mirrorMaterial = new THREE.MeshStandardMaterial({ color: 0x7fb4e0, metalness: 1, roughness: 0.05, envMap: target.texture, envMapIntensity: 1.1 });
+  return mirrorMaterial;
+}
+// Capture the scene from in front of the mirror nearest the player
+function captureReflections(playerPos) {
+  let best = null, bestD = PROBE_REACH;
+  for (const m of [...mirrorPanes, ...slidingDoors]) {
+    const d = Math.hypot(playerPos.x - m.x, playerPos.z - m.z);
+    if (d < bestD) { bestD = d; best = m; }
+  }
+  if (!best) return;
+  probe.position.set(best.x + best.side * 3, 1.7, best.z);
+  probe.updateMatrixWorld();
+  doorMesh.visible = false; // the glass mustn't reflect itself
+  const autoShadows = renderer.shadowMap.autoUpdate;
+  renderer.shadowMap.autoUpdate = false; // reuse this frame's shadow maps
+  probe.update(renderer, scene);
+  renderer.shadowMap.autoUpdate = autoShadows;
+  doorMesh.visible = true;
 }
 const mirrorPanes = [];   // static mirror glass: { x, y, z, sx, sy, sz }
 const displayPanes = [];  // see-through display windows, same shape
@@ -187,11 +187,11 @@ function buildMirrorMesh() {
   panes.userData.dynamic = true;
   scene.add(panes);
 }
-/** Every frame (Level 1's tick): the glint, and doors opening for the player. */
+/** Every frame (a level's tick): reflections, and doors opening for the player. */
 export function updateCityKit(dt, playerPos) {
   if (!mirrorPanes.length && !slidingDoors.length && !displayPanes.length) return;
   if (!doorMesh) buildMirrorMesh();
-  mirrorUniforms.uGlintTime.value += dt;
+  if (playerPos && (probeTimer -= dt) <= 0) { probeTimer = PROBE_EVERY; captureReflections(playerPos); }
   let moved = false;
   slidingDoors.forEach((d, i) => {
     const near = playerPos && Math.hypot(playerPos.x - d.x, playerPos.z - d.z) < DOOR_REACH ? 1 : 0;
@@ -220,10 +220,10 @@ class Builder {
   }
   // Mirror glass and sliding doors on the facade (instanced, see above)
   mirrorFace(u, v, out, su, sv, sn) {
-    mirrorPanes.push({ x: this.fx + this.side * out, y: v, z: this.zc + u, sx: sn, sy: sv, sz: su });
+    mirrorPanes.push({ x: this.fx + this.side * out, y: v, z: this.zc + u, sx: sn, sy: sv, sz: su, side: this.side });
   }
   slidingDoor(u) {
-    slidingDoors.push({ x: this.fx + this.side * 0.06, y: DOOR_H / 2, z: this.zc + u, open: 0 });
+    slidingDoors.push({ x: this.fx + this.side * 0.06, y: DOOR_H / 2, z: this.zc + u, open: 0, side: this.side });
   }
   // A box anywhere: centre (x, y, z), sizes along world axes
   box(x, y, z, sx, sy, sz, material) {

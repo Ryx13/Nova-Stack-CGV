@@ -468,35 +468,39 @@ function buildPort() {
     addStaticBox(0.2, 0.35, 0.2, bx, 0.35, -207.2);
   }
 
-  // Ships out on the water — silhouettes in the murk.
-  makeShip(-40, -230, 0.35, 34);
-  makeShip(30, -238, -0.5, 26);
-  makeShip(5, -248, 0.1, 40);
+  // The working port: ships, containers, warehouses, cranes. The harbour
+  // town (state.cityKit) keeps only her boat at the pier.
+  if (!state.cityKit) {
+    // Ships out on the water — silhouettes in the murk.
+    makeShip(-40, -230, 0.35, 34);
+    makeShip(30, -238, -0.5, 26);
+    makeShip(5, -248, 0.1, 40);
 
-  // Container yard — the mid-lane |x| < 4 stays clear (chase lane + pier
-  // approach); stacks flank it. One pile spilled toward the quay edge.
-  makeContainer(-12, -193, 0.12);
-  makeContainer(-12, -193, 0.12, 2.55);
-  makeContainer(-8.5, -196, -0.35);
-  makeContainer(-15.5, -197.5, 0.55);
-  makeContainer(12, -194, -0.15);
-  makeContainer(12, -194, -0.15, 2.55);
-  makeContainer(8.5, -197, 0.4);
-  makeContainer(15.5, -198.5, -0.5);
-  makeContainer(-26, -192, 1.5);
-  makeContainer(26, -193, 1.5);
-  makeContainer(-30, -196, 1.62, 0, true);
-  makeContainer(30, -197, 1.62, 0, true);
-  makeContainer(-36, -191, 0.35);
-  makeContainer(36, -192, -0.35);
+    // Container yard — the mid-lane |x| < 4 stays clear (chase lane + pier
+    // approach); stacks flank it. One pile spilled toward the quay edge.
+    makeContainer(-12, -193, 0.12);
+    makeContainer(-12, -193, 0.12, 2.55);
+    makeContainer(-8.5, -196, -0.35);
+    makeContainer(-15.5, -197.5, 0.55);
+    makeContainer(12, -194, -0.15);
+    makeContainer(12, -194, -0.15, 2.55);
+    makeContainer(8.5, -197, 0.4);
+    makeContainer(15.5, -198.5, -0.5);
+    makeContainer(-26, -192, 1.5);
+    makeContainer(26, -193, 1.5);
+    makeContainer(-30, -196, 1.62, 0, true);
+    makeContainer(30, -197, 1.62, 0, true);
+    makeContainer(-36, -191, 0.35);
+    makeContainer(36, -192, -0.35);
 
-  // Warehouses flanking the yard.
-  makeWarehouse(-28, -199, 0);
-  makeWarehouse(28, -200, 0);
+    // Warehouses flanking the yard.
+    makeWarehouse(-28, -199, 0);
+    makeWarehouse(28, -200, 0);
 
-  // Gantry cranes straddling the container rows.
-  makeGantryCrane(-21, -197);
-  makeGantryCrane(23, -203);
+    // Gantry cranes straddling the container rows.
+    makeGantryCrane(-21, -197);
+    makeGantryCrane(23, -203);
+  }
 
   // The pier — walkway over the water to her boat. The south bound wall
   // stops the player around z ≈ -208; the pier visual extends past it so
@@ -655,8 +659,10 @@ function buildZoneDressing() {
   makeWreck(-5, -178, -1.15);
   makeWreck(-6.2, -183, 0.5, true);
   makeWreck(3, -186, 1.05);
-  makeContainer(-4.2, -168, 0.35, 0, true);
-  makeContainer(3.5, -190, -0.25, 0, true);
+  if (!state.cityKit) { // the harbour town has no containers
+    makeContainer(-4.2, -168, 0.35, 0, true);
+    makeContainer(3.5, -190, -0.25, 0, true);
+  }
   scatterDebris(0, -175, 8, 14);
 }
 

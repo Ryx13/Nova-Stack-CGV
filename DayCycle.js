@@ -49,12 +49,15 @@ const DAY = [
     fog: 0xc2a088, fogD: 0.0055, sunCol: 0xffb070, sun: 1.8, el: 3, disc: 0.9,
     hemiSky: 0xc8b8a8, hemiGnd: 0x3a3028, hemi: 0.3, ambCol: 0x5a5048, amb: 0.18, exp: 0.82,
     mist: 0xd9c4a6, mistA: 0.3, stars: 0 },
+  // Level 2, a little way into the chase: the sun clears the rooftops, so the
+  // street is no longer one long shadow and buildings cast crisp ones
+  { c: 1.15, sun: 2.6, el: 12, az: 85, hemi: 0.16, amb: 0.08 },
   // Level 2 ends / Level 3 begins: the sun up but still low and golden.
   // Level 2 is lit by its own sky as well, so the fills stay low and the
   // sky warm, or the whole street washes out white.
   { c: 2, top: 0x6a8cb4, hor: 0xf0cfa2, bot: 0x7a6656, glow: 0xffc890, gs: 0.7,
-    fog: 0xcfb494, fogD: 0.0035, sunCol: 0xffc488, sun: 2.4, el: 16, az: 95, disc: 0.85,
-    hemiSky: 0xd8c4ac, hemiGnd: 0x40362c, hemi: 0.25, ambCol: 0x5a5048, amb: 0.12, exp: 0.78,
+    fog: 0xcfb494, fogD: 0.0035, sunCol: 0xffc488, sun: 2.6, el: 24, az: 95, disc: 0.85,
+    hemiSky: 0xd8c4ac, hemiGnd: 0x40362c, hemi: 0.16, ambCol: 0x5a5048, amb: 0.08, exp: 0.78,
     mist: 0xe0caa8, mistA: 0 },
   // Level 3, the first switch or so: cloud coming in off the sea
   { c: 2.35, top: 0x8e9cab, hor: 0xc4ccd2, bot: 0x7a7e80, glow: 0xf4f2ec, gs: 0.2,

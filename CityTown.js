@@ -32,7 +32,7 @@ function seeded(a) {
     return ((t ^ t >>> 14) >>> 0) / 4294967296;
   };
 }
-const flat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.9, flatShading: true, ...extra });
+const flat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.9, flatShading: true, envMapIntensity: 0.5, ...extra });
 const inReach = (x0, x1, z0, z1) => Math.min(x0, x1) < BOUNDS.x && Math.max(x0, x1) > -BOUNDS.x && Math.min(z0, z1) < BOUNDS.zN && Math.max(z0, z1) > BOUNDS.zS;
 
 // Geometry collected per material, merged once at the end
@@ -372,7 +372,7 @@ function lifeguardTower(batch, x, z) {
   batch.add(red, new THREE.BoxGeometry(0.02, 0.5, 0.8).translate(x + 1.2, 6.2, z - 0.4)); // the red flag
 }
 function sandcastle(batch, x, z) {
-  const sand = flat(0xd0b888);
+  const sand = flat(0xb88a54);
   batch.add(sand, new THREE.CylinderGeometry(0.7, 0.8, 0.5, 8).translate(x, 0.3, z));
   for (const [dx, dz] of [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]]) {
     batch.add(sand, new THREE.CylinderGeometry(0.18, 0.2, 0.5, 6).translate(x + dx, 0.75, z + dz));
@@ -418,7 +418,7 @@ function buildWaterfront(batch, rnd, P) {
     const sd = P.z1 - P.beachTo, sz = (P.z1 + P.beachTo) / 2;
     const geo = new THREE.PlaneGeometry(w, sd, Math.ceil(w / 2), Math.ceil(sd / 1.5)).rotateX(-Math.PI / 2).translate(cx, 0, sz);
     const pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
-    const dry = new THREE.Color(0xdcc89e), wet = new THREE.Color(0xb09a72), c = new THREE.Color();
+    const dry = new THREE.Color(0xc89a62), wet = new THREE.Color(0x8a6640), c = new THREE.Color(); // warm brown sand
     for (let i = 0; i < pos.count; i++) {
       const vx = pos.getX(i), vz = pos.getZ(i), t = (P.z1 - vz) / sd; // 0 at the boardwalk .. 1 out in the water
       const dune = (1 - THREE.MathUtils.smoothstep(t, 0.05, 0.3)) * 0.22 * (0.5 + 0.5 * Math.sin(vx * 0.7 + vz * 1.3));
@@ -499,7 +499,7 @@ function buildSandDrifts(rnd, L) {
   for (let i = 0; i < 26; i++) {
     const px = 16 + rnd() * 32, py = 16 + rnd() * 32, r = 8 + rnd() * 16;
     const grad = g.createRadialGradient(px, py, 0, px, py, r);
-    grad.addColorStop(0, 'rgba(216,196,150,0.55)'); grad.addColorStop(1, 'rgba(216,196,150,0)');
+    grad.addColorStop(0, 'rgba(186,140,86,0.6)'); grad.addColorStop(1, 'rgba(186,140,86,0)');
     g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
   }
   const tex = new THREE.CanvasTexture(c);
