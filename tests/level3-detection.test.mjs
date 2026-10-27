@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {DetectionMemory} from '../Level3Detection.js';
+const sample={distance:6,facing:1,visible:true};
+const tick=(m,seconds,input)=>{for(let i=0;i<seconds*20;i++)m.update(.05,input);};
+const unseen=new DetectionMemory();tick(unseen,5,{...sample,visible:false});assert.equal(unseen.alert,false);
+const behind=new DetectionMemory();tick(behind,5,{...sample,facing:-1});assert.equal(behind.alert,false);
+const seen=new DetectionMemory();tick(seen,1.1,sample);assert.equal(seen.alert,true);
+tick(seen,10,{...sample,visible:false});assert.equal(seen.alert,false,'breaking sight lets search end');
+const low=new DetectionMemory();tick(low,3,{...sample,distance:12,crouching:true});assert.equal(low.alert,false);
+const sprint=new DetectionMemory();tick(sprint,1.5,{...sample,visible:false,moving:true,sprinting:true});assert.equal(sprint.alert,true);
+const shot=new DetectionMemory();shot.update(.016,{...sample,visible:false,loud:true});assert.equal(shot.alert,true);
+const close=new DetectionMemory();close.update(.016,{...sample,distance:1,visible:true,facing:-1});assert.equal(close.alert,true);
+console.log('PASS: cover, facing, crouch range, visible accumulation, search timeout, sprint noise, gunshot and proximity detection.');

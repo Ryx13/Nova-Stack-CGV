@@ -1,11 +1,16 @@
+import { createPuddleInstances } from './PuddleInstances.js';
+import { createStaticLampCache, installStreetLampBudget } from './StaticLampCache.js';
 import * as THREE from 'three';
+import { installHeightMist, mistEnabled } from './HeightMist.js';
 import * as CANNON from 'cannon-es';
 import { state } from './state.js';
+import {levelWeapon} from './WeaponSlots.js';
 import { finishRun } from './account.js';
 import {
   createFogMaterial, fogUniforms, createRainMaterial, rainUniforms,
   createPuddleMaterial, puddleUniforms, fireUniforms, toxicUniforms,
 } from './shaders.js';
+installHeightMist(fogUniforms);
 import { isMuted, onSoundChange } from './Music.js'; // master mute, shared with the music decks
 
 /* ======================================================================
@@ -175,6 +180,46 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.92;
 
 export const scene = new THREE.Scene();
+// Hybrid candidate: all static lamp contributions, six live lamps.
+export const staticLampCache = createStaticLampCache(renderer, scene, { gridStatic: true });
+installStreetLampBudget(renderer,scene,staticLampCache);
+// Reuse effect lights, expanding when needed so overlapping effects retain their lighting.
+const effectLightPools = [[], []];
+for (const pool of effectLightPools) {
+  for (let i = 0; i < 4; i++) {
+    const light = new THREE.PointLight(0xffffff, 0, 1, 2);
+    light.userData.effectInUse = false;
+    pool.push(light);
+    scene.add(light);
+  }
+}
+export function acquireEffectLight(color, intensity, distance, decay = 2, persistent = false) {
+  if (sunlightOnly()) return null;
+  const pool = effectLightPools[persistent ? 1 : 0];
+  let light = pool.find((slot) => !slot.userData.effectInUse);
+  if (!light) {
+    light = new THREE.PointLight(0xffffff, 0, 1, 2);
+    pool.push(light);
+    scene.add(light);
+  }
+  light.userData.effectInUse = true;
+  light.color.set(color);
+  light.intensity = intensity;
+  light.distance = distance;
+  light.decay = decay;
+  return light;
+}
+export function releaseEffectLight(light) {
+  if (!light) return;
+  light.intensity = 0;
+  light.userData.effectInUse = false;
+}
+
+// Register all authored lamps; the hybrid cache budgets only live illumination.
+export function registerStreetLight(source) {
+  scene.add(source);
+}
+
 const SKY_COLOR = 0x6e6258;
 scene.background = new THREE.Color(SKY_COLOR);
 scene.fog = new THREE.FogExp2(SKY_COLOR, 0.009);
@@ -271,7 +316,7 @@ scene.add(hemiLight);
 const sun = new THREE.DirectionalLight(0xffc48a, 1.15);
 sun.position.set(-80, 42, 30);
 sun.castShadow = true;
-sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.left = -120; sun.shadow.camera.right = 120;
 sun.shadow.camera.top = 120; sun.shadow.camera.bottom = -120;
 sun.shadow.camera.near = 1; sun.shadow.camera.far = 320;
@@ -424,10 +469,10 @@ const TIME_OF_DAY_CONFIG = {
     bgColor: SKY_COLOR,
     fogColor: SKY_COLOR,
     fogDensity: 0.009,
-    hemiSky: 0xe7c9a0, hemiGround: 0x1a1612, hemiIntensity: 0.55,
+    hemiSky: 0xb7c8dc, hemiGround: 0x35332d, hemiIntensity: 0.8,
     sunColor: 0xffc48a, sunIntensity: 0, sunVisible: false, // sun switched off — streetlights carry the night
     celestial: true, // stars + moon own the night sky
-    ambientColor: 0x3a322c, ambientIntensity: 0.28,
+    ambientColor: 0x68717e, ambientIntensity: 0.42,
     hazeColor: 0xb9c4cf, hazeOpacity: 0.5, hazeCoverage: 0.35,
     rainOn: false,
     puddlesOn: false,
@@ -504,14 +549,21 @@ export function applyTimeOfDay(mode) {
   state.timeOfDay = TIME_OF_DAY_CONFIG[mode] ? mode : 'night';
   const warm = state.timeOfDay === 'day' && state.warmDay && !state.clearDay;
   const clear = state.timeOfDay === 'day' && (state.clearDay || state.warmDay);
+  effectLightPools.forEach(pool => pool.forEach(light => { light.visible = !clear; }));
   const moonlit = state.timeOfDay === 'night' && state.moonlitNight;
-  const cfg = warm ? TIME_OF_DAY_CONFIG.warmDay
+  let cfg = warm ? TIME_OF_DAY_CONFIG.warmDay
     : clear ? TIME_OF_DAY_CONFIG.clearDay
     : moonlit ? TIME_OF_DAY_CONFIG.moonNight
     : TIME_OF_DAY_CONFIG[state.timeOfDay];
+  // Level 3's quarantine compound is deliberately darker; keep the change
+  // scoped to its night state so the other levels retain their lighting.
+  if (state.timeOfDay === 'night' && state.quarantineFacility === true) {
+    cfg = { ...cfg, hemiIntensity: cfg.hemiIntensity * 0.82, ambientIntensity: cfg.ambientIntensity * 0.82, fogDensity: cfg.fogDensity * 1.12, hazeOpacity: cfg.hazeOpacity * .7, bgColor: 0x0b1421, fogColor: 0x182535, hazeColor: 0x35475a };
+  }
   if (clear && !cfg.skyTex) cfg.skyTex = duskSkyTexture();
 
   sky.material.map = cfg.skyTex;
+  sky.material.color.setHex(state.timeOfDay === 'night' && state.quarantineFacility === true ? 0x8293a8 : 0xffffff);
   sky.material.needsUpdate = true;
   scene.background = new THREE.Color(cfg.bgColor);
   if (clear) {
@@ -535,6 +587,9 @@ export function applyTimeOfDay(mode) {
   }
   sun.color.setHex(cfg.sunColor);
   sun.intensity = cfg.sunIntensity;
+  // A zero-brightness sun still submits a shadow pass in Three.js.
+  // Night keeps the same lighting without that unused pass.
+  sun.castShadow = cfg.sunIntensity > 0;
   sunVisual.visible = cfg.sunVisible;
   stars.forEach((s) => { s.visible = cfg.celestial; });
   moonVisual.visible = cfg.celestial;
@@ -553,7 +608,7 @@ export function applyTimeOfDay(mode) {
   fogUniforms.uColor.value.setHex(cfg.hazeColor);
   fogUniforms.uOpacity.value = cfg.hazeOpacity;
   fogUniforms.uCoverage.value = cfg.hazeCoverage;
-  fog.visible = cfg.hazeVisible !== false;
+  mistEnabled.value = cfg.hazeVisible === false ? 0 : 1;
   // extractLight is built at module load, before the mode is known. Only
   // the depot mission ever turns it up, so with no depot (state.skipDepot,
   // Level 2) it would sit at zero yet still cost every lit pixel a light
@@ -743,19 +798,13 @@ const _sunFocus = new THREE.Vector3(), _sunTmp = new THREE.Vector3(), _up = new 
 const _sunBasisX = new THREE.Vector3(), _sunBasisY = new THREE.Vector3(), _sunBasisZ = new THREE.Vector3();
 
 /* ---------------------------------------------------------------------
-   FOG — a horizontal plane sitting low to the ground, tracking the
-   camera's x/z each frame (see updateWeatherFX below) so it always
-   covers the area around the player. Density (and *where* fog banks
-   sit at all) is computed per-fragment from real world position in
-   shaders.js, so patches stay anchored to fixed spots rather than
-   sliding around as the camera moves.
+   FOG — low mist is integrated along the view ray inside material fog.
+   Opaque surfaces and animated characters keep their normal depth tests.
+   There is no flat fog surface to intersect the player at waist height.
 --------------------------------------------------------------------- */
-const FOG_HEIGHT = 1.4;
-export const fog = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), createFogMaterial());
-fog.rotation.x = -Math.PI / 2;
-fog.position.y = FOG_HEIGHT;
-fog.renderOrder = 5;
-scene.add(fog);
+// Compatibility anchor only: low mist is now integrated into surface fog.
+// It no longer draws a horizontal plane through characters.
+export const fog = new THREE.Object3D();
 
 /* ---------------------------------------------------------------------
    RAIN — a flat card parented to the camera so it always fills the
@@ -785,21 +834,21 @@ const puddleGroup = new THREE.Group();
 scene.add(puddleGroup);
 const puddleMaterial = createPuddleMaterial();
 const PUDDLE_COUNT = 22;
+let puddleInstances = null;
+// Sort before WebGLObjects uploads instance matrices for this frame.
+const renderWithPuddles = renderer.render;
+renderer.render = function(renderScene, renderCamera) {
+  if (renderScene === scene && puddleGroup.visible) puddleInstances?.sort(renderCamera);
+  return renderWithPuddles.call(this, renderScene, renderCamera);
+};
 export function createPuddles(enabled) {
-  puddleGroup.clear();
+  puddleGroup.visible = enabled;
   if (!enabled) return;
-  for (let i = 0; i < PUDDLE_COUNT; i++) {
-    const puddle = new THREE.Mesh(new THREE.CircleGeometry(1, 16), puddleMaterial);
-    const w = 1.2 + Math.random() * 2.4;
-    const l = 0.9 + Math.random() * 1.8;
-    puddle.scale.set(w, l, 1);
-    puddle.rotation.x = -Math.PI / 2;
-    puddle.rotation.z = Math.random() * Math.PI;
-    const x = (Math.random() - 0.5) * (STREET_HALF_W * 2 - 2.5);
-    const z = 30 - Math.random() * (STREET_LENGTH + 60);
-    puddle.position.set(x, 0.009, z);
-    puddleGroup.add(puddle);
+  if (!puddleInstances) {
+    puddleInstances = createPuddleInstances(puddleMaterial, PUDDLE_COUNT, STREET_HALF_W, STREET_LENGTH);
+    puddleGroup.add(puddleInstances.mesh);
   }
+  puddleInstances.scatter();
 }
 
 /* ---------------------------------------------------------------------
@@ -963,21 +1012,50 @@ export function setLoadUI() {
 // depot guards, requesting pointer lock, etc.) is registered from
 // Actions.js via onAssetsReady() instead of hardcoded here.
 let readyCallback = null;
+let readyInFlight = false;
 export function onAssetsReady(cb) { readyCallback = cb; }
 export function maybeReady() {
+  // A module or level boot can fail after Scene.js loads. The model
+  // timeout must never turn that failed launch into an empty game HUD.
+  if (state.loadFailed || !readyCallback || readyInFlight || state.readyShown) return;
   setLoadUI();
-  if (state.readyShown) return;
   if (state.loadFlags.player && state.loadFlags.zombie) {
-    state.readyShown = true;
-    if (dom.loadFill) dom.loadFill.style.width = '100%';
-    setTimeout(() => {
-      dom.loading.classList.add('hidden');
-      dom.hud.classList.remove('hidden');
-      document.body.classList.add('in-level'); // drops the sound chip below the radar (#sound-btn rule in index.html)
-      if (readyCallback) readyCallback();
-    }, 200);
+    readyInFlight = true;
+    if (dom.loadStatus) dom.loadStatus.textContent = 'PREPARING THE SCENE…';
+    if (dom.loadFill) dom.loadFill.style.width = '95%';
+    Promise.resolve().then(() => readyCallback()).then(() => {
+      if (state.loadFailed) return;
+      requestAnimationFrame(() => {
+        if (state.loadFailed) return;
+        state.readyShown = true;
+        if (dom.loadFill) dom.loadFill.style.width = '100%';
+        dom.loading.classList.add('hidden');
+        dom.hud.classList.remove('hidden');
+        document.body.classList.add('in-level');
+      });
+    }).catch(showRenderFailure);
   }
 }
+export function showRenderFailure(error) {
+  state.loadFailed = true;
+  state.paused = true;
+  console.error('[game] The scene could not render:', error);
+  dom.hud.classList.add('hidden');
+  dom.loading.classList.remove('hidden');
+  if (dom.loadStatus) dom.loadStatus.textContent = 'The scene could not start. Reload to try again.';
+  if (!document.getElementById('render-retry')) {
+    const button = document.createElement('button');
+    button.id = 'render-retry';
+    button.type = 'button';
+    button.textContent = 'Reload game';
+    button.addEventListener('click', () => location.reload());
+    dom.loading.appendChild(button);
+  }
+}
+dom.canvas.addEventListener('webglcontextlost', (event) => {
+  event.preventDefault();
+  showRenderFailure(new Error('The graphics context was lost'));
+});
 export function markLoaded(which) {
   state.loadFlags[which] = true;
   maybeReady();
@@ -1055,10 +1133,15 @@ export function updateShieldHUD() {
 }
 export function updateWeaponHUD() {
   if (!dom.weaponLabel) return;
-  dom.weaponLabel.textContent = state.currentWeapon === 'gun' ? 'PISTOL' : 'KNIFE';
-  dom.weaponLabel.style.color = state.currentWeapon === 'gun' ? '#fff4c2' : '#ffd8a8';
+  const extra=levelWeapon(state.currentWeapon);
+  dom.weaponLabel.textContent = extra?.label?.toUpperCase() || (state.currentWeapon === 'gun' ? 'PISTOL' : 'KNIFE');
+  dom.weaponLabel.style.color = extra?.color || (state.currentWeapon === 'gun' ? '#fff4c2' : '#ffd8a8');
+  const name=document.getElementById('weapon-name');if(name)name.textContent=extra?.label || (state.currentWeapon==='gun'?'9mm Sidearm':'Combat knife');
 }
 export function updateAmmoHUD() {
+  const extra=levelWeapon(state.currentWeapon);
+  if(extra){dom.ammo.innerHTML=`<span>${extra.charges()}</span><small> / ${extra.capacity}</small>`;return;}
+  if(state.currentWeapon==='knife'){dom.ammo.textContent='MELEE';return;}
   const low = state.ammoMag <= 3 ? ' id="low-ammo"' : '';
   dom.ammo.innerHTML = `<span${low}>${state.ammoMag}</span><small> / ${state.ammoReserve}</small>`;
 }

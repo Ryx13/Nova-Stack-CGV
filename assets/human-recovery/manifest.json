@@ -1,0 +1,41 @@
+{
+  "assets": [
+    {
+      "variant": "walker",
+      "source": "zombie_running_on_metel_maniac.glb",
+      "export": "human_walker.glb",
+      "bones": 66,
+      "clean_skin_polygons": 1676,
+      "clean_skin_atlases": 1,
+      "blender_actions": [
+        "recover",
+        "recover_pose"
+      ],
+      "gltf_animation_names": [
+        "recover",
+        "recover"
+      ]
+    },
+    {
+      "variant": "runner",
+      "source": "model-rigged.glb",
+      "export": "human_runner.glb",
+      "bones": 52,
+      "clean_skin_polygons": 9379,
+      "clean_skin_atlases": 1,
+      "blender_actions": [
+        "recover",
+        "recover_pose"
+      ],
+      "gltf_animation_names": [
+        "recover",
+        "recover"
+      ],
+      "recovery_head_source": "characters/viper.glb",
+      "editable_source": "human_runner_source.blend",
+      "skin_treatment": "Intact fitted human face, natural hair, neck and hand vertex colours; original runner clothing and recovery movement."
+    }
+  ],
+  "skin_treatment": "Neutral skin atlas rebuilt from original diffuse detail under rasterized skin-polygon UV coverage (glTF top-left V convention). Clothing/hair preserved. Walker mask removed only on recovery clones.",
+  "face_animation": "Shared, calibrated head-bound eyelids/eyes; sleeping at rest, waking during recognition close-up."
+}

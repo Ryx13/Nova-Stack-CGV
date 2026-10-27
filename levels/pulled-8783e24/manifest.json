@@ -1,0 +1,141 @@
+{
+  "commit": "8783e24",
+  "modules": {
+    "Actions.js": {
+      "kind": "exact pulled source",
+      "targetSha256": "5992a5d8319e63f0117ac68d9cb8a20e93e8c62619fa9c9daf17c6134dc4a9ce",
+      "runtimeSha256": "5992a5d8319e63f0117ac68d9cb8a20e93e8c62619fa9c9daf17c6134dc4a9ce"
+    },
+    "Level1.js": {
+      "kind": "exact pulled source",
+      "targetSha256": "26485fd4cb183d065d36c6161a725ead6da24824fa6396c725e7c224ecbb830f",
+      "runtimeSha256": "26485fd4cb183d065d36c6161a725ead6da24824fa6396c725e7c224ecbb830f"
+    },
+    "Level1Intro.js": {
+      "kind": "exact pulled source",
+      "targetSha256": "56714bf6587e148d84037834c4ee7d1f2856f9ce0c0e4bc1ad7a4f2b0993efb5",
+      "runtimeSha256": "56714bf6587e148d84037834c4ee7d1f2856f9ce0c0e4bc1ad7a4f2b0993efb5"
+    },
+    "Level2.js": {
+      "kind": "exact pulled source",
+      "targetSha256": "75fd0a316b90cdc2978c676efcd68253a8604279d21038bec07b6d92fb576755",
+      "runtimeSha256": "75fd0a316b90cdc2978c676efcd68253a8604279d21038bec07b6d92fb576755"
+    },
+    "Level2Config.js": {
+      "kind": "exact pulled source",
+      "targetSha256": "898e04a1f4f06c31cd0319a61ca056882a576def08f67d4671fdcd084be9d75c",
+      "runtimeSha256": "898e04a1f4f06c31cd0319a61ca056882a576def08f67d4671fdcd084be9d75c"
+    },
+    "Level2Intro.js": {
+      "kind": "exact pulled source",
+      "targetSha256": "ac3387164cd22acc7569561b7be9906be19c20a268388dac709558350abebe77",
+      "runtimeSha256": "ac3387164cd22acc7569561b7be9906be19c20a268388dac709558350abebe77"
+    },
+    "Level2Surroundings.js": {
+      "kind": "exact pulled source",
+      "targetSha256": "89403dfaf4f5f7a778c567c11acea26545c57fe761067e4ce6ca44154a8d6768",
+      "runtimeSha256": "89403dfaf4f5f7a778c567c11acea26545c57fe761067e4ce6ca44154a8d6768"
+    },
+    "Movement.js": {
+      "kind": "exact pulled source",
+      "targetSha256": "685f0442667f0b250b07ca7ac885c38f8ee3d8e78dfd16a8233cbf5d775b8dff",
+      "runtimeSha256": "685f0442667f0b250b07ca7ac885c38f8ee3d8e78dfd16a8233cbf5d775b8dff"
+    },
+    "Music.js": {
+      "kind": "host bridge; host source matches commit apart from line endings",
+      "targetSha256": "481d6d0070dc97c3382bbb1f617ff9471fb7c11e9fe0fe7cae8d5ab1793bc96b",
+      "runtimeSha256": "9cfb31deb0d6d0218f1ec24aa9840c95db20df4bd623c84d1963de0fa06ffc0d"
+    },
+    "PowerUps.js": {
+      "kind": "pulled source; explosion URL scoped to pulled asset",
+      "targetSha256": "9d130710de20b416bb67f9f8d6376ac4abd63e7ac2d44e7b25faba051b002cb1",
+      "runtimeSha256": "a71994bbf7e46e770f29da5de02ce4b5c789f4d1aa1281032b1e091521aa7d25"
+    },
+    "Scene.js": {
+      "kind": "pulled source plus authorised stationary-lamp/puddle update",
+      "targetSha256": "42745d15ca283728272391886efa72ef4b8c12aa6c76655987a9af1bcb7b5a1a",
+      "runtimeSha256": "ffae83141ec07cf3106c96820232c3a75afecff92684db7de7dd163417288a0f",
+      "baselineRuntimeSha256": "42745d15ca283728272391886efa72ef4b8c12aa6c76655987a9af1bcb7b5a1a"
+    },
+    "StreetAtmosphere.js": {
+      "kind": "exact pulled source",
+      "targetSha256": "d88cb04012ec25226c3763335ee6c033a8a43556f7e86ba812b193ad23623840",
+      "runtimeSha256": "d88cb04012ec25226c3763335ee6c033a8a43556f7e86ba812b193ad23623840"
+    },
+    "VendingMachine.js": {
+      "kind": "exact pulled source",
+      "targetSha256": "235e0263ebd9ffc4f87d417a0a649339235950b862a0f3fc87baeda8a03035a7",
+      "runtimeSha256": "235e0263ebd9ffc4f87d417a0a649339235950b862a0f3fc87baeda8a03035a7"
+    },
+    "account.js": {
+      "kind": "host bridge; host source matches commit apart from line endings",
+      "targetSha256": "f30a03962add2b76aba70eebefa257409a43965d7e3cc7b66ed33691786a284f",
+      "runtimeSha256": "b49f94e064ff7c221d7abfe6e6f4275025932b75404b0dd4aa1e721cf58ca2dd"
+    },
+    "characters.js": {
+      "kind": "pulled source plus authorised stationary-lamp/puddle update",
+      "targetSha256": "4d55f8bd763844f3b404cedb7929862d668f667f6c3b1bc8e949d35b1663b30b",
+      "runtimeSha256": "9449123d29f574ac0816d9b4d00e944312c2e20fd94bfc845eb202e2b2d4d6a6",
+      "baselineRuntimeSha256": "4d55f8bd763844f3b404cedb7929862d668f667f6c3b1bc8e949d35b1663b30b"
+    },
+    "mergeStatic.js": {
+      "kind": "pulled source plus authorised stationary-lamp/puddle update",
+      "targetSha256": "0a391f370ca1405db724fee32c5eed22a76ff1433ba7f26ab60a41820166a1a6",
+      "runtimeSha256": "12fa74f343b928c1548fbe4c510f9eadc578f629b04c68692049c7be4eec1cd9",
+      "baselineRuntimeSha256": "0a391f370ca1405db724fee32c5eed22a76ff1433ba7f26ab60a41820166a1a6"
+    },
+    "roster.js": {
+      "kind": "host bridge; host source matches commit apart from line endings",
+      "targetSha256": "33c040f57c8fc999e93f30997df2d10754cab396cf7536a3a7fbbee164d38676",
+      "runtimeSha256": "ce192de1a975936b7d430ec3bbb0724fdeda9fab749320a5eb0b6cc81277b9e8"
+    },
+    "saferoomSupplyCatalog.js": {
+      "kind": "exact pulled source",
+      "targetSha256": "baff4b6b96e80e9ff37f2302c9dabafc6a8744f035af632bd5fccdf309d94d78",
+      "runtimeSha256": "baff4b6b96e80e9ff37f2302c9dabafc6a8744f035af632bd5fccdf309d94d78"
+    },
+    "shaders.js": {
+      "kind": "pulled source plus authorised stationary-lamp/puddle update",
+      "targetSha256": "e8ada2846f019cb9a9f9efda6e7c20b8c8fdef1e4f9ff76db93cfa831a5d7a0d",
+      "runtimeSha256": "14e07a443dda2b02c45343ebdc722183db3d6310c7257279fb7b0331985e5bcd",
+      "baselineRuntimeSha256": "e8ada2846f019cb9a9f9efda6e7c20b8c8fdef1e4f9ff76db93cfa831a5d7a0d"
+    },
+    "state.js": {
+      "kind": "host bridge; host source matches commit apart from line endings",
+      "targetSha256": "7d2fbdc0f0ded2eeefb8fd4c849873a64530cb29c4f222efc6855c0814b81ec0",
+      "runtimeSha256": "728f9e74eb562c5c124306600ef580ac2692c8e3faa7555cc85f3d6eef060af3"
+    },
+    "streetDressing.js": {
+      "kind": "exact pulled source",
+      "targetSha256": "232b6662dc52b6eefddde7b5df5c02946a2f73be75be1f28668611cff2a160b5",
+      "runtimeSha256": "232b6662dc52b6eefddde7b5df5c02946a2f73be75be1f28668611cff2a160b5"
+    }
+  },
+  "explosionSha256": "63f46c6aabc220efe6e5ac78243bf57cc9e24bb1602b32e5eefedb675dde57fe",
+  "authorisedOverrides": {
+    "date": "2026-10-20",
+    "reason": "User requested stationary lamp calculation caching and shared instanced road puddles after the rollback",
+    "changedModules": {
+      "Scene.js": {
+        "before": "42745d15ca283728272391886efa72ef4b8c12aa6c76655987a9af1bcb7b5a1a",
+        "after": "ffae83141ec07cf3106c96820232c3a75afecff92684db7de7dd163417288a0f"
+      },
+      "characters.js": {
+        "before": "4d55f8bd763844f3b404cedb7929862d668f667f6c3b1bc8e949d35b1663b30b",
+        "after": "9449123d29f574ac0816d9b4d00e944312c2e20fd94bfc845eb202e2b2d4d6a6"
+      },
+      "shaders.js": {
+        "before": "e8ada2846f019cb9a9f9efda6e7c20b8c8fdef1e4f9ff76db93cfa831a5d7a0d",
+        "after": "14e07a443dda2b02c45343ebdc722183db3d6310c7257279fb7b0331985e5bcd"
+      },
+      "mergeStatic.js": {
+        "before": "0a391f370ca1405db724fee32c5eed22a76ff1433ba7f26ab60a41820166a1a6",
+        "after": "12fa74f343b928c1548fbe4c510f9eadc578f629b04c68692049c7be4eec1cd9"
+      }
+    },
+    "sharedHelpers": {
+      "StaticLampCache.js": "68f023b483a77e5ebf2ab1e43d177fb6c6e36c38718999a958e33a78b4031399",
+      "PuddleInstances.js": "98a04b4814fc137f952f6468c11b68b762cece2c24965076aa026d499a246ff5"
+    }
+  }
+}

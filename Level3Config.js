@@ -23,3 +23,6 @@ state.skipDepot = true;
 // what Level 1 already fetches, so the eager boot path is fine as a
 // first pass — worth revisiting only if the compound ends up adding new
 // models later (see Level3.md, "What's omitted / next").
+
+// This level occupies industrial quarantine grounds, with the city in the distance.
+state.quarantineFacility = true;

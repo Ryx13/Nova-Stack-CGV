@@ -22,6 +22,7 @@ import { playStoryboard, playLevelTransition } from './Intro.js';
 
 import { initAccountUI, sessionReady, showAuth, takeResumeRequest } from './account.js';
 import { getSession } from './cloud.js';
+import { state } from './state.js';
 import { showCharacterSelect, hideCharacterSelect, disposeCharacterSelect } from './characterSelect.js';
 import { initMusic, setMusicContext, isMuted, handleSoundToggle, onSoundChange } from './Music.js';
 
@@ -47,6 +48,7 @@ function initIntroScreen() {
     if (entering) return;
     entering = true;
     introScreen.classList.add('hidden');
+    try {
     let seen = false;
     try { seen = localStorage.getItem('deadway.intro.v2') === 'done'; } catch {}
     if (!seen) {
@@ -58,6 +60,13 @@ function initIntroScreen() {
     entering = false;
     introScreen.classList.add('hidden');
     goToCharacterSelect();
+    } catch (error) {
+      entering = false;
+      console.error('Opening tutorial failed:', error);
+      document.getElementById('safe-room-ui')?.remove();
+      introScreen.classList.remove('hidden');
+      enterBtn.textContent = 'RETRY ENTERING THE CITY';
+    }
   };
   // Intro -> character select -> level select. Back walks the same path.
   const goToCharacterSelect = () => {
@@ -156,6 +165,7 @@ async function launchLevel(levelId, mode) {
   const loading = document.getElementById('loading');
   const loadLevel = LEVEL_LOADERS[levelId];
   if (!loadLevel) return;
+  state.loadFailed = false;
   if (loading) loading.classList.remove('hidden');
   disposeCharacterSelect(); // the level brings its own renderer
   // Levels 1 and 2 share the Dark Ambience loop; Level 3 gets Demon Lord.
@@ -164,10 +174,33 @@ async function launchLevel(levelId, mode) {
     const levelModule = await loadLevel();
     levelModule.startLevel(mode);
   } catch (err) {
+    state.loadFailed = true;
     console.error(`Level ${levelId} failed to load:`, err);
     if (loading) {
       const status = document.getElementById('load-status');
-      if (status) status.textContent = 'FAILED TO LOAD — see console';
+      if (status) status.textContent = 'Could not start the game. Refresh to try again.';
+      if (String(levelId) === '3') {
+        document.getElementById('level3-startup-error')?.remove();
+        const details = document.createElement('details');
+        details.id = 'level3-startup-error';
+        details.style.cssText = 'max-width:min(640px,90vw);margin:14px auto;color:#e8d9b9;font:13px/1.5 Arial,sans-serif;letter-spacing:0;text-transform:none';
+        const summary = document.createElement('summary');
+        summary.textContent = 'Show startup error';
+        summary.style.cursor = 'pointer';
+        const cause = document.createElement('pre');
+        cause.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;text-align:left;padding:12px;background:#111;border:1px solid #544831;max-height:160px;overflow:auto;user-select:text';
+        cause.textContent = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+        details.append(summary, cause);
+        loading.appendChild(details);
+      }
+      if (!document.getElementById('render-retry')) {
+        const retry = document.createElement('button');
+        retry.id = 'render-retry';
+        retry.type = 'button';
+        retry.textContent = 'Reload game';
+        retry.addEventListener('click', () => location.reload());
+        loading.appendChild(retry);
+      }
     }
   }
 }

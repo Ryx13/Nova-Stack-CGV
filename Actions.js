@@ -1,10 +1,15 @@
+import {raycastAnimatedTargets} from './AnimatedRaycast.js';
+import {stepPlayerPhysics} from './PhysicsStep.js';
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { state } from './state.js';
 import { createStreetAtmosphere } from './StreetAtmosphere.js';
 import { updateLocomotion } from './Movement.js';
-import { markStaticSince } from './mergeStatic.js';
+import { RayCandidates } from './RayCandidates.js';
+import { addContactShading } from './ContactShading.js';
+import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
 import { retryLevel } from './account.js';
+import {levelWeapon,levelWeaponIds,nextWeapon} from './WeaponSlots.js';
 import {
   scene, world, camera, renderer, dom, sfx, sky,
   pushKillFeed, doDeath, doWin, checkExtraction, updateExtractRing,
@@ -13,7 +18,7 @@ import {
   forwardFromYaw, rightFromYaw,
   STREET_HALF_W, ZOMBIE_SPAWN_INTERVAL,
   updateFuelHUD as updateFuelHUDBase,
-  applyTimeOfDay, updateWeatherFX, addLight,
+  applyTimeOfDay, updateWeatherFX, addLight, showRenderFailure,
 } from './Scene.js';
 // Actions.js and characters.js import from each other (characters.js needs
 // damagePlayer/spawnHitSpark/spawnBlood for zombie hits; Actions.js needs
@@ -27,11 +32,11 @@ import {
   carVis, chassisBody, vehicle, carSpawn, CAR_MAX_FUEL,
   FRONT_WHEELS, REAR_WHEELS, MAX_STEER, MAX_ENGINE_FORCE, MAX_BRAKE_FORCE, HANDBRAKE_FORCE,
   viewmodelGun, knifeThirdPerson, knifeViewModel,
-  syncHandGun, setPlayerAction, groundClampRig, lerpAngle, checkVehicleRollover,
+  syncHandGun, setPlayerAction, playPlayerGesture, groundClampRig, lerpAngle, checkVehicleRollover,
   ZOMBIE_TARGET_HEIGHT,
   loadMainCharacter, loadZombies, loadCars, loadBuildings, loadTrashCans, loadObstacles,
   loadStreetSurface, spawnDepotGuards, spawnZombie, updateZombies,
-  adjustPlayerScale,
+  adjustPlayerScale, renderViewmodels, warmViewmodels,
 } from './characters.js';
 import {
   loadBarrels, initShield,
@@ -45,7 +50,11 @@ import {
    register nothing and every hook below no-ops for them.
 --------------------------------------------------------------------- */
 const levelTicks = [];
+const levelPreTicks = [];
+const levelPreparations = [];
+export function registerLevelPreparation(fn) { levelPreparations.push(fn); }
 export function registerLevelTick(fn) { levelTicks.push(fn); }
+export function registerLevelPreTick(fn) { levelPreTicks.push(fn); }
 // Key handlers a level module drops in, e.g. { KeyE: fn, KeyG: fn }.
 export const levelKeyHooks = {};
 
@@ -80,8 +89,73 @@ export function updateFuelHUD(maxFuel = CAR_MAX_FUEL) {
 }
 
 const raycaster = new THREE.Raycaster();
+const shotBounds = new THREE.Box3();
+const shotMatrix = new THREE.Matrix4();
+const shotCenter = new THREE.Vector3();
+const shotMin = new THREE.Vector3();
+const shotMax = new THREE.Vector3();
+const skinWeightsValid = new WeakMap();
+const shotTargets = [];
+const shotHits = [];
+
+function canBoundSkin(geometry) {
+  if (skinWeightsValid.has(geometry)) return skinWeightsValid.get(geometry);
+  const weights = geometry.attributes.skinWeight;
+  let valid = !!weights && weights.itemSize === 4;
+  for (let i = 0; valid && i < weights.count; i++) {
+    const x = weights.getX(i), y = weights.getY(i), z = weights.getZ(i), w = weights.getW(i);
+    valid = Number.isFinite(x + y + z + w) && Math.min(x, y, z, w) >= 0 && Math.abs(x + y + z + w - 1) < 1e-6;
+  }
+  skinWeightsValid.set(geometry, valid);
+  return valid;
+}
+
+function expandShotBounds(sphere, matrix) {
+  shotCenter.copy(sphere.center).applyMatrix4(matrix);
+  const e = matrix.elements;
+  // Frobenius norm bounds stretching even when parent transforms shear.
+  const stretch = Math.hypot(e[0], e[1], e[2], e[4], e[5], e[6], e[8], e[9], e[10]);
+  const radius = sphere.radius * stretch;
+  const padding = (Math.max(Math.abs(shotCenter.x), Math.abs(shotCenter.y), Math.abs(shotCenter.z)) + radius + 1) * 1e-5;
+  shotMin.copy(shotCenter).addScalar(-radius - padding);
+  shotMax.copy(shotCenter).addScalar(radius + padding);
+  shotBounds.expandByPoint(shotMin);
+  shotBounds.expandByPoint(shotMax);
+}
+
+function mayIntersectShot(root) {
+  shotBounds.makeEmpty();
+  let unknown = false;
+  root.updateWorldMatrix(true, true);
+  root.traverse(mesh => {
+    if (!mesh.isMesh || unknown) return;
+    const geometry = mesh.geometry;
+    if (!geometry || mesh.isInstancedMesh || mesh.morphTargetInfluences?.some(weight => weight !== 0)) { unknown = true; return; }
+    if (!geometry.boundingSphere) geometry.computeBoundingSphere();
+    const sphere = geometry.boundingSphere;
+    if (!sphere || !Number.isFinite(sphere.radius)) { unknown = true; return; }
+    if (mesh.isSkinnedMesh) {
+      if (!mesh.skeleton || !canBoundSkin(geometry)) { unknown = true; return; }
+      // Every posed vertex is a convex blend of these bone transforms.
+      // Enclosing every transformed source sphere also encloses that blend;
+      // this avoids CPU skinning every vertex just to reject an off-aim rig.
+      const { bones, boneInverses } = mesh.skeleton;
+      if (!bones.length) { unknown = true; return; }
+      for (let i = 0; i < bones.length; i++) {
+        if (!bones[i] || !boneInverses[i]) { unknown = true; return; }
+        shotMatrix.copy(mesh.matrixWorld).multiply(mesh.bindMatrixInverse)
+          .multiply(bones[i].matrixWorld).multiply(boneInverses[i]).multiply(mesh.bindMatrix);
+        expandShotBounds(sphere, shotMatrix);
+      }
+    } else {
+      expandShotBounds(sphere, mesh.matrixWorld);
+    }
+  });
+  return unknown || shotBounds.isEmpty() || raycaster.ray.intersectsBox(shotBounds);
+}
+
 const sparkGeo = new THREE.SphereGeometry(0.05, 6, 6);
-const sparkMat = new THREE.MeshBasicMaterial({ color: 0xffcc55 });
+const sparkMat = new THREE.MeshBasicMaterial({ color: 0xffcc55, transparent: true });
 
 export function spawnHitSpark(pos) {
   for (let i = 0; i < 6; i++) {
@@ -103,19 +177,24 @@ export function spawnBlood(pos) {
   decal.rotation.x = -Math.PI / 2;
   decal.position.set(pos.x, 0.04, pos.z);
   scene.add(decal);
-  setTimeout(() => scene.remove(decal), 20000);
+  setTimeout(() => {
+    scene.remove(decal);
+    decal.geometry.dispose();
+    decal.material.dispose();
+  }, 20000);
 }
 
 function activeGunMesh() {
   return state.firstPerson ? viewmodelGun : playerVis.gunPivot;
 }
+// Keep the light count stable: adding/removing a light for every shot
+// forces new material shader variants, often right as the player fires.
+const muzzleLight = new THREE.PointLight(0xffcc66, 0, 7, 2);
+let muzzleFlashTime = 0;
 function spawnMuzzleFlash() {
-  const flash = new THREE.PointLight(0xffcc66, 8, 7, 2);
-  const gunWorldPos = new THREE.Vector3();
-  activeGunMesh().getWorldPosition(gunWorldPos);
-  flash.position.copy(gunWorldPos);
-  addLight(scene, flash);
-  setTimeout(() => scene.remove(flash), 50);
+  activeGunMesh().getWorldPosition(muzzleLight.position);
+  muzzleLight.intensity = 8;
+  muzzleFlashTime = 0.05;
 }
 const tracerMat = new THREE.MeshBasicMaterial({ color: 0xfff4c2, transparent: true, opacity: 0.95 });
 function spawnTracer(from, to) {
@@ -144,31 +223,49 @@ function hasAnyAmmo() { return state.ammoMag > 0 || state.ammoReserve > 0; }
 function setWeaponVisualsVisible() {
   const showGun = state.currentWeapon === 'gun';
   if (playerVis.gun) playerVis.gun.visible = showGun;
-  if (knifeThirdPerson) knifeThirdPerson.visible = !showGun;
+  if (knifeThirdPerson) knifeThirdPerson.visible = state.currentWeapon === 'knife';
   if (viewmodelGun.children[0]) viewmodelGun.children[0].visible = showGun;
-  if (knifeViewModel) knifeViewModel.visible = !showGun;
+  viewmodelGun.visible = state.firstPerson && showGun && !state.inVehicle;
+  if (knifeViewModel) knifeViewModel.visible = state.firstPerson && state.currentWeapon === 'knife' && !state.inVehicle;
 }
 export function switchWeapon(weapon) {
-  if (state.narrativeBlocked) return;
+  if (state.narrativeBlocked || state.paused || state.isDead || state.dying || state.cinematic || state.inVehicle) return;
+  if (weapon !== 'gun' && weapon !== 'knife' && !levelWeapon(weapon)) return;
   if (weapon === 'gun' && !hasAnyAmmo()) {
     pushKillFeed('No ammo left — knife only');
     weapon = 'knife';
   }
   if (weapon === state.currentWeapon) return;
+  const previous = levelWeapon(state.currentWeapon);
   state.currentWeapon = weapon;
+  state.firePressed = false;
+  state.reloading = false; state.reloadTimer = 0; dom.reloadText.classList.add('hidden');
   setWeaponVisualsVisible();
   updateWeaponHUD();
-  pushKillFeed(state.currentWeapon === 'gun' ? 'Switched to pistol' : 'Switched to knife');
+  updateAmmoHUD();
+  previous?.onSwitch?.();levelWeapon(weapon)?.onSwitch?.();
+  pushKillFeed('Switched to '+(levelWeapon(weapon)?.label || (weapon==='gun'?'pistol':'knife')));
 }
 // Forces the knife if ammo has fully run out (both mag and reserve empty).
 // Called after every shot and after reload attempts/failures.
 function enforceAmmoWeaponRule() {
-  if (!hasAnyAmmo() && state.currentWeapon !== 'knife') {
+  if (!hasAnyAmmo() && state.currentWeapon === 'gun') {
     state.currentWeapon = 'knife';
     setWeaponVisualsVisible();
     updateWeaponHUD();
+    updateAmmoHUD();
     pushKillFeed('Out of ammo — switched to knife');
   }
+}
+
+function requestPointerLockSafe() {
+  if (!dom.canvas.isConnected || document.pointerLockElement === dom.canvas) return;
+  try {
+    // Loading, hidden previews, and browser gesture restrictions can reject
+    // pointer lock. Keep the game running; a canvas click retries it.
+    const request = dom.canvas.requestPointerLock();
+    if (request && typeof request.catch === 'function') request.catch(() => {});
+  } catch { /* The existing canvas click remains the retry path. */ }
 }
 
 export function togglePause() {
@@ -190,7 +287,7 @@ export function togglePause() {
     // instead of requiring an extra click just to get mouse-look back —
     // browsers allow this since the Tab press / button click that got us
     // here counts as the required direct user gesture.
-    dom.canvas.requestPointerLock()?.catch(() => {});
+    requestPointerLockSafe();
   }
 }
 
@@ -223,12 +320,15 @@ function zombieCapsuleHit() {
 }
 
 export function tryShoot() {
-  if (state.narrativeBlocked) return;
+  if (state.narrativeBlocked || state.paused || state.isDead || state.dying || state.cinematic) return;
+  const extra=levelWeapon(state.currentWeapon);
+  if(extra){if(!state.inVehicle&&extra.fire())triggerShootAnimSafe();return;}
   if (state.currentWeapon !== 'gun') { tryKnife(); return; }
   if (state.inVehicle || state.isDead || state.reloading || state.fireCooldown > 0) return;
   if (state.ammoMag <= 0) { startReload(); return; }
   state.fireCooldown = FIRE_RATE;
   state.ammoMag--;
+  levelKeyHooks.onGunshot?.();
   updateAmmoHUD();
   spawnMuzzleFlash();
   sfx.shoot();
@@ -242,16 +342,16 @@ export function tryShoot() {
   // Raycast against each alive zombie's actual mesh group (recursive), not
   // just the abstract hitbox capsule, so a visually-on-target shot can't
   // silently miss due to hitbox/model misalignment.
-  const targets = [];
-  state.zombies.forEach((z) => { if (z.alive) targets.push(z.mesh); });
-  state.explosiveBarrels.forEach((b) => { if (!b.exploded) targets.push(b.mesh); });
-  let hits = raycaster.intersectObjects(targets, true);
-  // Backup hitbox: the model raycast can miss a tall or oddly-skinned
-  // infected (the ray is tested against its bind-pose bounds), so a shot
-  // that visibly lands is also tested against a capsule around each one.
-  // Whichever is nearer along the ray wins.
+  shotTargets.length = 0;
+  shotHits.length = 0;
+  state.zombies.forEach((z) => { if (z.alive && mayIntersectShot(z.mesh)) shotTargets.push(z.mesh); });
+  state.explosiveBarrels.forEach((b) => { if (!b.exploded) shotTargets.push(b.mesh); });
+  const hits = raycastAnimatedTargets(raycaster, shotTargets, shotHits);
+  // Retain the incoming capsule fallback without masking a precise weak-point hit.
   const cap = zombieCapsuleHit();
-  if (cap && (!hits.length || cap.distance < hits[0].distance)) hits = [cap, ...hits];
+  const sameWeakPoint = hits.length && hits[0].object.userData.guardianWeakPoint && cap && hits[0].object.userData.owner === cap.object.userData.owner;
+  if (cap && !sameWeakPoint && (!hits.length || cap.distance < hits[0].distance)) hits.unshift(cap);
+
   const muzzlePos = new THREE.Vector3();
   activeGunMesh().getWorldPosition(muzzlePos);
   const tracerEnd = hits.length
@@ -264,8 +364,9 @@ export function tryShoot() {
       owner.takeDamage();
       showHitmarker();
     } else if (owner) {
-      const headshot = hits[0].point.y > owner.mesh.position.y + 1.42 * Math.max(1, owner.mesh.scale.y);
-      owner.takeDamage(headshot ? GUN_DAMAGE * 1.85 : GUN_DAMAGE, headshot);
+  const headshot = hits[0].point.y > owner.mesh.position.y + 1.42 * Math.max(1, owner.mesh.scale.y);
+  owner.takeDamage(headshot ? GUN_DAMAGE * 1.85 : GUN_DAMAGE, headshot, !!hits[0].object.userData.guardianWeakPoint);
+
       showHitmarker();
     }
   }
@@ -282,6 +383,7 @@ export function tryMelee() {
   if (state.narrativeBlocked) return;
   if (state.inVehicle || state.isDead || state.meleeTimer > 0) return;
   state.meleeTimer = 0.38;
+  playPlayerGesture('melee', state.meleeTimer);
   sfx.melee();
   const playerPos = playerVis.group.position;
   const forward = forwardFromYaw(state.yaw);
@@ -307,6 +409,7 @@ export function tryKnife() {
   if (state.narrativeBlocked) return;
   if (state.inVehicle || state.isDead || state.meleeTimer > 0) return;
   state.meleeTimer = 0.32;
+  playPlayerGesture('melee', state.meleeTimer);
   sfx.melee();
   const playerPos = playerVis.group.position;
   const forward = forwardFromYaw(state.yaw);
@@ -323,13 +426,13 @@ export function tryKnife() {
   if (hitAny) showHitmarker();
 }
 export function startReload() {
-  if (state.narrativeBlocked) return;
-  if (state.currentWeapon !== 'gun') return;
+  if (state.narrativeBlocked || state.currentWeapon !== 'gun' || state.isDead || state.paused) return;
   if (state.reloading || state.ammoMag === MAG_SIZE || state.ammoReserve <= 0 || state.inVehicle) {
     enforceAmmoWeaponRule();
     return;
   }
   state.reloading = true; state.reloadTimer = 1.55;
+  playPlayerGesture('reload', state.reloadTimer);
   dom.reloadText.classList.remove('hidden');
 }
 
@@ -662,7 +765,9 @@ export function updateInteractionPrompt() {
    CAMERA
 --------------------------------------------------------------------- */
 const camRayHelper = new THREE.Raycaster();
+const cameraCandidates = new RayCandidates();
 const EYE_HEIGHT = 1.62; // above playerVis.group's origin, which sits at the feet
+const eyePosition = new THREE.Vector3();
 
 export function updateCameraOnFoot(dt) {
   // Recoil recovers over time instead of permanently accumulating.
@@ -676,8 +781,9 @@ export function updateCameraOnFoot(dt) {
     camera.updateProjectionMatrix();
   }
   if (state.firstPerson) {
-    const eyePos = playerVis.group.position.clone().add(new THREE.Vector3(0, EYE_HEIGHT - (state.crouching ? 0.42 : 0), 0));
-    camera.position.copy(eyePos);
+    eyePosition.copy(playerVis.group.position);
+    eyePosition.y += EYE_HEIGHT - (state.crouching ? 0.42 : 0);
+    camera.position.copy(eyePosition);
     const horizSpeed = Math.hypot(playerBody.velocity.x, playerBody.velocity.z);
     if (horizSpeed > 0.4) state.bobPhase += dt * horizSpeed * 1.8;
     const bobAmt = Math.min(horizSpeed, 6.5) * 0.007;
@@ -715,7 +821,7 @@ export function updateCameraOnFoot(dt) {
     .add(new THREE.Vector3(0, sp * 10, 0));
   camRayHelper.set(origin, desired.clone().sub(origin).normalize());
   camRayHelper.far = origin.distanceTo(desired);
-  const hits = camRayHelper.intersectObjects(state.occluders, false);
+  const hits = camRayHelper.intersectObjects(cameraCandidates.query(state.occluders, camRayHelper.ray, camRayHelper.far), false);
   let finalPos = desired;
   if (hits.length && hits[0].distance > 0.9) {
     finalPos = origin.clone().add(desired.clone().sub(origin).normalize().multiplyScalar(Math.max(1.15, hits[0].distance * 0.88)));
@@ -758,7 +864,8 @@ export function updateCameraInCar() {
 // or missing Shooter_Pack file never leaves the player animation-less.
 function pickLocomotionAction(forwardInput, strafeInput, sprinting, moving) {
   const has = (k) => playerVis.actions && playerVis.actions[k];
-  if (!moving) return 'idle';
+  if (state.crouching && (has('crouchWalk') || has('crouchIdle'))) return moving && has('crouchWalk') ? 'crouchWalk' : (has('crouchIdle') ? 'crouchIdle' : 'idle');
+  if (!moving) return state.currentWeapon === 'knife' && has('knifeIdle') ? 'knifeIdle' : 'idle';
   if (forwardInput > 0) {
     if (sprinting && has('sprint')) return 'sprint';
     return has('walk') ? 'walk' : 'idle';
@@ -773,6 +880,11 @@ function pickLocomotionAction(forwardInput, strafeInput, sprinting, moving) {
   return 'idle';
 }
 
+const groundRayFrom = new CANNON.Vec3();
+const groundRayTo = new CANNON.Vec3();
+const groundRayResult = new CANNON.RaycastResult();
+const groundRayOptions = { skipBackfaces: true, collisionFilterMask: -1 };
+let movementHUDTimer = 0;
 export function updatePlayerMovement(dt) {
   const forwardInput = (state.keys['KeyW'] ? 1 : 0) - (state.keys['KeyS'] ? 1 : 0);
   const strafeInput = (state.keys['KeyD'] ? 1 : 0) - (state.keys['KeyA'] ? 1 : 0);
@@ -798,7 +910,8 @@ export function updatePlayerMovement(dt) {
   // before normalizing below — atan2 only cares about direction, not
   // magnitude, so this doesn't need its own separate vector.
   state.playerMoving = forwardInput !== 0 || strafeInput !== 0;
-  if (state.playerMoving) state.playerFacingAngle = state.levelId === 3 ? state.yaw : Math.atan2(-move.x, -move.z);
+  // Directional clips strafe/backpedal while the body keeps facing the aim.
+  state.playerFacingAngle = state.yaw;
   if (move.lengthSq() > 0) move.normalize().multiplyScalar(speed);
   // Direct assignment, not eased/lerped toward the previous velocity — a
   // self-referential lerp can get stuck at NaN forever if the body's
@@ -812,29 +925,36 @@ export function updatePlayerMovement(dt) {
     playerBody.position.set(1.5, playerHeight / 2 + 0.25, 30);
     playerBody.velocity.set(0, 0, 0);
   }
-  const from = new CANNON.Vec3(playerBody.position.x, playerBody.position.y, playerBody.position.z);
-  const to = new CANNON.Vec3(playerBody.position.x, playerBody.position.y - playerHeight / 2 - 0.18, playerBody.position.z);
-  const ray = new CANNON.Ray(from, to);
-  ray.mode = CANNON.Ray.CLOSEST;
-  ray.skipBackfaces = true;
-  const result = new CANNON.RaycastResult();
-  ray.intersectWorld(world, { result, collisionFilterMask: -1 });
-  const grounded = result.hasHit || playerBody.position.y < playerHeight / 2 + 0.35;
+  groundRayFrom.copy(playerBody.position);
+  groundRayTo.set(playerBody.position.x, playerBody.position.y - playerHeight / 2 - 0.18, playerBody.position.z);
+  groundRayResult.reset();
+  world.raycastClosest(groundRayFrom, groundRayTo, groundRayOptions, groundRayResult);
+  const grounded = playerBody.velocity.y <= 0.5 && (groundRayResult.hasHit || playerBody.position.y < playerHeight / 2 + 0.12);
+  let jumping = !grounded;
   if (state.keys['Space'] && grounded && playerBody.velocity.y < 1) {
     playerBody.velocity.y = 5.6;
+    jumping = true;
     // If the player is moving backward when they jump, use the
     // Shooter_Pack's backward jump clip instead of the forward one, when
     // it's loaded; otherwise fall back to the regular jump.
     const jumpKey = (forwardInput < 0 && playerVis.actions && playerVis.actions.jumpBack) ? 'jumpBack' : 'jump';
     if (playerVis.actions && playerVis.actions[jumpKey]) {
-      setPlayerAction(jumpKey);
-      state.playerActionLock = (jumpKey === 'jumpBack' ? playerVis.jumpBackDuration : playerVis.jumpDuration) || 0.5;
+      const flightTime = 2 * 5.6 / Math.abs(world.gravity.y);
+      const jumpAction = playerVis.actions[jumpKey];
+      jumpAction.setEffectiveTimeScale(jumpAction.getClip().duration / flightTime);
+      setPlayerAction(jumpKey, 0.1, true);
+      state.playerActionLock = flightTime;
     }
   }
-  dom.staminaFill.style.width = state.playerStamina + '%';
-  dom.staminaFill.style.opacity = state.staminaExhausted ? '0.45' : '1';
-  dom.staminaStatus?.classList.toggle('visible', state.staminaExhausted);
-  dom.staminaStatus?.setAttribute('aria-hidden', String(!state.staminaExhausted));
+  movementHUDTimer -= dt;
+  const refreshMovementHUD = movementHUDTimer <= 0;
+  if (refreshMovementHUD) {
+    movementHUDTimer = 0.1;
+    dom.staminaFill.style.width = state.playerStamina + '%';
+    dom.staminaFill.style.opacity = state.staminaExhausted ? '0.45' : '1';
+    dom.staminaStatus?.classList.toggle('visible', state.staminaExhausted);
+    dom.staminaStatus?.setAttribute('aria-hidden', String(!state.staminaExhausted));
+  }
   playerVis.group.position.set(playerBody.position.x, playerBody.position.y - playerHeight / 2, playerBody.position.z);
   const moving = move.lengthSq() > 0.01;
   if (playerVis.rigged && playerVis.mixer && playerVis.actions) {
@@ -844,7 +964,14 @@ export function updatePlayerMovement(dt) {
       setPlayerAction(pickLocomotionAction(forwardInput, strafeInput, sprinting, moving));
     }
     playerVis.mixer.update(dt);
-    groundClampRig(playerVis.rigObj, playerVis.footBoneL, playerVis.footBoneR, dt, 10, playerVis.ankleToSole);
+    if (!jumping) {
+      // Correct relative to the physics feet, including raised platforms.
+      groundClampRig(playerVis.rigObj, playerVis.footBoneL, playerVis.footBoneR, dt, 10, playerVis.ankleToSole, playerVis.group.position.y);
+      playerVis.groundOffset = playerVis.rigObj.position.y;
+    } else {
+      // Preserve the last grounded offset so the mesh rises with its body.
+      playerVis.rigObj.position.y = playerVis.groundOffset ?? playerVis.rigObj.position.y;
+    }
     syncHandGun();
   } else if (moving) {
     state.walkCycle += dt * (sprinting ? 12 : 6);
@@ -865,7 +992,7 @@ export function updatePlayerMovement(dt) {
     state.footTimer -= dt;
     if (state.footTimer <= 0) { sfx.foot(); state.footTimer = sprinting ? 0.28 : (state.crouching ? 0.6 : 0.42); }
   }
-  if (dom.debugReadout) {
+  if (refreshMovementHUD && dom.debugReadout && document.body.classList.contains('debug')) {
     const rawShift = (state.keys['ShiftLeft'] ? 'L' : '') + (state.keys['ShiftRight'] ? 'R' : '') || 'none';
     dom.debugReadout.textContent =
       `Shift held: ${rawShift} | Sprinting: ${sprinting} | Exhausted: ${state.staminaExhausted} | Stamina: ${state.playerStamina.toFixed(0)}\n` +
@@ -1018,7 +1145,7 @@ function initInputHandlers() {
       // A retry relaunches without a fresh click, so the audio context may
       // have been created suspended — this click is the gesture to wake it.
       if (sfx.ctx && sfx.ctx.state === 'suspended') sfx.ctx.resume();
-      dom.canvas.requestPointerLock()?.catch(() => {});
+      requestPointerLockSafe();
     }
   });
   window.addEventListener('mousedown', (e) => {
@@ -1034,13 +1161,18 @@ function initInputHandlers() {
     if (state.dying && e.code !== 'Tab' && e.code !== 'KeyP' && e.code !== 'Escape') return;
     if (e.code === 'KeyR') startReload();
     if (e.code === 'KeyF') toggleVehicle();
-    if (e.code === 'KeyV' && !state.inVehicle) state.firstPerson = !state.firstPerson;
-    if (e.code === 'KeyQ') switchWeapon(state.currentWeapon === 'gun' ? 'knife' : 'gun');
-    // Level-registered keys (Level 2: E interact, G adrenaline). Nothing is
-    // registered in Levels 1/3 so these lines no-op there. !e.repeat keeps
-    // purchase/activation from firing on held-key auto-repeat.
+    if (e.code === 'KeyV' && !e.repeat && !state.inVehicle && !state.paused) state.firstPerson = !state.firstPerson;
+    if (e.code === 'KeyQ' && !e.repeat) switchWeapon(nextWeapon(state.currentWeapon,hasAnyAmmo()));
+    if (!e.repeat && levelWeaponIds().length) {
+      if(e.code==='Digit1')switchWeapon('gun');
+      if(e.code==='Digit2')switchWeapon('knife');
+      if(e.code==='Digit3')switchWeapon(levelWeaponIds()[0]);
+    }
+    // Level-owned controls; held keys must not repeat purchases or pulses.
     if (!e.repeat && e.code === 'KeyE' && levelKeyHooks.KeyE) levelKeyHooks.KeyE();
     if (!e.repeat && e.code === 'KeyG' && levelKeyHooks.KeyG) levelKeyHooks.KeyG();
+    if (!e.repeat && e.code === 'KeyX' && levelKeyHooks.KeyX) levelKeyHooks.KeyX();
+    if (!e.repeat && e.code === 'KeyB' && levelKeyHooks.KeyB) levelKeyHooks.KeyB();
     // Tab, P, or Esc (Esc only arrives here once the mouse is free — e.g.
     // to resume from the pause screen; see pointerlockchange above)
     if (e.code === 'Tab' || e.code === 'KeyP' || e.code === 'Escape') {
@@ -1085,6 +1217,7 @@ function armTwoClick(btn, confirmText, action) {
 --------------------------------------------------------------------- */
 let missionTracker = null;
 let streetAtmosphere = null;
+let initialFrameReady = false;
 
 export function bootLevel(levelConfig = {}) {
   // Day/Night was picked on the mode-select screen (main.js), right after
@@ -1100,7 +1233,7 @@ export function bootLevel(levelConfig = {}) {
   // gameplay-start behind — as soon as assets are ready, jump straight
   // into the HUD/game. Registered up front, before any of the loaders
   // below fire, in case something somehow resolved synchronously.
-  onAssetsReady(() => {
+  onAssetsReady(async () => {
     sfx.init();
     if (sfx.ctx && sfx.ctx.state === 'suspended') sfx.ctx.resume();
     // Pointer lock requires a direct user gesture in most browsers, and
@@ -1108,12 +1241,33 @@ export function bootLevel(levelConfig = {}) {
     // click) is long stale, so this attempt may be silently ignored —
     // that's fine, the canvas click handler wired below is the fallback
     // the player uses to lock in.
-    dom.canvas.requestPointerLock()?.catch(() => {});
+    requestPointerLockSafe();
     if (!state.skipCar) spawnDepotGuards();
     updateObjectiveHUD();
     updateWeaponHUD();
     updateCoinHUD();
     if (!state.skipCar) updateFuelHUD();
+    // Prepare the actual loaded rigs and lighting while the loading
+    // screen is still covering the canvas, then draw the first world frame.
+    // Level 2 already has instanced scorch/oil/contact dressing.
+    if (state.levelId !== 2) addContactShading(scene, state.obstacles);
+    updateWeatherFX(0);
+    const releasePrepared = [];
+    try {
+      for (const prepare of levelPreparations) {
+        const release = await prepare(renderer,scene,camera);
+        if (typeof release === 'function') releasePrepared.push(release);
+      }
+      if (renderer.compileAsync) await renderer.compileAsync(scene, camera);
+      else renderer.compile(scene, camera);
+      await warmViewmodels(renderer);
+      if (renderer.getContext().isContextLost()) throw new Error('WebGL context lost during startup');
+      // Upload the world and temporary preparation rigs in one hidden frame.
+      renderer.render(scene, camera);
+    } finally {
+      for (const release of releasePrepared.reverse()) release();
+    }
+    initialFrameReady = true;
   });
 
   // World population — mirrors the exact order the original monolithic
@@ -1127,6 +1281,7 @@ export function bootLevel(levelConfig = {}) {
   loadObstacles();
   loadTrashCans();
   markStaticSince(scene, sceneryStart);
+  if (state.levelId !== 2) console.info('[scenery]', mergeStaticScenery(scene));
   if (state.levelId !== 2) streetAtmosphere = createStreetAtmosphere(scene);
   if (!state.skipCar) loadCars();
   loadMainCharacter();
@@ -1145,6 +1300,7 @@ export function bootLevel(levelConfig = {}) {
   updateCoinHUD();
   if (!state.skipCar) updateFuelHUD();
 
+  addLight(scene, muzzleLight);
   startAnimationLoop();
 
   if (levelConfig.name) pushKillFeed(`${levelConfig.name} loaded`);
@@ -1152,12 +1308,18 @@ export function bootLevel(levelConfig = {}) {
 
 const clock = new THREE.Clock();
 let stepAccumulator = 0;
-const FIXED_STEP = 1 / 60;
 
 function startAnimationLoop() {
   function animate() {
+    if (state.loadFailed) return;
     requestAnimationFrame(animate);
     const dt = Math.min(clock.getDelta(), 0.05);
+    if (!initialFrameReady) return;
+    try {
+    if (muzzleFlashTime > 0) {
+      muzzleFlashTime = Math.max(0, muzzleFlashTime - dt);
+      if (muzzleFlashTime === 0) muzzleLight.intensity = 0;
+    }
     if (!state.narrativeBlocked) {
     state.shake = Math.max(0, state.shake - dt * 1.8);
     state.meleeTimer = Math.max(0, state.meleeTimer - dt);
@@ -1171,11 +1333,7 @@ function startAnimationLoop() {
       updateDying(dt);
     } else if (!state.isDead && !state.paused && !state.cinematic && !state.narrativeBlocked && dom.hud && !dom.hud.classList.contains('hidden')) {
       state.runTime += dt;
-      stepAccumulator += dt;
-      while (stepAccumulator >= FIXED_STEP) {
-        world.step(FIXED_STEP);
-        stepAccumulator -= FIXED_STEP;
-      }
+      stepAccumulator=stepPlayerPhysics(world,playerBody,stepAccumulator,dt,state.inVehicle);
       if (!state.skipCar) checkVehicleRollover(dt);
       if (state.fireCooldown > 0) state.fireCooldown -= dt;
       if (state.firePressed && !state.inVehicle && state.currentWeapon === 'gun') tryShoot();
@@ -1211,6 +1369,7 @@ function startAnimationLoop() {
         sfx.setEngine(0, false);
       }
       const activePos = state.inVehicle ? carVis.group.position : playerVis.group.position;
+      for (const tick of levelPreTicks) tick(dt);
       updateZombies(dt, activePos);
       updateLowHealthFX(dt);
       updateInfectionMonitor(dt);
@@ -1224,8 +1383,7 @@ function startAnimationLoop() {
         s.position.addScaledVector(s.userData.vel, dt);
         s.userData.life -= dt;
         s.material.opacity = Math.max(0, s.userData.life / (s.userData.maxLife || 0.4));
-        s.material.transparent = true;
-        if (s.userData.life <= 0) { scene.remove(s); state.activeSparks.splice(i, 1); }
+        if (s.userData.life <= 0) { scene.remove(s); s.material.dispose(); state.activeSparks.splice(i, 1); }
       }
       for (let i = state.activeTracers.length - 1; i >= 0; i--) {
         const tr = state.activeTracers[i];
@@ -1258,6 +1416,10 @@ function startAnimationLoop() {
     for (const tick of levelTicks) tick(dt);
 
     renderer.render(scene, camera);
+    renderViewmodels(renderer);
+    } catch (error) {
+      showRenderFailure(error);
+    }
   }
   animate();
 }

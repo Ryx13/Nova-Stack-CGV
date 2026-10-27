@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import {GuardianCombat,GUARDIAN_TIMING,GuardianGas,GUARDIAN_GAS_RADIUS} from '../GuardianCombat.js';
+
+const boss={x:0,z:0},far={x:0,z:20},near={x:0,z:2};
+const fight=new GuardianCombat();
+fight.setHealth(NaN,1400);fight.setHealth(1,0);assert.equal(fight.stage,1);
+fight.setHealth(701,1400);assert.equal(fight.stage,1);
+fight.setHealth(700,1400);assert.equal(fight.stage,2);assert.equal(fight.speed,.85);
+fight.setHealth(1400,1400);assert.equal(fight.stage,2,'pressure phase cannot flicker back');
+fight.enter('chase');fight.update(3.4,boss,far);assert.equal(fight.phase,'chase');fight.update(.1,boss,far);assert.equal(fight.phase,'vent_warning');
+assert.deepEqual(fight.ventTarget,{x:0,z:16},'distant camping gets a marked cloud within range');
+fight.update(1.79,boss,near);assert.equal(fight.phase,'vent_warning');assert.deepEqual(fight.direction,{x:0,z:1},'warning aim stays committed');
+assert.deepEqual(fight.ventTarget,{x:0,z:16},'moving after the tell avoids a homing attack');
+fight.update(.01,boss,near);assert.equal(fight.phase,'vent');fight.update(GUARDIAN_TIMING.vent,boss,near);assert.equal(fight.phase,'recovery');
+assert.equal(fight.duration,3.4,'second phase retains full vulnerability window');assert.equal(fight.damage(20,true),50);
+fight.update(3.39,boss,near);assert.equal(fight.phase,'recovery');fight.update(.01,boss,near);assert.equal(fight.phase,'chase');
+fight.attacks=0;fight.update(3.5,boss,near);assert.equal(fight.phase,'slam_warning');fight.update(1.99,boss,far);assert.equal(fight.phase,'slam_warning');fight.update(.01,boss,far);assert.equal(fight.phase,'slam');
+fight.enter('dying');assert.equal(fight.damage(999,true),0);fight.update(3.2,boss,near);assert.equal(fight.phase,'defeated');fight.update(99,boss,near);assert.equal(fight.phase,'defeated');
+const gas=new GuardianGas();gas.spawn(0,0);assert.equal(gas.update(.01,{x:GUARDIAN_GAS_RADIUS+.01,z:0}),0);assert.equal(gas.update(.01,{x:GUARDIAN_GAS_RADIUS-.01,z:0}),0);assert.equal(gas.update(.59,{x:GUARDIAN_GAS_RADIUS-.01,z:0}),7);
+console.log('PASS: half-health pressure, preserved tells/recovery, committed aim, damage, final defeat and exact gas boundary.');

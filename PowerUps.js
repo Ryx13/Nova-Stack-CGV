@@ -4,8 +4,7 @@ import { state } from './state.js';
 import {
   scene, world, dom, sfx, addStaticBox, pushKillFeed,
   DEPOT_POS, STREET_HALF_W, WEST_POCKET_Z, rowX,
-  updateAmmoHUD, updateCoinHUD, updateShieldHUD,
-  addLight,
+  updateAmmoHUD, updateCoinHUD, updateShieldHUD, acquireEffectLight, releaseEffectLight,
 } from './Scene.js';
 import { createShieldMaterial, shieldUniforms } from './shaders.js';
 import { updateFuelHUD, MAG_SIZE } from './Actions.js';
@@ -31,11 +30,50 @@ const EXPLOSION_RADIUS = 6.5;
 let barrelTemplate = null;
 let explosionTemplate = null;
 
-// The explosion VFX GLB is 18.8 MB — a quarter of the boot-time fetch —
-// for an effect most runs never trigger. Levels can defer it to the
+// Keep a visible blast while the animated asset downloads or fails, including
+// sunlight-only scenes where real effect lights are intentionally disabled.
+// Four reusable slots bound simultaneous fallback geometry and allocations.
+const explosionFallbacks = [];
+let explosionFallbackGeometry = null;
+function acquireExplosionFallback(pos) {
+  let slot = explosionFallbacks.find((entry) => !entry.busy);
+  if (!slot && explosionFallbacks.length < 4) {
+    explosionFallbackGeometry ||= new THREE.IcosahedronGeometry(1, 1);
+    const flash = new THREE.MeshBasicMaterial({ color: 0xffa32d, transparent: true, depthWrite: false });
+    const core = new THREE.MeshBasicMaterial({ color: 0xffecad, transparent: true, depthWrite: false });
+    const smoke = new THREE.MeshBasicMaterial({ color: 0x49413b, transparent: true, depthWrite: false });
+    const obj = new THREE.Group();
+    const parts = [flash, core, smoke, smoke, smoke].map((material) => new THREE.Mesh(explosionFallbackGeometry, material));
+    obj.add(...parts);
+    slot = { obj, parts, flash, core, smoke, busy: false };
+    explosionFallbacks.push(slot);
+  }
+  if (!slot) return null;
+  slot.busy = true;
+  slot.obj.position.copy(pos).setY(pos.y + 0.7);
+  updateExplosionFallback(slot, 0);
+  scene.add(slot.obj);
+  return slot;
+}
+function updateExplosionFallback(slot, elapsed) {
+  const progress = Math.min(elapsed / 0.65, 1);
+  const flashSize = progress < 0.12 ? 0.9 + progress * 12 : Math.max(0.001, 2.5 * (1 - progress / 0.55));
+  slot.parts[0].scale.setScalar(flashSize);
+  slot.parts[1].scale.setScalar(flashSize * 0.65);
+  slot.flash.opacity = slot.core.opacity = Math.max(0, 1 - progress / 0.55);
+  slot.smoke.opacity = 0.55 * Math.sin(progress * Math.PI);
+  for (let i = 2; i < slot.parts.length; i++) {
+    const angle = (i - 2) * Math.PI * 2 / 3;
+    slot.parts[i].position.set(Math.cos(angle) * progress, progress * 2.6, Math.sin(angle) * progress);
+    slot.parts[i].scale.setScalar(0.35 + progress * 1.2);
+  }
+}
+
+// The original full-detail explosion VFX GLB is 19.27 MB for an effect most runs
+// never trigger. Levels can defer it to the
 // first actual explosion via state.lazyExplosionVFX (Level 2 does);
 // the default is an eager load at boot. Either way this runs at most
-// once, and the light-only fallback in spawnExplosionEffect covers the
+// once, and the unlit fallback in spawnExplosionEffect covers the
 // window before it resolves (and the failure case).
 let explosionFetchStarted = false;
 function fetchExplosionTemplate() {
@@ -43,7 +81,7 @@ function fetchExplosionTemplate() {
   explosionFetchStarted = true;
   new GLTFLoader().load('assets/timeframe_explosion.glb', (gltf) => {
     explosionTemplate = gltf;
-  }, undefined, () => { pushKillFeed('Explosion VFX failed to load — barrels still work, just silent-visual'); });
+  }, undefined, () => { pushKillFeed('Explosion model unavailable — using backup blast effects'); });
 }
 
 export class Barrel {
@@ -102,17 +140,14 @@ export class Barrel {
 }
 
 export function spawnExplosionEffect(pos) {
-  const light = new THREE.PointLight(0xff8a33, 7, 16, 2);
-  light.position.copy(pos).setY(pos.y + 1.2);
-  addLight(scene, light);
+  const light = acquireEffectLight(0xff8a33, 7, 16);
+  if (light) light.position.copy(pos).setY(pos.y + 1.2);
   if (!explosionTemplate) {
-    // VFX model not loaded yet (or failed) — the kill/damage logic above
-    // already happened regardless, this just skips the visual. Still
-    // fade out the light so there's at least a flash. In lazy mode this
-    // is also the trigger that starts the fetch: the first explosion is
-    // light-only, every later one gets the full VFX.
+    // Damage is immediate; the cheap unlit fallback supplies a visible blast
+    // while lazy loading catches up, or if the animated asset fails to load.
     if (state.lazyExplosionVFX) fetchExplosionTemplate();
-    state.activeExplosions.push({ mixer: null, obj: null, light, duration: 0.4, elapsed: 0 });
+    const fallback = acquireExplosionFallback(pos);
+    state.activeExplosions.push({ mixer: null, obj: fallback?.obj ?? null, fallback, light, duration: 0.65, elapsed: 0 });
     return;
   }
   const obj = explosionTemplate.scene.clone(true);
@@ -133,10 +168,16 @@ export function updateExplosions(dt) {
     const e = state.activeExplosions[i];
     if (e.mixer) e.mixer.update(dt);
     e.elapsed += dt;
+    if (e.fallback) updateExplosionFallback(e.fallback, e.elapsed);
     if (e.light) e.light.intensity = Math.max(0, 7 * (1 - e.elapsed / Math.max(e.duration, 0.01)));
     if (e.elapsed >= e.duration + 0.3) {
+      if (e.mixer) {
+        e.mixer.stopAllAction();
+        e.mixer.uncacheRoot(e.obj);
+      }
       if (e.obj) scene.remove(e.obj);
-      if (e.light) scene.remove(e.light);
+      if (e.fallback) e.fallback.busy = false;
+      releaseEffectLight(e.light);
       state.activeExplosions.splice(i, 1);
     }
   }
@@ -165,11 +206,31 @@ export function loadBarrels() {
 /* ---------------------------------------------------------------------
    ITEM PICKUPS (health/ammo dropped by kills) — consumed by the player
 --------------------------------------------------------------------- */
+const pickupGeometry = new THREE.OctahedronGeometry(0.18);
+const pickupMaterials = new Map();
+function pickupMaterial(color) {
+  if (!pickupMaterials.has(color)) pickupMaterials.set(color,
+    new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.8, roughness: 0.35 }));
+  return pickupMaterials.get(color);
+}
+const powerupCoreGeometry = new THREE.IcosahedronGeometry(0.24, 0);
+const powerupRingGeometry = new THREE.TorusGeometry(0.36, 0.02, 8, 24);
+const powerupMaterials = new Map();
+function powerupMaterialPair(color) {
+  if (!powerupMaterials.has(color)) powerupMaterials.set(color, [
+    new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.1, roughness: 0.25, metalness: 0.3 }),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.75 }),
+  ]);
+  return powerupMaterials.get(color);
+}
+const coinGeometry = new THREE.CylinderGeometry(0.16, 0.16, 0.035, 18);
+const coinMaterial = new THREE.MeshStandardMaterial({ color: 0xffd94a, emissive: 0x996600, emissiveIntensity: 0.6, metalness: 0.75, roughness: 0.3 });
+
 export function spawnPickup(pos, type) {
   const color = type === 'health' ? 0x44dd66 : 0xe0b030;
   const mesh = new THREE.Mesh(
-    new THREE.OctahedronGeometry(0.18),
-    new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.8, roughness: 0.35 })
+    pickupGeometry,
+    pickupMaterial(color)
   );
   mesh.position.set(pos.x, 0.45, pos.z);
   scene.add(mesh);
@@ -233,21 +294,21 @@ export function spawnPowerup(pos, type) {
   const color = POWERUP_COLORS[type];
   const group = new THREE.Group();
   const core = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(0.24, 0),
-    new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.1, roughness: 0.25, metalness: 0.3 })
+    powerupCoreGeometry,
+    powerupMaterialPair(color)[0]
   );
   group.add(core);
   const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(0.36, 0.02, 8, 24),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.75 })
+    powerupRingGeometry,
+    powerupMaterialPair(color)[1]
   );
   ring.rotation.x = Math.PI / 2;
   group.add(ring);
-  const light = new THREE.PointLight(color, 1.6, 5, 2);
-  addLight(group, light);
+  const light = acquireEffectLight(color, 1.6, 5, 2, true);
+  if (light) light.position.set(pos.x, 0.55, pos.z);
   group.position.set(pos.x, 0.55, pos.z);
   scene.add(group);
-  state.powerups.push({ mesh: group, type, life: 26 });
+  state.powerups.push({ mesh: group, light, type, life: 26 });
 }
 
 export function applyPowerup(type, carMaxFuel) {
@@ -281,9 +342,10 @@ export function updatePowerups(dt, pos, carMaxFuel) {
     p.life -= dt;
     p.mesh.rotation.y += dt * 1.6;
     p.mesh.position.y = 0.55 + Math.sin(performance.now() * 0.003 + i) * 0.08;
-    if (p.life <= 0) { scene.remove(p.mesh); state.powerups.splice(i, 1); continue; }
+    if (p.life <= 0) { scene.remove(p.mesh); releaseEffectLight(p.light); state.powerups.splice(i, 1); continue; }
     if (p.mesh.position.distanceTo(pos) < 1.5) {
       applyPowerup(p.type, carMaxFuel);
+      releaseEffectLight(p.light);
       scene.remove(p.mesh);
       state.powerups.splice(i, 1);
     }
@@ -293,8 +355,8 @@ export function updatePowerups(dt, pos, carMaxFuel) {
 /* --- Coins: separate from powerups — every confirmed kill drops one. --- */
 export function spawnCoin(pos) {
   const mesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.16, 0.16, 0.035, 18),
-    new THREE.MeshStandardMaterial({ color: 0xffd94a, emissive: 0x996600, emissiveIntensity: 0.6, metalness: 0.75, roughness: 0.3 })
+    coinGeometry,
+    coinMaterial
   );
   mesh.rotation.x = Math.PI / 2;
   mesh.position.set(pos.x + (Math.random() - 0.5) * 0.4, 0.3, pos.z + (Math.random() - 0.5) * 0.4);

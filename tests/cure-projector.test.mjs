@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {registerLevelWeapon,levelWeapon,levelWeaponIds,nextWeapon} from '../WeaponSlots.js';
+import {CureDevice,CURE_CHARGES,withinCureAim} from '../Level3Systems.js';
+assert.equal(nextWeapon('gun'),'knife');assert.equal(nextWeapon('knife'),'gun');
+assert.throws(()=>registerLevelWeapon('gun',{fire(){}}));
+const slot={label:'Cure projector',fire(){}};const release=registerLevelWeapon('cure',slot);
+assert.equal(levelWeapon('cure'),slot);assert.deepEqual(levelWeaponIds(),['cure']);
+assert.equal(nextWeapon('gun'),'knife');assert.equal(nextWeapon('knife'),'cure');assert.equal(nextWeapon('cure'),'gun');
+assert.equal(nextWeapon('knife',false),'cure');assert.equal(nextWeapon('cure',false),'knife');assert.throws(()=>registerLevelWeapon('cure',slot));
+release();assert.equal(levelWeapon('cure'),undefined);assert.equal(nextWeapon('knife'),'gun');
+const enemy=(x,z)=>({alive:true,mesh:{position:{x,y:0,z}}}),origin={x:0,y:0,z:0},aim={x:0,z:-1};
+const front=enemy(0,-4),spread=enemy(2,-4),behind=enemy(0,2),side=enemy(3,0);
+assert.equal(withinCureAim(front,origin,aim),true);assert.equal(withinCureAim(spread,origin,aim),true);assert.equal(withinCureAim(behind,origin,aim),false);assert.equal(withinCureAim(side,origin,aim),false);
+assert.equal(withinCureAim(side,origin,{x:1,z:0}),true,'aim follows the equipped gun direction');
+const device=new CureDevice(),result=device.activate([front,spread,behind,side],origin,{visible:z=>withinCureAim(z,origin,aim)});
+assert.deepEqual(result.targets,[front,spread]);assert.equal(device.charges,CURE_CHARGES-1);
+const empty=new CureDevice();assert.equal(empty.activate([behind],origin,{visible:z=>withinCureAim(z,origin,aim)}).ok,false);assert.equal(empty.charges,CURE_CHARGES);
+console.log('PASS: base weapon cycle, cure slot, empty-pistol cycling, unregister, aimed groups, rear/side exclusion and charges.');

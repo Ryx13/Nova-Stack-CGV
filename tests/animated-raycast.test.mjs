@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import {raycastAnimatedTargets} from '../AnimatedRaycast.js';
+let calculations=0,pose=1;const mesh={isSkinnedMesh:true,geometry:{attributes:{position:{count:3}}},getVertexPosition(i,v){calculations++;return v.set(i+pose,i*2,i*3);},traverse(fn){fn(this);}};
+const original=mesh.getVertexPosition,out={set(x,y,z){this.x=x;this.y=y;this.z=z;return this;}};
+const ray={intersectObjects(roots,recursive,hits=[]){for(const root of roots)for(let i=0;i<12;i++){root.getVertexPosition(i%3,out);hits.push([out.x,out.y,out.z]);}return hits;}};
+const expected=ray.intersectObjects([mesh]);calculations=0;assert.deepEqual(raycastAnimatedTargets(ray,[mesh],[]),expected);assert.equal(calculations,3,'each unique posed vertex evaluated once');assert.equal(mesh.getVertexPosition,original);
+pose=4;assert.deepEqual(raycastAnimatedTargets(ray,[mesh],[]),ray.intersectObjects([mesh]),'fresh pose used for each shot');
+assert.throws(()=>raycastAnimatedTargets({intersectObjects(){throw Error('ray failed');}},[mesh],[]));assert.equal(mesh.getVertexPosition,original,'restored even on failure');
+assert.deepEqual(raycastAnimatedTargets(ray,[mesh,mesh],[]),ray.intersectObjects([mesh,mesh]),'overlapping roots do not recurse');
+console.log('PASS: identical vertices/hits, unique-vertex reuse, pose invalidation, overlapping roots and exception cleanup.');

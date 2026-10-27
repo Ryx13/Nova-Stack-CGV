@@ -1,11 +1,15 @@
 import * as THREE from 'three';
+import {EnemyCrowd} from './EnemyCrowd.js';
+import { CircleGrid } from './SpatialGrid.js';
+import { asphaltRoughness } from './ContactShading.js';
+import { streetlightBeamMaterial } from './survivor.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as CANNON from 'cannon-es';
 import { state } from './state.js';
 import {
-  scene, world, camera, dom, sfx,
+  scene, world, camera, dom, sfx, registerStreetLight, acquireEffectLight, releaseEffectLight,
   addStaticBox, addObstacle, pushKillFeed, flashDamage, markLoaded, updateObjectiveHUD,
   STREET_HALF_W, STREET_LENGTH, KILL_TARGET, ZOMBIE_MAX_ALIVE, DEPOT_POS, WEST_POCKET_Z, rowX,
   matPlayer, matChassis,
@@ -137,6 +141,7 @@ export const asphaltTex = new THREE.CanvasTexture(makeCanvas(512, 512, (ctx, w, 
 asphaltTex.wrapS = asphaltTex.wrapT = THREE.RepeatWrapping;
 asphaltTex.repeat.set(6, 40);
 asphaltTex.anisotropy = 8;
+const roadRoughnessTex=asphaltRoughness(asphaltTex);
 
 // Bump detail for the road — grit specks plus a few embossed cracks,
 // painted at the same relative scale/density as asphaltTex's own detail
@@ -242,7 +247,7 @@ function makeWindowTexture(litChance) {
   return tex;
 }
 export const windowTex = makeWindowTexture(0.18); // kept exported for compatibility
-export const windowTexVariants = [makeWindowTexture(0.08), makeWindowTexture(0.18), makeWindowTexture(0.32)];
+export const windowTexVariants = [makeWindowTexture(0.035), makeWindowTexture(0.07), makeWindowTexture(0.12)];
 
 /* DAYLIGHT FACADES (clear-day levels) — nothing glows in daylight, and an
    abandoned block looks it: one tile is two storeys (6.4 m) by three bays
@@ -643,17 +648,19 @@ export function loadStreetSurface() {
   groundMesh.rotation.x = -Math.PI / 2;
   groundMesh.position.set(0, -0.02, -STREET_LENGTH / 2 + 20);
   groundMesh.receiveShadow = true;
+  groundMesh.material.userData.staticLampHeight = groundMesh.position.y;
   scene.add(groundMesh);
   const road = new THREE.Mesh(
     new THREE.PlaneGeometry(STREET_HALF_W * 2, STREET_LENGTH + 70),
     new THREE.MeshStandardMaterial({
-      map: asphaltTex, normalMap: asphaltNormalTex, normalScale: new THREE.Vector2(0.6, 0.6),
+      map: asphaltTex, roughnessMap: roadRoughnessTex, normalMap: asphaltNormalTex, normalScale: new THREE.Vector2(0.6, 0.6),
       roughness: 0.95, metalness: 0,
     })
   );
   road.rotation.x = -Math.PI / 2;
   road.position.set(0, 0.005, -STREET_LENGTH / 2 + 20);
   road.receiveShadow = true;
+  road.material.userData.staticLampHeight = road.position.y;
   scene.add(road);
   [-1, 1].forEach((side) => {
     const walk = new THREE.Mesh(
@@ -663,6 +670,7 @@ export function loadStreetSurface() {
     walk.rotation.x = -Math.PI / 2;
     walk.position.set(side * (STREET_HALF_W + 2.1), 0.03, -STREET_LENGTH / 2 + 20);
     walk.receiveShadow = true;
+    walk.material.userData.staticLampHeight = walk.position.y;
     scene.add(walk);
     const curbNormalTex = concreteNormalTex.clone();
     curbNormalTex.needsUpdate = true;
@@ -1153,7 +1161,7 @@ export function makeBuilding(x, z, w, h, d, opts = {}) {
     // mode where a glowing facade reads odd under full sun.
     mat = new THREE.MeshStandardMaterial({
       map: tex, roughness: 0.94, color: tint,
-      emissive: 0xffb066, emissiveMap: tex, emissiveIntensity: night ? 0.9 : 0.22,
+      emissive: 0xffb066, emissiveMap: tex, emissiveIntensity: night ? 0.35 : 0.08,
     });
   }
   const roofMat = new THREE.MeshStandardMaterial({ map: roofTex, roughness: 1 });
@@ -1279,6 +1287,7 @@ function nightPlan() {
 // block's facade (-1: east row, facing -x).
 let guttedLeft = 3; // the first three tall original blocks from the start come down hardest
 function streetBlock(x, z, w, h, d, sx, ruin, lit) {
+  if(state.quarantineFacility){makeBuilding(x,z,w,h,d,{consumeOnly:true});return;}
   const plan = lit && !ruin ? nightPlan() : null;
   if (plan?.oldLook && h > 24 && guttedLeft > 0) { plan.shape = 'gutted'; guttedLeft--; }
   const fall = ruin || plan?.collapse;
@@ -1305,7 +1314,7 @@ export function loadBuildings() {
     }
   }
   if (lit) addLitWindowMeshes(lit);
-  buildWestPocket();
+  if(!state.quarantineFacility)buildWestPocket();
   const night = state.timeOfDay === 'night';
   const clearDay = state.timeOfDay === 'day' && (state.clearDay || state.warmDay);
   for (let i = 0; i < 18; i++) {
@@ -1328,6 +1337,7 @@ export function loadBuildings() {
         })
     );
     sil.position.set((rnd() < 0.5 ? -1 : 1) * (48 + rnd() * 40), sil.geometry.parameters.height / 2, -20 - rnd() * STREET_LENGTH);
+    if(state.quarantineFacility)sil.position.x+=Math.sign(sil.position.x)*24;
     // A level with its own city behind the street (state.backCity — Level
     // 2) has real blocks here; the draws above still happen so nothing
     // placed after them moves
@@ -1553,13 +1563,14 @@ export function makeStreetlight(x, z) {
   // up even further, since a modest lamp easily gets lost against full
   // sunlight and needs real extra punch to still read as "on".
   const isDay = state.timeOfDay === 'day';
-  const spot = new THREE.SpotLight(0xffc070, isDay ? 11 : 6.5, isDay ? 30 : 24, Math.PI / 5.5, 0.55, 1.6);
+  const spot = new THREE.SpotLight(0xffc070, isDay ? 11 : state.quarantineFacility ? 9.1 : 6.5, isDay ? 30 : 24, Math.PI / 5.5, 0.55, 1.6);
+  spot.userData.stationaryStreetLamp = true;
   spot.position.copy(lamp.position);
   const spotTarget = new THREE.Object3D();
   spotTarget.position.set(lamp.position.x, 0, lamp.position.z); // straight down to the road surface
   scene.add(spotTarget);
   spot.target = spotTarget;
-  scene.add(spot);
+  registerStreetLight(spot);
 
   // Soft additive halo at the lamp head — the light source itself reads
   // at a distance without paying for another real light.
@@ -1579,18 +1590,12 @@ export function makeStreetlight(x, z) {
   // ambient light to stay visible.
   const beamHeight = lamp.position.y;
   const beamGeo = new THREE.ConeGeometry(2.6, beamHeight, 20, 1, true);
-  const beamMat = new THREE.MeshBasicMaterial({
-    color: 0xffc070,
-    transparent: true,
-    opacity: isDay ? 0.24 : 0.14,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-    fog: false,
-    blending: THREE.AdditiveBlending,
-  });
+  const beamMat = streetlightBeamMaterial(isDay);
   const beam = new THREE.Mesh(beamGeo, beamMat);
   beam.position.set(lamp.position.x, lamp.position.y - beamHeight / 2, lamp.position.z);
-  scene.add(beam);
+  // The quarantine street already has a real spotlight and bulb halo. Its
+  // visible cone reads as a large yellow prop detached from the lamp.
+  if (!state.quarantineFacility) scene.add(beam);
 
   if (blink) {
     blinkingLamps.push({
@@ -1886,7 +1891,9 @@ function loadCorpses() {
 function scatterCorpses() {
   if (!corpseTemplate) return;
   for (let i = 0; i < 8; i++) {
-    const c = corpseTemplate.clone(true);
+    // Skinned props need independent bones; a plain clone shares the template's
+    // skeleton and can draw the entire scatter in one overlapping pile.
+    const c = skeletonClone(corpseTemplate);
     const side = rnd() < 0.5 ? -1 : 1;
     const x = side * (STREET_HALF_W - 1 - rnd() * 3);
     const z = 10 - rnd() * (STREET_LENGTH + 10);
@@ -1896,6 +1903,13 @@ function scatterCorpses() {
     const box = new THREE.Box3().setFromObject(c);
     c.position.set(x, -box.min.y, z);
     scene.add(c);
+    c.updateMatrixWorld(true);
+    c.userData.decorativeCorpse=true;
+    // These props never animate. Cache their correct posed bounds and transforms.
+    c.traverse(o=>{
+      if(o.isSkinnedMesh){o.skeleton.update();o.computeBoundingSphere();o.computeBoundingBox();}
+      o.matrixAutoUpdate=false;o.matrixWorldAutoUpdate=false;
+    });
   }
 }
 
@@ -2001,6 +2015,54 @@ scene.add(playerVis.group);
 
 const PISTOL_SCALE = 0.00987;
 let pistolTemplate = null;
+let pistolLoading = false;
+
+// The pistol GLB is Y-up with its muzzle at +Z (the two root X
+// rotations cancel). A camera looks down -Z; wrist grip presets are
+// deliberately separate from this fixed asset-to-camera correction.
+const VIEWMODEL_LAYER = 31;
+let viewmodelRevision = 0;
+let warmedViewmodelRevision = -1;
+let readyViewmodelRevision = -1;
+let viewmodelWarmPromise = null;
+let viewmodelWarmError = null;
+const viewmodelWarmMaterials = new Set();
+
+function prepareViewmodel(root) {
+  viewmodelRevision++;
+  const materials = new Map();
+  root.traverse((object) => {
+    if (!object.isMesh) return;
+    object.castShadow = false;
+    object.receiveShadow = false;
+    object.layers.set(VIEWMODEL_LAYER);
+    const prepare = (source) => {
+      if (!materials.has(source)) {
+        const material = source.clone();
+        material.depthTest = true;
+        material.depthWrite = true;
+        materials.set(source, material);
+      }
+      return materials.get(source);
+    };
+    object.material = Array.isArray(object.material)
+      ? object.material.map(prepare) : prepare(object.material);
+  });
+}
+
+// Only the replaced procedural models own their resources. Loaded GLB
+// clones intentionally share geometry/textures with the cached template.
+function disposeProceduralWeapon(root) {
+  const geometries = new Set();
+  const materials = new Set();
+  root.traverse((object) => {
+    if (!object.isMesh) return;
+    geometries.add(object.geometry);
+    for (const material of (Array.isArray(object.material) ? object.material : [object.material])) materials.add(material);
+  });
+  geometries.forEach((geometry) => geometry.dispose());
+  materials.forEach((material) => material.dispose());
+}
 function makePistolVisual() {
   const wrap = new THREE.Group();
   const inst = pistolTemplate.clone(true);
@@ -2011,27 +2073,40 @@ function makePistolVisual() {
 }
 export function applyGunOrientation() {
   const preset = GUN_GRIP_PRESETS[state.gunGripIndex];
-  if (viewmodelGun.children[0]) viewmodelGun.children[0].rotation.set(...preset.rot);
+  // The fallback rifle already points down -Z. The imported pistol
+  // needs only a half-turn around Y, never a hand-bone grip rotation.
+  if (viewmodelGun.children[0]) viewmodelGun.children[0].rotation.set(0, pistolTemplate ? Math.PI : 0, 0);
   if (!playerVis.gunOnHand && playerVis.gun) playerVis.gun.rotation.set(...preset.rot);
 }
 function applyPistolModel() {
   if (!pistolTemplate) return;
   const newThirdPerson = makePistolVisual();
   playerVis.gunPivot.remove(playerVis.gun);
+  disposeProceduralWeapon(playerVis.gun);
   playerVis.gunPivot.add(newThirdPerson);
+  newThirdPerson.visible = state.currentWeapon === 'gun';
   playerVis.gun = newThirdPerson;
   const newViewGun = makePistolVisual();
-  newViewGun.scale.multiplyScalar(0.7);
-  if (viewmodelGun.children[0]) viewmodelGun.remove(viewmodelGun.children[0]);
+  newViewGun.scale.multiplyScalar(0.9);
+  prepareViewmodel(newViewGun);
+  if (viewmodelGun.children[0]) {
+    const fallback = viewmodelGun.children[0];
+    viewmodelGun.remove(fallback);
+    disposeProceduralWeapon(fallback);
+  }
   viewmodelGun.add(newViewGun);
   applyGunOrientation();
   pushKillFeed('Pistol model loaded');
 }
 export function loadPistolModel() {
+  if (pistolTemplate || pistolLoading) return;
+  pistolLoading = true;
   new GLTFLoader().load('assets/pistol.glb', (gltf) => {
+    pistolLoading = false;
     pistolTemplate = gltf.scene;
     applyPistolModel();
   }, undefined, () => {
+    pistolLoading = false;
     pushKillFeed('Pistol model failed to load — using procedural gun');
   });
 }
@@ -2044,6 +2119,7 @@ if (!state.lightBoot) loadPistolModel();
 export const viewmodelGun = new THREE.Group();
 const viewmodelGunMesh = buildRifleMesh();
 viewmodelGunMesh.scale.setScalar(0.5);
+prepareViewmodel(viewmodelGunMesh);
 viewmodelGun.add(viewmodelGunMesh);
 viewmodelGun.position.set(0.22, -0.2, -0.42);
 viewmodelGun.visible = false;
@@ -2118,13 +2194,25 @@ function findBoneLike(root, substr) {
   return found;
 }
 
-export function setPlayerAction(name) {
-  if (!playerVis.actions || playerVis.currentActionName === name) return;
+export function setPlayerAction(name, fade = 0.16, restart = false) {
+  if (!playerVis.actions || (!restart && playerVis.currentActionName === name)) return;
   const to = playerVis.actions[name];
   if (!to) return;
-  Object.values(playerVis.actions).forEach((a) => { a.paused = false; a.stop(); });
-  to.reset().play();
+  const from = playerVis.actions[playerVis.currentActionName];
+  Object.values(playerVis.actions).forEach((action) => {
+    if (action !== from && action !== to) action.stop();
+  });
+  to.reset().setEffectiveWeight(1).play();
+  if (from && from !== to) to.crossFadeFrom(from, fade, false);
   playerVis.currentActionName = name;
+}
+
+export function playPlayerGesture(name, seconds) {
+  const action = playerVis.actions && playerVis.actions[name];
+  if (!action || state.isDead || state.paused || state.playerActionLock > 0) return;
+  action.setEffectiveTimeScale(action.getClip().duration / seconds);
+  setPlayerAction(name, 0.1, true);
+  state.playerActionLock = seconds;
 }
 export function triggerOneShot(action) {
   if (!action) return;
@@ -2169,6 +2257,7 @@ export function loadMainCharacter() {
     playerVis.rigObj = obj;
     playerRigObjRef = obj;
     applyPlayerScale();
+    playerVis.groundOffset = obj.position.y;
     playerVis.footBoneL = boneByName(obj, 'LeftFoot');
     playerVis.footBoneR = boneByName(obj, 'RightFoot');
     if (!playerVis.footBoneL && !playerVis.footBoneR) {
@@ -2211,7 +2300,8 @@ export function loadMainCharacter() {
       playerVis.shootAction = playerVis.mixer.clipAction(additiveShoot);
       playerVis.shootAction.blendMode = THREE.AdditiveAnimationBlendMode;
       playerVis.shootAction.setLoop(THREE.LoopOnce);
-      playerVis.shootAction.clampWhenFinished = true;
+      playerVis.shootAction.clampWhenFinished = false;
+      playerVis.shootAction.setEffectiveTimeScale(clips.shoot.duration / 0.18);
       playerVis.shootAction.enabled = true;
       playerVis.shootAction.setEffectiveWeight(1);
     }
@@ -2263,7 +2353,7 @@ const _gunSyncQuat = new THREE.Quaternion();
 const _gunGripQuat = new THREE.Quaternion();
 const _gunGripEuler = new THREE.Euler();
 export function syncHandGun() {
-  if (!playerVis.gunOnHand || !playerVis.handBone || state.inVehicle) return;
+  if (!playerVis.gunOnHand || !playerVis.handBone || state.inVehicle || state.firstPerson) return;
   playerVis.handBone.getWorldPosition(_gunSyncPos);
   playerVis.handBone.getWorldQuaternion(_gunSyncQuat);
   const grip = playerVis.handGrip;
@@ -2338,9 +2428,105 @@ knifeThirdPerson.visible = false;
 playerVis.gunPivot.add(knifeThirdPerson);
 export const knifeViewModel = buildKnifeMesh();
 knifeViewModel.scale.setScalar(1.4);
+prepareViewmodel(knifeViewModel);
 knifeViewModel.position.set(0.22, -0.18, -0.32);
 knifeViewModel.visible = false;
 camera.add(knifeViewModel);
+
+// Keep the original camera parent: muzzle/tracer world positions remain
+// correct immediately after mouse look, without synchronizing a proxy rig.
+// These inexpensive lights are visible only in the weapon layer.
+const viewmodelAmbient = new THREE.AmbientLight(0xdfe8ff, 1.5);
+viewmodelAmbient.layers.set(VIEWMODEL_LAYER);
+const viewmodelKey = new THREE.DirectionalLight(0xffe2bd, 2.0);
+viewmodelKey.layers.set(VIEWMODEL_LAYER);
+viewmodelKey.position.set(-1, 2, 3);
+camera.add(viewmodelKey);
+camera.add(viewmodelKey.target);
+viewmodelKey.target.position.set(0, 0, -1);
+scene.add(viewmodelAmbient);
+
+const levelViewmodels = new Set();
+export function registerLevelViewmodel(root){
+  prepareViewmodel(root);root.visible=false;camera.add(root);levelViewmodels.add(root);
+}
+
+// Warm shared weapon materials while the player is still in third person.
+// A small detached scene avoids compiling the entire city's materials.
+export function warmViewmodels(renderer) {
+  if (warmedViewmodelRevision === viewmodelRevision) return viewmodelWarmPromise || Promise.resolve();
+  const revision = viewmodelRevision;
+  warmedViewmodelRevision = revision;
+  const warmScene = new THREE.Scene();
+  warmScene.add(viewmodelAmbient.clone(), viewmodelKey.clone());
+  const materials=new Map();
+  for (const root of [viewmodelGun, knifeViewModel,...levelViewmodels]) {
+    const clone = root.clone(true);
+    clone.visible = true;
+    clone.traverse((object) => {
+      object.visible = true;
+      if(object.isMesh){
+        const copy=source=>{if(!materials.has(source)){const m=source.clone();materials.set(source,m);viewmodelWarmMaterials.add(m);}return materials.get(source);};
+        object.material=Array.isArray(object.material)?object.material.map(copy):copy(object.material);
+      }
+    });
+    warmScene.add(clone);
+  }
+  const warmCamera = camera.clone(false);
+  warmCamera.layers.set(VIEWMODEL_LAYER);
+  warmCamera.position.set(0,0,0);warmCamera.quaternion.identity();warmCamera.near=.01;warmCamera.far=10;warmCamera.updateProjectionMatrix();
+  // Private warmup materials stay alive for this level. Deferred pistol
+  // replacement cannot dispose a program while r160 polls its readiness.
+  viewmodelWarmError=null;
+  viewmodelWarmPromise=(async()=>{
+    if(renderer.compileAsync)await renderer.compileAsync(warmScene,warmCamera);
+    else renderer.compile(warmScene,warmCamera);
+    if(viewmodelRevision!==revision)return warmViewmodels(renderer);
+    if(!state.readyShown)renderer.render(warmScene,warmCamera);
+    readyViewmodelRevision=revision;
+  })().catch(error=>{if(viewmodelRevision!==revision)return warmViewmodels(renderer);viewmodelWarmError=error;throw error;});
+  return viewmodelWarmPromise;
+}
+
+// Call immediately after the world render. Clearing only depth lets nearby
+// walls stay behind the weapon while preserving the weapon's own occlusion.
+export function renderViewmodels(renderer) {
+  if(viewmodelWarmError)throw viewmodelWarmError;
+  warmViewmodels(renderer).catch(()=>{}); // surfaced through the render loop on the next frame
+  if (!viewmodelGun.visible && !knifeViewModel.visible) {
+    let visible=false;for(const root of levelViewmodels)if(root.visible){visible=true;break;}
+    if(!visible)return;
+  }
+  // If the view changes during warmup, defer only the weapon overlay until
+  // its shaders are ready rather than blocking the game on first reveal.
+  if (readyViewmodelRevision !== viewmodelRevision) return;
+  const layerMask = camera.layers.mask;
+  const background = scene.background;
+  const fog = scene.fog;
+  const autoClear = renderer.autoClear;
+  const matrixAutoUpdate = scene.matrixWorldAutoUpdate;
+  const shadowAutoUpdate = renderer.shadowMap.autoUpdate;
+  const shadowNeedsUpdate = renderer.shadowMap.needsUpdate;
+  try {
+    camera.layers.set(VIEWMODEL_LAYER);
+    scene.background = null;
+    scene.fog = null;
+    scene.matrixWorldAutoUpdate = false;
+    renderer.autoClear = false;
+    renderer.shadowMap.autoUpdate = false;
+    renderer.shadowMap.needsUpdate = false;
+    renderer.clearDepth();
+    renderer.render(scene, camera);
+  } finally {
+    camera.layers.mask = layerMask;
+    scene.background = background;
+    scene.fog = fog;
+    scene.matrixWorldAutoUpdate = matrixAutoUpdate;
+    renderer.autoClear = autoClear;
+    renderer.shadowMap.autoUpdate = shadowAutoUpdate;
+    renderer.shadowMap.needsUpdate = shadowNeedsUpdate;
+  }
+}
 
 /* ---------------------------------------------------------------------
    VEHICLE (drivable truck)
@@ -2547,13 +2733,15 @@ function buildZombieMesh() {
   return { group: g, legL, legR, armL, armR, head };
 }
 
+const avoidanceGrid = new CircleGrid();
 export function avoidObstacles(pos, move, extra = []) {
   const push = new THREE.Vector3();
   // Was: state.obstacles.concat(extra) — allocated a brand-new merged array
   // on every call (once per zombie per frame). Looping the two lists back
   // to back does the same job with zero extra allocation.
-  for (let i = 0; i < state.obstacles.length; i++) {
-    const o = state.obstacles[i];
+  const nearby = avoidanceGrid.query(state.obstacles, pos.x, pos.z);
+  for (let i = 0; i < nearby.length; i++) {
+    const o = nearby[i];
     const dx = pos.x - o.x, dz = pos.z - o.z;
     const d = Math.hypot(dx, dz) || 0.0001;
     const minD = o.r + 0.55;
@@ -2599,13 +2787,13 @@ export function lerpAngle(a, b, t) {
 // sole than 0.09 units).
 const ANKLE_TO_SOLE = 0.09;
 const _groundClampTmp = new THREE.Vector3();
-export function groundClampRig(rigObj, boneL, boneR, dt, rate = 10, ankleToSole = ANKLE_TO_SOLE) {
+export function groundClampRig(rigObj, boneL, boneR, dt, rate = 10, ankleToSole = ANKLE_TO_SOLE, groundY = 0) {
   if (!rigObj || (!boneL && !boneR)) return;
   let lowY = Infinity;
   if (boneL) { boneL.getWorldPosition(_groundClampTmp); lowY = Math.min(lowY, _groundClampTmp.y); }
   if (boneR) { boneR.getWorldPosition(_groundClampTmp); lowY = Math.min(lowY, _groundClampTmp.y); }
   const soleY = lowY - ankleToSole;
-  const idealY = rigObj.position.y - soleY;
+  const idealY = rigObj.position.y + groundY - soleY;
   rigObj.position.y = THREE.MathUtils.lerp(rigObj.position.y, idealY, Math.min(1, dt * rate));
 }
 
@@ -2661,10 +2849,11 @@ const deathSparkGeo = new THREE.IcosahedronGeometry(0.07, 0);
 const DEATH_SPARK_COLORS = [0xfff4c2, 0xffe37a, 0x9ff7ff, 0xffffff];
 export function spawnDeathSparkles(pos) {
   const center = pos.clone().add(new THREE.Vector3(0, 0.9, 0));
-  const flash = new THREE.PointLight(0xbfe9ff, 6, 6, 2);
-  flash.position.copy(center);
-  addLight(scene, flash);
-  setTimeout(() => scene.remove(flash), 120);
+  const flash = acquireEffectLight(0xbfe9ff, 6, 6, 2);
+  if (flash) {
+    flash.position.copy(center);
+    setTimeout(() => releaseEffectLight(flash), 120);
+  }
   for (let i = 0; i < 22; i++) {
     const color = DEATH_SPARK_COLORS[Math.floor(Math.random() * DEATH_SPARK_COLORS.length)];
     const s = new THREE.Mesh(deathSparkGeo, new THREE.MeshBasicMaterial({ color, transparent: true }));
@@ -2930,7 +3119,7 @@ export class Zombie {
     // since it can't physically get close enough to swing.
     const attackRange = state.shieldActive ? Math.max(1.55, (state.shieldRadius || 0) + 0.4) : 1.55;
     if (dist < 26) {
-      this.state = (dist < attackRange && !state.shieldActive) ? 'attack' : 'chase';
+      this.state = (dist < attackRange && !state.shieldActive && (!this.crowd || this.crowd.mayAttack)) ? 'attack' : 'chase';
     } else if (this.state !== 'idle') {
       this.state = 'idle';
     }
@@ -2943,7 +3132,17 @@ export class Zombie {
       x: z.mesh.position.x, z: z.mesh.position.z, r: 0.7,
     }));
     if (this.state === 'chase') {
-      const move = toPlayer.clone().normalize();
+      const move = this.crowd?.eligible
+        ? new THREE.Vector3(this.crowd.targetX-this.mesh.position.x,0,this.crowd.targetZ-this.mesh.position.z).normalize()
+        : toPlayer.clone().normalize();
+      if(this.crowd?.eligible&&!this.crowd.mayAttack&&dist<3.2){
+        // Waiting attackers go around the inner combat space, not through it.
+        const radial=toPlayer.clone().multiplyScalar(-1/Math.max(.001,dist));
+        if(dist<.001)radial.set(Math.sin(this.crowd.id*2.4),0,Math.cos(this.crowd.id*2.4));
+        const goalX=this.crowd.targetX-playerPos.x,goalZ=this.crowd.targetZ-playerPos.z;
+        const turn=Math.sign(radial.z*goalX-radial.x*goalZ)||1;
+        move.set(radial.x*Math.max(.35,3.3-dist)+radial.z*turn*.85,0,radial.z*Math.max(.35,3.3-dist)-radial.x*turn*.85).normalize();
+      }
       avoidObstacles(this.mesh.position, move, others);
       const PLAYER_RADIUS = 0.32;
       const ZOMBIE_RADIUS = 0.65;
@@ -2955,10 +3154,20 @@ export class Zombie {
       const MIN_DISTANCE = state.shieldActive
         ? Math.max(PLAYER_RADIUS + ZOMBIE_RADIUS, (state.shieldRadius || 0) + ZOMBIE_RADIUS * 0.6)
         : PLAYER_RADIUS + ZOMBIE_RADIUS;
-      const nextX = this.mesh.position.x + move.x * this.speed * dt;
-      const nextZ = this.mesh.position.z + move.z * this.speed * dt;
-      const nextDist = Math.hypot(playerPos.x - nextX, playerPos.z - nextZ);
-      if (nextDist > MIN_DISTANCE) {
+      let nextX = this.mesh.position.x + move.x * this.speed * dt;
+      let nextZ = this.mesh.position.z + move.z * this.speed * dt;
+      let nextDist = Math.hypot(playerPos.x - nextX, playerPos.z - nextZ);
+      const blockedAt=(x,z)=>this.crowd&&others.some(other=>other.owner!==this&&Math.hypot(x-other.x,z-other.z)<(other.owner?.isBoss?3.0:1.22)&&Math.hypot(x-other.x,z-other.z)<Math.hypot(this.mesh.position.x-other.x,this.mesh.position.z-other.z)-.00001);
+      let bodyBlocked=blockedAt(nextX,nextZ)||(this.crowd&&!crowdCanMove(this.mesh.position.x,this.mesh.position.z,nextX,nextZ));
+      if(bodyBlocked){
+        // Slide past a body instead of stopping an entire queue behind it.
+        for(const side of [1,-1]){
+          const x=this.mesh.position.x+move.z*side*this.speed*dt,z=this.mesh.position.z-move.x*side*this.speed*dt;
+          const distance=Math.hypot(playerPos.x-x,playerPos.z-z);
+          if(distance>MIN_DISTANCE&&!blockedAt(x,z)&&crowdCanMove(this.mesh.position.x,this.mesh.position.z,x,z)){nextX=x;nextZ=z;nextDist=distance;bodyBlocked=false;break;}
+        }
+      }
+      if (nextDist > MIN_DISTANCE && !bodyBlocked) {
         this.mesh.position.x = nextX;
         this.mesh.position.z = nextZ;
       } else if (state.shieldActive && dist < MIN_DISTANCE) {
@@ -2973,7 +3182,7 @@ export class Zombie {
         this.mesh.position.z = playerPos.z + pushBack.z * MIN_DISTANCE;
       }
       this.mesh.position.x = clampZombieX(this.mesh.position.x, this.mesh.position.z);
-      const targetAngle = Math.atan2(move.x, move.z);
+      const targetAngle = this.crowd?.eligible ? Math.atan2(toPlayer.x,toPlayer.z) : Math.atan2(move.x, move.z);
       this.mesh.rotation.y = lerpAngle(this.mesh.rotation.y, targetAngle, dt * 5);
       this.playWalk(dt, 8, 0.55 + this.speed * 0.2);
     } else if (this.state === 'attack') {
@@ -2981,7 +3190,7 @@ export class Zombie {
       this.mesh.rotation.y = lerpAngle(this.mesh.rotation.y, targetAngle, dt * 8);
       this.attackCooldown -= dt;
       this.playWalk(dt, 3, 0.7);
-      if (this.attackCooldown <= 0 && !state.inVehicle) {
+      if (this.attackCooldown <= 0 && !state.inVehicle && (!this.crowd || this.crowd.mayAttack)) {
         this.attackCooldown = 0.95;
         if (!state.shieldActive) {
           damagePlayer((8 + Math.random() * 5) * state.zombieDamageMul);
@@ -3050,6 +3259,37 @@ export class Zombie {
 // Reused every frame instead of allocated fresh — its contents get
 // overwritten each call, only its backing array capacity is kept.
 const _zombieNeighborSnapshot = [];
+const enemyCrowd=new EnemyCrowd(),crowdSolids=[],crowdSolidGrid=new CircleGrid(8,1);
+let crowdBodyCount=-1;
+function crowdCanMove(x,z,nx,nz){
+  if(Math.abs(clampZombieX(nx,nz)-nx)>.001||nz < -201||nz>39)return false;
+  // The crowd uses gameplay collision bounds, not repeated mesh triangle rays.
+  // Cache static bodies once; new cover/body creation invalidates the cache.
+  if(crowdBodyCount!==world.bodies.length){
+    crowdBodyCount=world.bodies.length;crowdSolids.length=0;
+    for(const body of world.bodies){
+      if(body.mass!==0||body.collisionResponse===false||!body.shapes.some(shape=>shape.type===CANNON.Shape.types.BOX))continue;
+      body.updateAABB();const a=body.aabb.lowerBound,b=body.aabb.upperBound;
+      if(b.y<.35||a.y>1.8||!Number.isFinite(a.x+b.x+a.z+b.z))continue;
+      crowdSolids.push({x:(a.x+b.x)/2,z:(a.z+b.z)/2,r:Math.hypot(b.x-a.x,b.z-a.z)/2+.35,minX:a.x-.35,maxX:b.x+.35,minZ:a.z-.35,maxZ:b.z+.35});
+    }
+    crowdSolidGrid.rebuild(crowdSolids);
+  }
+  const dx=nx-x,dz=nz-z;
+  for(const box of crowdSolidGrid.query(crowdSolids,(x+nx)/2,(z+nz)/2)){
+    if(x>box.minX&&x<box.maxX&&z>box.minZ&&z<box.maxZ){
+      const oldDepth=Math.min(x-box.minX,box.maxX-x,z-box.minZ,box.maxZ-z),newDepth=Math.min(nx-box.minX,box.maxX-nx,nz-box.minZ,box.maxZ-nz);
+      if(newDepth<oldDepth-.000001)continue;return false;
+    }
+    let enter=0,exit=1;
+    if(Math.abs(dx)<.000001){if(x<box.minX||x>box.maxX)continue;}
+    else {const a=(box.minX-x)/dx,b=(box.maxX-x)/dx;enter=Math.max(enter,Math.min(a,b));exit=Math.min(exit,Math.max(a,b));}
+    if(Math.abs(dz)<.000001){if(z<box.minZ||z>box.maxZ)continue;}
+    else {const a=(box.minZ-z)/dz,b=(box.maxZ-z)/dz;enter=Math.max(enter,Math.min(a,b));exit=Math.min(exit,Math.max(a,b));}
+    if(enter<=exit)return false;
+  }
+  return true;
+}
 
 // Drives every zombie's update() for one frame. Replaces the previous
 // `state.zombies.forEach(z => z.update(dt, playerPos))`, which left each
@@ -3059,16 +3299,19 @@ const _zombieNeighborSnapshot = [];
 // player is being chased by a full pack). Building the snapshot once
 // here and handing the same array to every zombie makes it O(n).
 export function updateZombies(dt, playerPos) {
+  const coordinated=state.levelId===3&&!state.isDead&&!state.paused&&!state.narrativeBlocked;
+  if(coordinated)enemyCrowd.prepare(state.zombies,playerPos,dt,{shieldRadius:state.shieldActive?(state.shieldRadius||0):0,inVehicle:state.inVehicle});
   _zombieNeighborSnapshot.length = 0;
   for (let i = 0; i < state.zombies.length; i++) {
     const z = state.zombies[i];
     if (z.alive) {
-      _zombieNeighborSnapshot.push({ x: z.mesh.position.x, z: z.mesh.position.z, r: 0.7 });
+      _zombieNeighborSnapshot.push({ x: z.mesh.position.x, z: z.mesh.position.z, r: 0.7, owner:z });
     }
   }
   for (let i = 0; i < state.zombies.length; i++) {
     state.zombies[i].update(dt, playerPos, _zombieNeighborSnapshot);
   }
+  if(coordinated)enemyCrowd.separate(playerPos,dt,crowdCanMove,state.shieldActive?(state.shieldRadius||0):0);
 }
 
 export function spawnDepotGuards() {

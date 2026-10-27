@@ -103,7 +103,9 @@ function deckFor(key) {
   return d;
 }
 
-function targetVolume(key) { return TRACKS[key].volume; }
+let cinematicDuck=1;
+export function setCinematicDuck(value=1){cinematicDuck=Math.max(0,Math.min(1,value));applyContext();}
+function targetVolume(key) { return TRACKS[key].volume*cinematicDuck; }
 
 function applyContext() {
   if (!currentKey) return;

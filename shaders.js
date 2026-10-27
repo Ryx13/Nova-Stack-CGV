@@ -318,8 +318,16 @@ export const puddleVertexShader = `
   varying vec3 vViewDir;
   void main() {
     vUv = uv;
-    vNormal = normalize(normalMatrix * normal);
-    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    vec3 objectNormal = normal;
+    vec4 localPosition = vec4(position, 1.0);
+    #ifdef USE_INSTANCING
+      mat3 im = mat3(instanceMatrix);
+      objectNormal /= vec3(dot(im[0],im[0]),dot(im[1],im[1]),dot(im[2],im[2]));
+      objectNormal = im * objectNormal;
+      localPosition = instanceMatrix * localPosition;
+    #endif
+    vNormal = normalize(normalMatrix * objectNormal);
+    vec4 mv = modelViewMatrix * localPosition;
     vViewDir = normalize(-mv.xyz);
     gl_Position = projectionMatrix * mv;
   }

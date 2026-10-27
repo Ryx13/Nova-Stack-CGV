@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {GuardianCombat,GuardianGas} from '../GuardianCombat.js';
+const b={x:0,z:0},far={x:0,z:9},near={x:0,z:2};
+const c=new GuardianCombat();assert.equal(c.damage(20,true),0);
+c.update(3.5,b,far);assert.equal(c.phase,'chase');c.update(5,b,far);assert.equal(c.phase,'vent_warning');
+c.update(1.79,b,near);assert.equal(c.phase,'vent_warning');assert.deepEqual(c.direction,{x:0,z:1});
+c.update(.01,b,near);assert.equal(c.phase,'vent');c.update(2.4,b,near);assert.equal(c.phase,'recovery');
+assert.equal(c.damage(20,true),50);assert.equal(c.damage(20,false),20);assert.equal(c.damage(NaN,true),0);
+c.update(3.4,b,near);c.attacks=0;c.update(5,b,near);assert.equal(c.phase,'slam_warning');c.update(1.3,b,far);assert.equal(c.phase,'slam');c.update(.9,b,far);assert.equal(c.phase,'recovery');
+c.enter('dying');assert.equal(c.damage(100,true),0);c.update(3.19,b,far);assert.equal(c.phase,'dying');c.update(.01,b,far);assert.equal(c.phase,'defeated');c.update(10,b,far);assert.equal(c.phase,'defeated');
+const g=new GuardianGas();g.spawn(0,0);assert.equal(g.update(.1,near),0);assert.equal(g.update(.5,near),7);assert.equal(g.update(.7,far),0);assert.equal(g.update(.1,near),7);
+g.update(7.1,near);assert.equal(g.clouds.some(c=>c.active),false);assert.equal(g.update(1,near),0);
+for(let i=0;i<10;i++)g.spawn(i,0);assert.equal(g.clouds.length,3);g.clear();assert.equal(g.clouds.some(c=>c.active),false);
+console.log('PASS: attack anticipation, committed aim, slam/vent/recovery, valve damage, full death, gas damage cadence, radius, expiry, fixed pool and cleanup');
