@@ -191,3 +191,33 @@ export const state = {
   // Shape: { pos: THREE.Vector3, label: string }
   compassOverride: null,
 };
+
+/* Everything a single run changes, captured with its starting value
+   before any module touches it. resetRunState() puts it all back so a
+   level can restart in place (Actions.js restartLevel) instead of
+   reloading the page. Level config (skip flags, multipliers, time of
+   day), loading flags and player preferences (view mode, scale, grip)
+   are deliberately left out — they belong to the session, not the run. */
+const RUN_KEYS = [
+  'stage', 'ingredientCollected', 'runTime', 'runReported',
+  'kills', 'coins', 'killStreak', 'spawnedTotal', 'spawnTimer',
+  'playerHealth', 'heartbeatTimer', 'hurtGrace', 'playerStamina', 'staminaExhausted',
+  'isDead', 'paused', 'narrativeBlocked', 'walkCycle', 'footTimer', 'crouching',
+  'isSprinting', 'playerMoving', 'playerFacingAngle', 'playerActionLock', 'meleeTimer',
+  'bobPhase', 'currentSpeed', 'sprintToggle', 'lastWTapTime',
+  'currentWeapon', 'ammoMag', 'ammoReserve', 'reloading', 'reloadTimer', 'fireCooldown',
+  'yaw', 'pitch', 'recoilPitch',
+  'inVehicle', 'carSteer', 'carThrottle', 'rolloverTimer', 'carFuel',
+  'shieldActive', 'shieldTimer', 'shieldDuration', 'shieldRadius', 'shake',
+  'cinematic', 'dying',
+  'girlPos', 'girlCaught', 'portReached', 'hasRadarUpgrade',
+  'adrenalineCharges', 'adrenalineActive', 'adrenalineTimer', 'compassOverride',
+];
+const runDefaults = Object.fromEntries(RUN_KEYS.map((k) => [k, state[k]]));
+
+export function resetRunState() {
+  Object.assign(state, runDefaults);
+  state.keys = {};
+  state.firePressed = false;
+  state.deathInfection = undefined;
+}

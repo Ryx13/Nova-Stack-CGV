@@ -61,6 +61,9 @@ const LEVEL_CONFIG = {
   id: 3,
   name: 'Level 3 — The Broadcast Tower',
   skip: { car: true, depot: true },
+  // The Guardian, cure projector, stealth and quarantine systems have no
+  // reset yet, so Retry reloads the page for this level.
+  restartInPlace: false,
 };
 
 export function startLevel(mode) {

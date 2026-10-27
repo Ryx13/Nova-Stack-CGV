@@ -205,8 +205,9 @@ async function launchLevel(levelId, mode) {
   }
 }
 
-// "Retry" on an end screen reloads the page with a resume request, so
-// the same level + mode relaunches straight away (see account.js).
+// "Continue to Level N" and "Main menu" reload the page with a resume
+// request, so the next level (or the menu) comes up straight away (see
+// account.js). Retry doesn't reload — the level restarts in place.
 async function handleResume() {
   const req = takeResumeRequest();
   if (!req || !req.level || !LEVEL_LOADERS[req.level]) return;

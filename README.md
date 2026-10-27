@@ -136,8 +136,13 @@
   `firestore.rules`) — sign up / sign in / Google / guest, per-level stats and
   best times, online leaderboard. Runs offline as guest until Firebase is
   configured: see **CLOUD_SETUP.md**.
-- **Retry** relaunches the same level + mode directly; **Main menu** button on
-  every end screen.
+- **Retry** (end screens) and **Restart Level** (pause menu) restart the
+  level in place, with no page reload: run state, player, infected, drops,
+  barrels and the level's mission are reset (`restartLevel` in
+  `Actions.js`, plus each level's `registerLevelReset` hook); the intro
+  doesn't replay. Level 3 opts out (`restartInPlace: false`) and still
+  relaunches through a page reload. **Main menu** button on every end
+  screen.
 - **Levels are linked** — winning a level offers a primary "Continue to
   Level N" button that auto-advances after 6 s (any other click cancels),
   booting the next level directly with the same day/night mode. The Level 3
@@ -571,7 +576,7 @@ playtest it and report anything that looks off, especially:
   list, but other buildings never needed it since zombies are normally kept
   well clear of them.
 - If the zombie's walk cycle looks like it's facing backwards once you see
-  it moving, open `game.js` and flip `ZOMBIE_RIG_YAW_OFFSET` from `0` to
+  it moving, open `state.js` and flip `ZOMBIE_RIG_YAW_OFFSET` from `0` to
   `Math.PI` — that's the only orientation guess I couldn't verify without a
   browser in front of me.
 
@@ -606,7 +611,6 @@ playtest it and report anything that looks off, especially:
 - `account.js`, `cloud.js`, `firebase-config.js`, `firestore.rules`,
   `credits.js` — accounts, cloud save, leaderboard, credits (see
   **CLOUD_SETUP.md**)
-- `game.js` — the original single-file build, kept for reference
 - `assets/characters/` — roster characters + shared `animations.glb`;
   `assets/*.glb` — rigged models (zombies, vehicles, props);
   `assets/music/` — the three CC-BY soundtrack loops;

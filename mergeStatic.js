@@ -16,7 +16,9 @@
    - Only plain lit/unlit opaque materials merge. Transparent, custom
      shader (fire, toxic, puddles), sprites, lines, points, skinned and
      instanced meshes are left exactly as they were, as is anything the
-     game tracks as dynamic (coins).
+     game tracks as dynamic (coins, and anything flagged
+     userData.dynamic — e.g. vending-machine shelf cards, which sales
+     take away).
    - Merged originals are detached, not destroyed: the third-person
      camera raycasts state.occluders every frame, and those small meshes
      (with their last world matrix) stay far cheaper to test than one
@@ -99,7 +101,7 @@ export function mergeStaticScenery(scene, { instances = state.levelId !== 2 } = 
   const visit = (o, inStatic, visible) => {
     const isStatic = inStatic || o.userData.staticScenery;
     const vis = visible && o.visible;
-    if (dynamic.has(o)) return;
+    if (dynamic.has(o) || o.userData.dynamic) return;
     for (const c of [...o.children]) visit(c, isStatic, vis);
     if (isStatic && vis && o.isMesh && o.matrixWorld.determinant() > 0 && !o.isSkinnedMesh && !o.isInstancedMesh && o.geometry && !o.morphTargetInfluences) {
       const mats = Array.isArray(o.material) ? o.material : [o.material];

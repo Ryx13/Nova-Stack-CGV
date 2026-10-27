@@ -233,6 +233,7 @@ function addEndScreenButtons(el, result) {
   }
   const row = document.createElement('div');
   row.className = 'end-actions';
+  row.dataset.runActions = ''; // removed again on an in-place restart
   row.innerHTML = `
     <button type="button" data-act="menu">Main menu</button>
     <button type="button" data-open-leaderboard>Leaderboard</button>
@@ -265,19 +266,34 @@ function stopAutoAdvance() {
   autoAdv = null;
 }
 
-/* Restarting still reloads the page (each level builds its world at
-   module load time), but it no longer sends the player back through
-   title → level → mode: main.js reads this and relaunches immediately,
-   and the sign-in session survives the reload. */
-const RESUME_KEY = 'deadway.resume';
+/* Restarting resets the running level in place, with no page reload:
+   Actions.js registers its restartLevel() here once a level has booted.
+   This side clears the end screens — hides them and strips what
+   finishRun added — so the next run's end builds them fresh. */
+let restartHandler = null;
+export function setRestartHandler(fn) { restartHandler = fn; }
 export function retryLevel() {
-  try { sessionStorage.setItem(RESUME_KEY, JSON.stringify({ level: state.levelId || 1, mode: state.timeOfDay || 'night' })); } catch { /* ignore */ }
-  location.reload();
+  stopAutoAdvance();
+  // A level that can't reset itself (Level 3) relaunches through a reload
+  if (!restartHandler) {
+    try { sessionStorage.setItem(RESUME_KEY, JSON.stringify({ level: state.levelId || 1, mode: state.timeOfDay || 'night' })); } catch { /* ignore */ }
+    location.reload();
+    return;
+  }
+  document.querySelectorAll('.end-screen').forEach((el) => {
+    el.classList.add('hidden');
+    el.querySelectorAll('.run-summary, .end-next, .campaign-complete, [data-run-actions]').forEach((n) => n.remove());
+  });
+  restartHandler();
 }
 
-/* The campaign chain: 1 → 2 → 3. Same resume-request mechanism as
-   retryLevel — the current day/night mode carries over and the session
-   survives the reload. */
+/* The campaign chain: 1 → 2 → 3. Switching level still reloads the page
+   (each level builds its world at module load time), but it doesn't send
+   the player back through
+   title → level → mode: main.js reads this and relaunches immediately,
+   and the sign-in session survives the reload. The current day/night
+   mode carries over. */
+const RESUME_KEY = 'deadway.resume';
 const NEXT_LEVEL = { 1: 2, 2: 3 };
 export function playNextLevel() {
   const next = NEXT_LEVEL[state.levelId];

@@ -222,6 +222,7 @@ export class VendingMachine {
     // shared module state, so sibling machines — even ones built from the
     // same catalog preset — never see each other's prices, stock, or
     // selection.
+    this._catalog = catalog; // kept for restock()
     this._categories = buildCategories(catalog);
     this._texs = [];
     this._cardMats = [];
@@ -458,6 +459,7 @@ export class VendingMachine {
         const y = rowCenters[categoryIndex];
         const card = new THREE.Mesh(new THREE.PlaneGeometry(cardWidth, cardHeight), material);
         card.position.set(x, y, cardZ);
+        card.userData.dynamic = true; // sales remove it — keep it out of mergeStatic
         this.root.add(card);
 
         const highlight = new THREE.LineSegments(
@@ -495,6 +497,33 @@ export class VendingMachine {
     this._renderDisplay();
     this._syncCatalogCardSelection();
     return true;
+  }
+
+  /** A level restart: every shelf back to its catalog stock, the SOLD
+      OUT labels taken down. */
+  restock() {
+    this._catalogCards.forEach(({ card, highlight }) => {
+      this.root.remove(card, highlight);
+      card.geometry.dispose();
+      highlight.geometry.dispose();
+    });
+    this._soldOutLabels.forEach((label) => {
+      if (!label) return;
+      this.root.remove(label);
+      label.geometry.dispose();
+    });
+    // Their materials and textures go too; the new cards make their own
+    const oldMaps = new Set(this._cardMats.map((m) => m.map));
+    this._cardMats.forEach((m) => { m.map.dispose(); m.dispose(); });
+    this._cardMats = [];
+    this._texs = this._texs.filter((t) => !oldMaps.has(t));
+    this._catalogCards = [];
+    this._soldOutLabels = [];
+    this._categories = buildCategories(this._catalog);
+    this._buildCatalogCards();
+    if (this._display) this._display.selection = null;
+    this._renderDisplay();
+    this._syncCatalogCardSelection();
   }
 
   // "SOLD OUT" across an empty shelf (only with the soldOutShelves option)

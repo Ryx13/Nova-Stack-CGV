@@ -3251,6 +3251,13 @@ export class Zombie {
   }
   remove() {
     scene.remove(this.mesh);
+    // A mixer caches an action per clip; let them go with the zombie.
+    if (this.mixer) {
+      this.mixer.stopAllAction();
+      this.mixer.uncacheRoot(this.mixer.getRoot());
+      this.mixer = null;
+      this.hasAnim = false;
+    }
     const idx = state.zombies.indexOf(this);
     if (idx >= 0) state.zombies.splice(idx, 1);
   }
@@ -3362,4 +3369,43 @@ export function spawnZombie() {
   const zom = new Zombie(new THREE.Vector3(x, 0, z));
   state.zombies.push(zom);
   state.spawnedTotal++;
+}
+
+/* ---------------------------------------------------------------------
+   RESTART — every infected gone, the player back on the spawn in their
+   idle, the truck back at its spot. Called by Actions.js restartLevel()
+   after resetRunState(), so yaw/health/etc. are already the defaults.
+--------------------------------------------------------------------- */
+export function resetCharacters() {
+  for (const z of [...state.zombies]) z.remove();
+
+  playerBody.position.set(1.5, playerHeight / 2 + 0.25, 30);
+  playerBody.velocity.set(0, 0, 0);
+  playerVis.group.position.set(playerBody.position.x, 0, playerBody.position.z);
+  playerVis.group.visible = true;
+  if (playerVis.actions) {
+    playerVis.currentActionName = null; // force the switch even if idle was last
+    setPlayerAction('idle');
+  }
+  if (playerVis.shootAction) playerVis.shootAction.stop();
+
+  if (chassisBody) {
+    chassisBody.position.set(carSpawn.x, 1.05, carSpawn.z);
+    chassisBody.quaternion.set(0, 0, 0, 1);
+    chassisBody.velocity.set(0, 0, 0);
+    chassisBody.angularVelocity.set(0, 0, 0);
+    for (let i = 0; i < 4; i++) {
+      vehicle.setSteeringValue(0, i);
+      vehicle.applyEngineForce(0, i);
+      vehicle.setBrake(0, i);
+    }
+    carVis.group.position.copy(chassisBody.position);
+    carVis.group.quaternion.copy(chassisBody.quaternion);
+  }
+
+  // The street's opening pack, as at boot (loadZombieTemplate) — around
+  // the spawn, so after the player is back on it
+  if (zombieTemplateResolved) {
+    for (let i = 0, n = Math.round(6 * state.zombieCountMul); i < n; i++) spawnZombie();
+  }
 }

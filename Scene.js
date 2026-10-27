@@ -982,7 +982,16 @@ export function createMissionTracker(depotYard) {
     if (state.ingredientCollected) return;
     if (pos.distanceTo(DEPOT_POS) < 3) collectIngredient();
   }
-  return { collectIngredient, checkDepotObjective };
+  // Restart: the sample back in the depot, extraction dark again
+  function reset() {
+    scene.add(depotYard.crate);
+    depotYard.marker.visible = true;
+    depotYard.markerLight.intensity = 2.4;
+    depotYard.beam.visible = true;
+    extractRing.visible = false;
+    extractLight.intensity = 0;
+  }
+  return { collectIngredient, checkDepotObjective, reset };
 }
 
 /* ---------------------------------------------------------------------

@@ -183,6 +183,7 @@ export function updateExplosions(dt) {
   }
 }
 
+let barrelSpots = []; // kept so a restart can put blown barrels back
 export function loadBarrels() {
   new GLTFLoader().load('assets/barrel.glb', (gltf) => {
     barrelTemplate = gltf.scene;
@@ -198,9 +199,33 @@ export function loadBarrels() {
     if (!state.skipDepot) {
       BARREL_SPOTS.push([DEPOT_POS.x - 9, DEPOT_POS.z + 6], [DEPOT_POS.x + 7, DEPOT_POS.z - 7]);
     }
+    barrelSpots = BARREL_SPOTS;
     BARREL_SPOTS.forEach(([x, z]) => new Barrel(new THREE.Vector3(x, 0, z)));
   }, undefined, () => { pushKillFeed('Barrel model failed to load'); });
   if (!state.lazyExplosionVFX) fetchExplosionTemplate();
+}
+
+/* RESTART — clears every drop, coin, blast and spark the run left lying
+   around, puts every barrel back (blown or not, so none is doubled up)
+   and drops the shield. Called by Actions.js restartLevel(). */
+export function resetPowerUps() {
+  for (const list of [state.pickups, state.powerups, state.coinPickups]) {
+    list.forEach((p) => scene.remove(p.mesh));
+    list.length = 0;
+  }
+  state.activeExplosions.forEach((e) => {
+    if (e.obj) scene.remove(e.obj);
+    if (e.light) scene.remove(e.light);
+  });
+  state.activeExplosions.length = 0;
+  state.explosiveBarrels.forEach((b) => {
+    scene.remove(b.mesh);
+    if (b.collisionBody) world.removeBody(b.collisionBody);
+  });
+  state.explosiveBarrels.length = 0;
+  if (barrelTemplate) barrelSpots.forEach(([x, z]) => new Barrel(new THREE.Vector3(x, 0, z)));
+  if (shieldMesh) shieldMesh.visible = false;
+  updateShieldHUD();
 }
 
 /* ---------------------------------------------------------------------

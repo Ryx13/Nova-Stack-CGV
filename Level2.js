@@ -19,7 +19,7 @@ import { scene, camera, addStaticBox, pushKillFeed, dom, sfx, KILL_TARGET, STREE
 import { state } from './state.js';
 import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis, playerBody, spawnZombie, loadDeferredAssets, updateBlinkingLamps, updateFireLights, syncHandGun, spawnChargers } from './characters.js';
 import { spawnCoin } from './PowerUps.js';
-import { bootLevel, registerLevelTick, levelKeyHooks } from './Actions.js';
+import { bootLevel, registerLevelTick, registerLevelReset, levelKeyHooks } from './Actions.js';
 import { VendingMachine, makeIcon } from './VendingMachine.js';
 import { finishRun } from './account.js';
 import { instantiateCharacter, loadGLB, fitClip, clipsFor, boneByName } from './roster.js';
@@ -97,6 +97,7 @@ export function startLevel(mode) {
   // so loading-screen seconds never count.
   buildLevel2EndScreens();
   registerLevelTick(updateMission);
+  registerLevelReset(resetLevel2);
 }
 
 // Handles for the logic phase: { machines, escapePoint } from the
@@ -607,8 +608,7 @@ function buildCollapseZone() {
   makeWreck(-6.5, -138, -1.0);
   makeWreck(5.5, -152, 0.9);
   scatterDebris(28, -142, 10, 30);
-
-  placeCoinCluster(27, -143, 9);
+  // (its coin cluster is placed with the rest, in placeCoinClusters)
 }
 
 /** ZONE DRESSING — Entrance / Centre clutter and the Final Approach
@@ -664,20 +664,25 @@ function buildLevel2Scene() {
     adrenaline: placeVendingMachine(-39.5, -53, Math.PI / 2, adrenalineCatalog, ADRENALINE_GLOW),
   };
 
-  // Persistent coin clusters along the route — the machine economy's
-  // second income stream besides zombie drops.
+  placeCoinClusters();
+
+  return { machines, escapePoint: port.escapePoint, boat: port.boat };
+}
+
+// Persistent coin clusters along the route — the machine economy's
+// second income stream besides zombie drops. Placed again on a restart.
+function placeCoinClusters() {
   placeCoinCluster(2, 8, 3);       // Outskirts
   placeCoinCluster(-3, -5, 3);     // Outskirts
   placeCoinCluster(-28, -53, 3);   // west pocket detour reward
   placeCoinCluster(7.5, -62, 3);   // past the blockage squeeze
   placeCoinCluster(4, -80, 3);     // Centre
   placeCoinCluster(-5, -105, 3);   // Centre
+  placeCoinCluster(27, -143, 9);   // collapse-zone nest
   placeCoinCluster(0, -172, 4);    // Final Approach
   placeCoinCluster(-2, -188, 4);   // Final Approach
   placeCoinCluster(5, -195, 3);    // Port edge
   placeCoinCluster(-5, -200, 3);   // Port edge
-
-  return { machines, escapePoint: port.escapePoint, boat: port.boat };
 }
 
 
@@ -1325,6 +1330,47 @@ function updateMission(dt) {
     escalationTimer = ESCALATE_START - (ESCALATE_START - ESCALATE_MIN) * progress;
     spawnZombie();
   }
+}
+
+/** RESTART (Actions.js restartLevel, after the shared reset) — the girl
+    back on her mark with her head start, the boat moored, the machines
+    restocked, the route's coins back, and the chase clock re-armed. The
+    briefing doesn't replay, so the start ambush that follows it is
+    sprung straight away. */
+function resetLevel2() {
+  loseCinematic = null;
+  missionStartTime = 0;
+  escalationTimer = ESCALATE_START;
+  beatClosingIn = beatNearingPort = beatFinalStretch = false;
+  girlSpotted = girlAnnounced = false;
+  closeShotPicker();
+  adrenalineStock = ADRENALINE_START_STOCK;
+
+  const boat = lv2Scene.boat;
+  boat.departing = false;
+  boat.group.position.copy(BOAT_MOOR);
+  boat.group.rotation.set(0, 0, 0);
+  boat.wake.material.opacity = 0;
+  boat.wake.scale.y = 1;
+  boat.wake.position.z = BOAT_LENGTH / 2 + 8;
+
+  if (girl) {
+    const g = girl.group;
+    scene.attach(g); // out of the boat, or back after being grabbed
+    const wp = GIRL_WAYPOINTS[0], next = GIRL_WAYPOINTS[1];
+    g.position.set(wp.x, wp.y, wp.z);
+    g.rotation.set(0, Math.atan2(next.x - wp.x, next.z - wp.z) + GIRL_RIG_YAW_OFFSET, 0);
+    girl.wpIndex = 1;
+    if (girl.idle && girl.run) { girl.run.stop(); girl.idle.reset().play(); }
+    state.girlPos = g.position;
+  }
+
+  for (const def of lv2Machines) def.machine.restock();
+  placeCoinClusters();
+  lv2HUD.setGirlDistance(null);
+  lv2HUD.setItemCount('radar', 0);
+  lv2HUD.setItemCount('adrenaline', 0);
+  spawnStartAmbush();
 }
 
 

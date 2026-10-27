@@ -2,13 +2,13 @@ import {raycastAnimatedTargets} from './AnimatedRaycast.js';
 import {stepPlayerPhysics} from './PhysicsStep.js';
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
-import { state } from './state.js';
+import { state, resetRunState } from './state.js';
 import { createStreetAtmosphere } from './StreetAtmosphere.js';
 import { updateLocomotion } from './Movement.js';
 import { RayCandidates } from './RayCandidates.js';
 import { addContactShading } from './ContactShading.js';
 import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
-import { retryLevel } from './account.js';
+import { retryLevel, setRestartHandler } from './account.js';
 import {levelWeapon,levelWeaponIds,nextWeapon} from './WeaponSlots.js';
 import {
   scene, world, camera, renderer, dom, sfx, sky,
@@ -36,10 +36,10 @@ import {
   ZOMBIE_TARGET_HEIGHT,
   loadMainCharacter, loadZombies, loadCars, loadBuildings, loadTrashCans, loadObstacles,
   loadStreetSurface, spawnDepotGuards, spawnZombie, updateZombies,
-  adjustPlayerScale, renderViewmodels, warmViewmodels,
+  adjustPlayerScale, renderViewmodels, warmViewmodels, resetCharacters,
 } from './characters.js';
 import {
-  loadBarrels, initShield,
+  loadBarrels, initShield, resetPowerUps,
   updatePickups, updatePowerups, updateCoins, updateExplosions, updateShield,
 } from './PowerUps.js';
 
@@ -55,6 +55,10 @@ const levelPreparations = [];
 export function registerLevelPreparation(fn) { levelPreparations.push(fn); }
 export function registerLevelTick(fn) { levelTicks.push(fn); }
 export function registerLevelPreTick(fn) { levelPreTicks.push(fn); }
+// Called by restartLevel() after the shared reset, so a level can put
+// its own mission state back (Level 2: the girl and the boat).
+const levelResets = [];
+export function registerLevelReset(fn) { levelResets.push(fn); }
 // Key handlers a level module drops in, e.g. { KeyE: fn, KeyG: fn }.
 export const levelKeyHooks = {};
 
@@ -1187,7 +1191,7 @@ function initInputHandlers() {
   // Quit to the title screen: a fresh page load is the clean teardown (the
   // level owns a renderer, physics world and timers). Asks twice so a
   // stray click doesn't throw away a run.
-  // Restart relaunches the same level and day/night mode (retryLevel),
+  // Restart resets the same level in place (retryLevel -> restartLevel),
   // with the same ask-twice guard.
   armTwoClick(document.getElementById('pause-menu-btn'), 'Quit this run? Click again', () => location.reload());
   armTwoClick(document.getElementById('pause-restart-btn'), 'Restart this level? Click again', retryLevel);
@@ -1302,8 +1306,59 @@ export function bootLevel(levelConfig = {}) {
 
   addLight(scene, muzzleLight);
   startAnimationLoop();
+  // A level whose mission can't be put back in place (restartInPlace:
+  // false) leaves no handler, so Retry reloads the page instead.
+  if (levelConfig.restartInPlace !== false) setRestartHandler(restartLevel);
 
   if (levelConfig.name) pushKillFeed(`${levelConfig.name} loaded`);
+}
+
+/* ---------------------------------------------------------------------
+   RESTART IN PLACE — the world (scene, physics, buildings, loaded
+   models) is built once per page and stays; everything a run changes is
+   put back: run state, the player, every infected, drops, barrels, the
+   mission, the HUD, then each level's own reset hook. The level intro
+   doesn't replay — a restart drops straight back into play.
+--------------------------------------------------------------------- */
+export function restartLevel() {
+  document.getElementById('overrun-caption')?.remove();
+  resetRunState();
+  resetCharacters();
+  resetPowerUps();
+  if (missionTracker) missionTracker.reset();
+  state.activeSparks.forEach((s) => scene.remove(s));
+  state.activeSparks.length = 0;
+  state.activeTracers.forEach((tr) => { scene.remove(tr); tr.geometry.dispose(); tr.material.dispose(); });
+  state.activeTracers.length = 0;
+  stepAccumulator = 0;
+  clock.getDelta(); // don't let the time spent on the end screen land in one frame
+
+  if (dom.pauseOverlay) dom.pauseOverlay.classList.add('hidden');
+  dom.hud.classList.remove('hidden');
+  dom.reloadText.classList.add('hidden');
+  dom.prompt.classList.add('hidden');
+  if (dom.speedo) dom.speedo.classList.add('hidden');
+  dom.healthFill.style.width = '100%';
+  if (dom.bloodVig) dom.bloodVig.style.opacity = '0';
+  if (dom.criticalPulse) dom.criticalPulse.classList.remove('active');
+  if (monitor.el) {
+    monitor.value = 0;
+    monitor.shown = false;
+    monitor.el.classList.remove('on', 'fatal');
+  }
+  setWeaponVisualsVisible();
+
+  if (!state.skipCar) spawnDepotGuards();
+  for (const reset of levelResets) reset();
+
+  updateAmmoHUD();
+  updateObjectiveHUD();
+  updateWeaponHUD();
+  updateCoinHUD();
+  if (!state.skipCar) updateFuelHUD();
+  sfx.setEngine(0, false);
+  dom.canvas.requestPointerLock()?.catch(() => {});
+  pushKillFeed('Level restarted');
 }
 
 const clock = new THREE.Clock();
