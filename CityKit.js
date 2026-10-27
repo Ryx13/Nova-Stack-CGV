@@ -282,8 +282,9 @@ function pickShop(rnd) {
 // Main-street features: the first lot on `side` (of x = 0) whose centre lies
 // between z0 and z1 gets these shops along its buildings
 const FEATURES = [{ side: -1, z0: 2, z1: -40, shops: ['bar', 'salon'] }];
-/** Named spots for later, e.g. FEATURE_SPOTS.luckyDog: the bar's terrace,
-    where the lady in the red dress and her chihuahua will be. */
+/** Named spots for later: luckyDog, the bar's terrace, where the lady in
+    the red dress and her chihuahua will be; vets, each clinic's facade
+    { x, z, side } (side: which way along x it faces). */
 export const FEATURE_SPOTS = {};
 
 // Restaurants and clothing: a shallow window box, its back wall the shop
@@ -350,6 +351,7 @@ function vetExtras(b, rnd, fw) {
   b.box(at(0.82), 0.7, b.zc - fw * 0.2, 0.05, 0.4, 1.6, wood);
   b.add(new THREE.CylinderGeometry(0.16, 0.13, 0.07, 10).translate(at(1.2), 0.04, b.zc + fw * 0.15), mat(0x3a6ab0));
   aFrame(b, at(1.3), b.zc + fw * 0.3, 'PETS', 'WELCOME', '#1f7a78');
+  (FEATURE_SPOTS.vets ||= []).push({ x: b.fx, z: b.zc, side: b.side });
 }
 // A chalkboard A-frame sign on the sidewalk
 function aFrame(b, x, z, line1, line2, colour = '#1a1a1a') {

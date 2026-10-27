@@ -16,6 +16,9 @@
      7  Extraction   — the green marker at the end of the street
      8  GO
 
+   For now SHOWCASE (below) swaps this for a preview tour of the new town:
+   the zoo gate, both vet clinics and the park.
+
    While it plays state.cinematic freezes the gameplay gate in Actions.js
    (no movement, zombies, spawns or run clock). Any key or click skips it;
    a click also falls through to the canvas so it captures the mouse.
@@ -28,6 +31,8 @@ import {
 import { registerLevelTick } from './Actions.js';
 import { playerVis, playerBody, syncHandGun, carSpawn } from './characters.js';
 import { state } from './state.js';
+import { FEATURE_SPOTS } from './CityKit.js';
+import { ZOO, PARK } from './CityLayout.js';
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 
@@ -37,6 +42,7 @@ const V = (x, y, z) => new THREE.Vector3(x, y, z);
    `tag` is the small line above the title, `keys` the key chips, and
    `mark` { at, text } a label pinned on a world point. */
 function buildShots({ playerPos, playerPose, infectedPos }) {
+  if (SHOWCASE) return showcaseShots(playerPose);
   const fwd = forwardFromYaw(state.yaw), right = rightFromYaw(state.yaw);
   const playerEye = playerPos.clone().add(V(0, 0.45, 0)); // aimed low so the figure sits above the caption
   const playerCam = playerPos.clone().addScaledVector(fwd, 3.1).addScaledVector(right, 0.9).add(V(0, 1.2, 0));
@@ -102,6 +108,41 @@ function buildShots({ playerPos, playerPose, infectedPos }) {
     },
     { pos: playerPose.pos, look: playerPose.look, move: 2.0, hold: 0.7, lift: 0.12, title: 'GO' },
   ];
+}
+
+/* SHOWCASE: a preview tour of the new town in place of the briefing above,
+   to see how the places look: the zoo gate, both vet clinics, the park.
+   Set it to false to bring the story briefing back. */
+const SHOWCASE = true;
+function showcaseShots(playerPose) {
+  const gate = V(ZOO.x1, 0, ZOO.gateZ);
+  const park = V((PARK.x0 + PARK.x1) / 2, 0, (PARK.z0 + PARK.z1) / 2);
+  const shots = [{
+    pos: gate.clone().add(V(16, 7, 14)), look: gate.clone().add(V(-4, 3, 0)), move: 3.2, hold: 4.5, lift: 0.35,
+    tag: 'Showcase · The city zoo',
+    title: 'The zoo gate',
+    sub: 'On the west street. Inside: lions, elephants, giraffes, penguins, the aviary. The quake broke the fence by the lions and the elephants.',
+    mark: { at: gate.clone().add(V(0, 7, 0)), text: 'CITY ZOO' },
+  }];
+  (FEATURE_SPOTS.vets || []).forEach((v, i) => {
+    const front = V(v.x, 0, v.z);
+    shots.push({
+      pos: front.clone().add(V(v.side * 11, 4, 7)), look: front.clone().add(V(0, 2.4, 0)), move: 2.6, hold: 4, lift: 0.3,
+      tag: `Showcase · Vet clinic ${i + 1} of ${FEATURE_SPOTS.vets.length}`,
+      title: i === 0 ? 'The vet by the zoo' : 'The vet by the park',
+      sub: 'Paw sign, a bench, a water bowl and a PETS WELCOME board out front.',
+      mark: { at: front.clone().add(V(v.side * 0.5, 4.6, 0)), text: 'VET CLINIC' },
+    });
+  });
+  shots.push({
+    pos: park.clone().add(V(20, 16, 20)), look: park.clone().add(V(0, 0.5, 0)), move: 3.0, hold: 5, lift: 0.3,
+    tag: 'Showcase · The park',
+    title: 'The park',
+    sub: 'Beside the depot yard: lawns, paths, the fountain, flower beds, benches, hedges and trees.',
+    mark: { at: park.clone().add(V(0, 3.6, 0)), text: 'PARK' },
+  });
+  shots.push({ pos: playerPose.pos, look: playerPose.look, move: 3.2, hold: 0.7, lift: 0.3, title: 'GO' });
+  return shots;
 }
 
 // The stock on-foot third-person pose (updateCameraOnFoot in Actions.js),
