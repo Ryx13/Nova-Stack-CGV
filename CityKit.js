@@ -56,6 +56,10 @@ const PALETTE = {
   harbourBrick: [0x8a4a3a, 0x7a5a4a, 0x9a5a44],
   roofTile: [0xa8553a, 0x8a4a3a, 0x4a5058, 0x5a5e62],
   shutter: [0x2f6b5a, 0x2e4a7a, 0xa83a32, 0x3a6a8a, 0x6a8a5a],
+  // The headland's works, in the quarantine compound's own greys and
+  // teal-greys (Level3Quarantine.js), so they read as more of the facility
+  panel: [0x6f8582, 0x7a8584, 0x5e6a72, 0x8a9494],
+  sheet: [0x52686a, 0x6a7a7c, 0x5a6668, 0x7a8486],
 };
 const IRON = 0x2a2c2e, GLASS = 0x2a3a48, BROKEN = 0x0c0e10, TANK = 0x7a5a3a, ROOF = 0x4e4c48, METAL = 0x8a8e90;
 const SIGN_COLOURS = [['#a83a32', '#f4e9d6'], ['#2f6b5a', '#f4e9d6'], ['#1f2d4a', '#f2c46a'], ['#151515', '#e8d37a'], ['#efe6d2', '#2a2a2a']];
@@ -355,6 +359,9 @@ const SHOPS = {
   sushi: { front: 'display', fill: 'tables', terrace: true, sign: ['#c8323a', '#ffffff'], noAwning: true, extra: sushiFront, names: ['SUSHI', 'SUSHI BAR', 'NAMI SUSHI', 'SUSHI GO'] },
   marine: { front: 'small', names: ['BAIT & TACKLE', 'CHANDLERY', 'SURF SHOP', 'ICE CREAM', 'NEWSAGENT', 'SOUVENIRS'] },
   boatyard: { front: 'garage', names: ['BOAT REPAIR', 'MARINE PARTS', 'OUTBOARDS'] },
+  // The headland's works
+  works: { front: 'garage', noAwning: true, sign: ['#263b40', '#cf9c45'], names: ['HEADLAND POWER', 'COOLING WORKS', 'GRID SUBSTATION', 'TURBINE HALL', 'NORTH PIER FREIGHT', 'MAINTENANCE'] },
+  siteoffice: { front: 'small', noAwning: true, sign: ['#b5c0b9', '#263b40'], names: ['SITE OFFICE', 'SECURITY', 'CANTEEN', 'FIRST AID', 'STORES'] },
   vet: { front: 'small', names: ['VET CLINIC'], sign: ['#1f7a78', '#ffffff'], icon: 'paw', awning: 0x1f7a78, extra: vetExtras },
   salon: { front: 'display', fill: 'salon', names: ['GLAMOUR SALON'], sign: ['#e86a9a', '#ffffff'], awning: 0xd8648e },
   bar: { front: 'display', fill: 'tables', names: ['THE LUCKY DOG'], sign: ['#151515', '#f2c46a'], icon: 'paw', awning: 0x6a2a2a, extra: outdoorSeating },
@@ -382,6 +389,13 @@ const DISTRICTS = {
     // The grid is dead: a few windows and shops lit by candles and generators
     litWindows: 0.07, broken: 0.06, litShops: 0.25, signsLit: 0.2,
     warehousesSouthOf: -150, // toward the port the blocks are warehouses
+  },
+  // Level 3: the works round the quarantine compound on the headland
+  industrial: {
+    types: ['factory', 'factory', 'shed', 'shed', 'warehouse', 'plantoffice'],
+    storeys: { factory: () => 2, shed: () => 1, warehouse: () => 2, plantoffice: (r) => rint(r, 3, 4) },
+    shops: { works: 0.7, siteoffice: 0.3 },
+    litWindows: 0.08, broken: 0.05, litShops: 0.2, signsLit: 0.4,
   },
 };
 
@@ -659,6 +673,20 @@ function pitchedRoof(b, depth, fw, H, rise, roof, wall, alongStreet) {
     b.add(gable, wall);
   }
 }
+// A factory's sawtooth roof: teeth along the frontage, each with a glazed
+// north light on its vertical face
+function sawtoothRoof(b, depth, fw, H, roof, glass) {
+  const n = Math.max(2, Math.round(fw / 4)), tw = fw / n, rise = 2.2;
+  for (let i = 0; i < n; i++) {
+    const sh = new THREE.Shape(); sh.moveTo(0, 0); sh.lineTo(tw, 0); sh.lineTo(0, rise); sh.lineTo(0, 0);
+    // Shape across the frontage, extruded back from the facade (rotateY maps
+    // the extrusion onto +x and the shape's x onto -z)
+    const g = new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled: false }).rotateY(Math.PI / 2);
+    const zFace = b.zc - fw / 2 + (i + 1) * tw;
+    b.add(g.translate(b.side > 0 ? b.fx - depth : b.fx, H, zFace), roof);
+    b.box(b.fx - b.side * depth / 2, H + rise / 2, zFace + 0.03, depth - 0.6, rise - 0.4, 0.05, glass);
+  }
+}
 function chimney(b, rnd, depth, fw, H, rise) {
   const x = b.fx - b.side * depth * (0.35 + rnd() * 0.3), z = b.zc + (rnd() - 0.5) * fw * 0.6;
   b.box(x, H + rise * 0.6 + 0.6, z, 0.7, 1.6 + rise * 0.6, 0.7, mat(pick(rnd, PALETTE.harbourBrick)));
@@ -666,6 +694,7 @@ function chimney(b, rnd, depth, fw, H, rise) {
 }
 const WAREHOUSE_NAMES = ['PIER 7', 'HARBOUR STORES', 'FISH CO.', 'ROPE WORKS', 'ICE HOUSE', 'SAIL LOFT'];
 const HARBOUR_TYPES = new Set(['townhouse', 'terrace', 'shophouse', 'warehouse', 'harbourhotel']);
+const INDUSTRIAL_TYPES = new Set(['factory', 'shed', 'plantoffice']);
 let lastType = null;
 
 function buildOne(b, rnd, fw, depth, lotH, night, far, shopKind, minStoreys = 0) {
@@ -678,16 +707,19 @@ function buildOne(b, rnd, fw, depth, lotH, night, far, shopKind, minStoreys = 0)
   if (minStoreys && type === 'shophouse') type = 'townhouse';
   lastType = type;
   const storeys = Math.max(D.storeys[type](rnd), minStoreys);
-  const storeyH = type === 'warehouse' ? 4.4 : STOREY;
+  const storeyH = type === 'warehouse' || type === 'factory' ? 4.4 : type === 'shed' ? 5 : STOREY;
   const H = GROUND + storeys * storeyH;
-  const harbour = HARBOUR_TYPES.has(type);
+  const harbour = HARBOUR_TYPES.has(type), works = INDUSTRIAL_TYPES.has(type);
   const wall = type === 'walkup' ? pick(rnd, PALETTE.brick) : type === 'office' ? pick(rnd, PALETTE.stone)
     : type === 'hotel' ? pick(rnd, [...PALETTE.brick, ...PALETTE.stone])
     : type === 'terrace' || type === 'warehouse' ? pick(rnd, PALETTE.harbourBrick)
     : type === 'harbourhotel' ? pick(rnd, [0xf0ece4, ...PALETTE.pastel])
+    : type === 'shed' ? pick(rnd, PALETTE.sheet)
+    : type === 'factory' ? pick(rnd, PALETTE.panel)
+    : type === 'plantoffice' ? pick(rnd, PALETTE.stone)
     : harbour ? pick(rnd, PALETTE.pastel) : pick(rnd, PALETTE.plaster);
   const wallMat = mat(wall);
-  const trim = mat(type === 'office' || type === 'warehouse' ? pick(rnd, PALETTE.darkTrim) : pick(rnd, PALETTE.trim));
+  const trim = mat(type === 'office' || type === 'warehouse' || works ? pick(rnd, PALETTE.darkTrim) : pick(rnd, PALETTE.trim));
   // Body: the full lot depth, so neighbours of different heights show real side walls
   b.box(b.fx - b.side * depth / 2, H / 2, b.zc, depth, H, fw, wallMat);
   // Pilasters at the edges keep neighbouring buildings visibly separate
@@ -701,7 +733,18 @@ function buildOne(b, rnd, fw, depth, lotH, night, far, shopKind, minStoreys = 0)
     if (night && r < D.broken + D.litWindows) return mat(0x3a3020, { emissive: 0xffc27a, emissiveIntensity: 0.9 });
     return mat(GLASS, { roughness: 0.25, metalness: 0.2 });
   };
-  if (type === 'office') {
+  if (type === 'factory') {
+    // High strip windows under the eaves of each tall storey
+    for (let s = 0; s < storeys; s++) {
+      const v = GROUND + s * storeyH + 2.7;
+      b.face(0, v, 0.03, fw - 1.2, 1.1, 0.06, glass());
+      for (let m = -fw / 2 + 1.2; m < fw / 2 - 0.8; m += 1.2) b.face(m, v, 0.07, 0.08, 1.1, 0.08, trim);
+    }
+  } else if (type === 'shed') {
+    // Corrugated sheet: vertical ribs up the wall, one small office window
+    const rib = mat(wall).color.clone().multiplyScalar(0.82).getHex();
+    for (let u = -fw / 2 + 0.3; u < fw / 2 - 0.2; u += 0.6) b.face(u, (GROUND + H) / 2, 0.04, 0.12, H - GROUND, 0.06, mat(rib));
+  } else if (type === 'office') {
     // Ribbon windows: a glass band per storey between deep spandrels, mullions on top
     for (let s = 0; s < storeys; s++) {
       const v = GROUND + s * STOREY + 1.8;
@@ -736,10 +779,15 @@ function buildOne(b, rnd, fw, depth, lotH, night, far, shopKind, minStoreys = 0)
   if (type === 'walkup' || type === 'hotel' || type === 'harbourhotel') {
     if (rnd() > 0.12) b.face(0, H - 0.3, 0.3, fw + 0.3, 0.55, 0.6, trim); // a few lost theirs in the quake
     b.face(0, H - 1.0, 0.12, fw, 0.22, 0.24, trim);
-  } else if (type === 'townhouse' || type === 'warehouse' || type === 'terrace') {
-    pitched = Math.min(type === 'warehouse' ? 3.2 : 4, depth * (type === 'warehouse' ? 0.24 : 0.32));
-    pitchedRoof(b, depth, fw, H, pitched, mat(pick(rnd, PALETTE.roofTile)), wallMat, type !== 'terrace');
+  } else if (type === 'townhouse' || type === 'warehouse' || type === 'terrace' || type === 'shed') {
+    pitched = type === 'shed' ? 1.6 : Math.min(type === 'warehouse' ? 3.2 : 4, depth * (type === 'warehouse' ? 0.24 : 0.32));
+    pitchedRoof(b, depth, fw, H, pitched, mat(type === 'shed' ? pick(rnd, PALETTE.sheet) : pick(rnd, PALETTE.roofTile)), wallMat, type !== 'terrace');
     b.face(0, H - 0.15, 0.2, fw + 0.1, 0.3, 0.4, trim); // eaves board
+  } else if (type === 'factory') {
+    pitched = 2.2;
+    const lit = night && rnd() < 0.3;
+    sawtoothRoof(b, depth, fw, H, mat(pick(rnd, PALETTE.sheet)), lit ? mat(0x3a3020, { emissive: 0xffc27a, emissiveIntensity: 0.7 }) : mat(GLASS, { roughness: 0.3, metalness: 0.2 }));
+    b.box(b.fx - b.side * depth / 2, H + 0.05, b.zc, depth - 0.2, 0.1, fw - 0.2, mat(ROOF));
   } else {
     b.face(0, H + 0.4, -0.15, fw, 0.8, 0.3, type === 'office' ? trim : wallMat);
     if (type === 'shophouse' && !far) b.face(0, H + 1.25, -0.35, fw - 0.4, 0.9, 0.04, mat(IRON)); // roof terrace rail
@@ -768,7 +816,11 @@ function buildOne(b, rnd, fw, depth, lotH, night, far, shopKind, minStoreys = 0)
     b.box(b.fx - b.side * (depth / 2 + 0.8), H + th / 2, b.zc, td, th, tf, wallMat);
     if (!far) roofKit(b, rnd, H + th, depth, tf, type);
   } else if (pitched) {
-    if (!far && type !== 'warehouse') for (let i = 0, n = rint(rnd, 1, 2); i < n; i++) chimney(b, rnd, depth, fw, H, pitched);
+    if (!far && (type === 'townhouse' || type === 'terrace')) for (let i = 0, n = rint(rnd, 1, 2); i < n; i++) chimney(b, rnd, depth, fw, H, pitched);
+    if (!far && type === 'factory' && rnd() < 0.5) { // a works flue and roof plant
+      b.add(new THREE.CylinderGeometry(0.45, 0.55, 7, 10).translate(b.fx - b.side * depth * 0.7, H + 3.5, b.zc + (rnd() - 0.5) * fw * 0.5), mat(pick(rnd, PALETTE.sheet)));
+      roofKit(b, rnd, H + 2.2, depth, fw, type);
+    }
   } else if (!far) {
     roofKit(b, rnd, H, depth, fw, type);
   }

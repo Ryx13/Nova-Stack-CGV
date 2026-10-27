@@ -1367,7 +1367,7 @@ export function loadBuildings() {
     // A level with its own city behind the street (state.backCity — Level
     // 2) has real blocks here; the draws above still happen so nothing
     // placed after them moves
-    if (!state.backCity && !state.cityKit) scene.add(sil); // a district builds a real town instead (CityTown.js)
+    if (!state.backCity && !state.cityKit && !state.industrialDistrict) scene.add(sil); // a district builds a real town instead (CityTown.js, Level3Industry.js)
   }
   const depotYard = state.skipDepot ? null : buildDepotYard();
   if (state.cityKit) buildTown(); // after every shared rnd() draw above

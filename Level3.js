@@ -57,6 +57,7 @@ import {buildCureProjector} from './CureProjector.js';
 import {OPENING_CONVERSATION,endingReflection} from './Level3HumanityDialogue.js';
 import {getGirlOutcome} from './StoryProgress.js';
 import {buildArrivalBay} from './Level3Arrival.js';
+import {buildIndustrialDistrict} from './Level3Industry.js';
 import {registerDayProgress} from './DayCycle.js';
 import {preloadHumanRecovery,prepareHumanRecovery,beginHumanRecovery,updateHumanRecovery,survivorFrame,recognizeSurvivor} from './assets/human-recovery/HumanRecovery.js';
 
@@ -87,6 +88,7 @@ export function startLevel(mode) {
     if (lv3.phase === 'boss') return 0.75;
     return 0.2 * lv3.compound.switches.filter((s) => s.activated).length;
   });
+  buildIndustrialDistrict(); // the works over the walls, merged with the compound below
   const compound = buildLevel3Scene();
   for(const object of [compound.towerShell,compound.mast,compound.dish,...compound.switches.map(s=>s.shell)]) object.userData.staticScenery=true;
   console.info('[compound scenery]',mergeStaticScenery(scene));
@@ -107,7 +109,7 @@ export function startLevel(mode) {
   levelKeyHooks.KeyE = () => lv3.vendor?.buy(playerVis.group.position);
   state.ammoReserve = 60; updateAmmoHUD();
   lv3.details = buildCompoundDetails(scene, SWITCH_DEFS);
-  lv3.facility=buildQuarantineFacility(scene,null,addStaticBox,{night:state.timeOfDay==='night'});
+  lv3.facility=buildQuarantineFacility(scene,null,addStaticBox,{night:state.timeOfDay==='night',backdrop:false}); // Level3Industry.js stands there instead
   levelKeyHooks.KeyG = () => readTerminal();
   initLevel3Story();
   initCureDevice();

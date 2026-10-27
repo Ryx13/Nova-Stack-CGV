@@ -26,3 +26,6 @@ state.skipDepot = true;
 
 // This level occupies industrial quarantine grounds, with the city in the distance.
 state.quarantineFacility = true;
+// Over the compound walls: the headland's works (Level3Industry.js), in
+// place of the stock skyline boxes
+state.industrialDistrict = true;

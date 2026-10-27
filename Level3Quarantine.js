@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // Static, non-colliding facility dressing. The road (roughly |x| <= 11)
 // stays open; only the two gate headers cross it, above head height.
-export function buildQuarantineFacility(scene, label, addStaticBox, {night=false}={}) {
+export function buildQuarantineFacility(scene, label, addStaticBox, {night=false, backdrop=true}={}) {
   const facility = new THREE.Group();
   facility.name = 'Level 3 quarantine facility';
   facility.userData.staticScenery=true;
@@ -250,7 +250,8 @@ export function buildQuarantineFacility(scene, label, addStaticBox, {night=false
   for(const side of [-1,1]){
     box(mats.concrete,side*43,2.5,-95,2,5,290);
     for(let z=-231;z<=39;z+=18)addStaticBox?.(1,2.5,9,side*43,2.5,z);
-    for(let i=0;i<7;i++){
+    // backdrop: false when Level3Industry.js builds the works there instead
+    for(let i=0;i<(backdrop?7:0);i++){
       const z=32-i*40,h=11+(i%3)*3,x=side*52,face=side*44.9;
       box(mats.backdrop,x,h/2,z,14,h,37);
       box(mats.backdropRoof,x,h+.2,z,14.6,.4,37.6);
@@ -267,9 +268,11 @@ export function buildQuarantineFacility(scene, label, addStaticBox, {night=false
       for(const dx of [-.85,.85])box(mats.stripe,side*24+dx,.9,z+1.22,.12,1.3,.05);
     }
   }
-  box(mats.backdrop,0,7,-239,90,14,12);
-  box(mats.backdropRoof,0,14.25,-239,92,.5,13);
-  for(let x=-36;x<=36;x+=12)box(mats.backdropWindows,x,10,-232.9,5,.9,.1);
+  if(backdrop){
+    box(mats.backdrop,0,7,-239,90,14,12);
+    box(mats.backdropRoof,0,14.25,-239,92,.5,13);
+    for(let x=-36;x<=36;x+=12)box(mats.backdropWindows,x,10,-232.9,5,.9,.1);
+  }
 
   const dummy = new THREE.Object3D();
   for (const [material, items] of batches) {

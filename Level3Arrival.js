@@ -4,7 +4,7 @@
    You crossed the bay in her boat, the only one at the port. Looking back
    from the start: the street runs out onto a quay and a jetty, the boat is
    tied up alongside with the girl waiting in it, and across the water the
-   port you chased her through stands in the haze, crane lights blinking.
+   harbour town you chased her through stands in the haze, its lighthouse flashing.
 
    Out of reach (the world bound is z 40), so nothing here has physics.
    The far shore is flat silhouettes in a darkened fog colour plus point
@@ -128,7 +128,7 @@ function buildBoat() {
   return boat;
 }
 
-// The port across the bay: Level 2's container yard, cranes, warehouses
+// The harbour town across the bay: Level 2's waterfront houses, the lighthouse
 // and the town behind it, as layered silhouettes. One merged mesh per
 // layer, its colour a darkened copy of the fog's that follows the fog as
 // the weather turns (DayCycle.js), plus three sets of lights.
@@ -142,22 +142,33 @@ function buildFarShore(glowTex) {
     g.deleteAttribute('uv'); g.deleteAttribute('normal');
     layer.parts.push(g);
   };
+  // A pitched roof on a silhouette: ridge along x
+  const roof = (w, rise, d, x, y, z, layer) => {
+    const sh = new THREE.Shape(); sh.moveTo(-d / 2, 0); sh.lineTo(d / 2, 0); sh.lineTo(0, rise); sh.lineTo(-d / 2, 0);
+    const g = new THREE.ExtrudeGeometry(sh, { depth: w, bevelEnabled: false }).rotateY(Math.PI / 2).translate(x - w / 2, y, z);
+    g.deleteAttribute('uv'); g.deleteAttribute('normal');
+    layer.parts.push(g);
+  };
+  // The harbour town you chased her through (Level 2): its waterfront of
+  // low pitched-roof houses and warehouses, the lighthouse on its rocks at
+  // the west end, the town rising behind, boats moored off the beaches
   const SHORE = 340;
-  add(1400, 3, 40, 0, WATER_Y, SHORE + 20, port);                     // the far quay
-  for (let i = 0; i < 46; i++) {                                       // container stacks
-    const x = -170 + rnd() * 340, z = SHORE + 4 + rnd() * 14, tiers = 1 + ((rnd() * 3) | 0);
-    add(6 + rnd() * 6, tiers * 2.6, 2.5 + rnd() * 2, x, 2, z, port);
+  add(1400, 3, 40, 0, WATER_Y, SHORE + 20, port);                     // the far waterfront
+  for (let x = -180; x < 180;) {
+    const w = 7 + rnd() * 6, h = 6 + rnd() * 5, d = 9 + rnd() * 4, z = SHORE + 10 + rnd() * 8;
+    if (Math.abs(x) > 12) { add(w, h, d, x + w / 2, 2, z, port); roof(w, 2 + rnd() * 1.5, d + 0.6, x + w / 2, 2 + h, z, port); }
+    x += w + (rnd() < 0.3 ? 3 : 0.5);
   }
-  for (let i = 0; i < 7; i++) add(30 + rnd() * 25, 9 + rnd() * 6, 22, -240 + i * 80 + rnd() * 20, 2, SHORE + 34, port); // warehouses
-  const cranes = [-110, -40, 35, 120];
-  for (const cx of cranes) {                                          // gantry cranes
-    for (const lx of [-6, 6]) add(1.4, 34, 1.4, cx + lx, 2, SHORE + 6, port);
-    add(15, 3, 3, cx, 34, SHORE + 6, port);                            // cross beam
-    add(3, 2.2, 62, cx, 36, SHORE - 14, port);                         // boom, reaching over the water
+  for (const lx of [-90]) {                                            // the lighthouse
+    add(10, 3, 9, lx, WATER_Y, SHORE - 8, port);                       // its rocks
+    add(3.6, 14, 3.6, lx, 2, SHORE - 8, port);
+    add(2.4, 3, 2.4, lx, 16, SHORE - 8, port);
   }
-  for (let i = 0; i < 34; i++) add(14 + rnd() * 20, 10 + rnd() * 32, 16 + rnd() * 10, -320 + rnd() * 640, 2, SHORE + 70 + rnd() * 70, town); // the town
-  add(48, 8, 9, -150, WATER_Y, SHORE - 50, ships); add(16, 7, 8, -158, WATER_Y + 8, SHORE - 50, ships); // moored ships
-  add(36, 7, 8, 160, WATER_Y, SHORE - 64, ships); add(12, 6, 7, 166, WATER_Y + 7, SHORE - 64, ships);
+  for (let i = 0; i < 34; i++) {                                       // the town behind, roofs and all
+    const w = 10 + rnd() * 14, h = 8 + rnd() * 14, d = 12 + rnd() * 8, x = -320 + rnd() * 640, z = SHORE + 60 + rnd() * 70;
+    add(w, h, d, x, 2, z, town); roof(w, 3 + rnd() * 2, d + 0.8, x, 2 + h, z, town);
+  }
+  for (const [bx, bz] of [[-60, SHORE - 18], [-40, SHORE - 22], [55, SHORE - 20], [75, SHORE - 16]]) add(5, 1.4, 2, bx, WATER_Y, bz, ships); // boats
   for (const layer of Object.values(layers)) {
     layer.material = new THREE.MeshBasicMaterial({ fog: false });
     scene.add(new THREE.Mesh(mergeGeometries(layer.parts), layer.material));
@@ -174,7 +185,7 @@ function buildFarShore(glowTex) {
     for (const l of lights) l.points.material.opacity = l.opacity * lit;
   };
 
-  // Lights: red crane-top warnings that blink, amber yard lamps, town windows
+  // Lights: the lighthouse flashing, Harbour Walk's glow, windows along the waterfront and in the town
   const night = state.timeOfDay === 'night';
   const points = (list, color, size, opacity, steady = true) => {
     const geo = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(list.flat()), 3));
@@ -185,10 +196,13 @@ function buildFarShore(glowTex) {
     if (steady) lights.push({ points: p, opacity }); // the blinking ones fade in the tick
     return p;
   };
-  const warnings = points(cranes.flatMap((cx) => [[cx - 6, 37, SHORE + 6], [cx + 6, 37, SHORE + 6], [cx, 38.5, SHORE - 44]]), 0xff3020, 7, 0.9, false);
+  const warnings = points([[-90, 18, SHORE - 8]], 0xfff0b0, 16, 0.95, false); // the lighthouse lamp
+  const walk = [];
+  for (let x = -14; x <= 14; x += 2) walk.push([x, 8 + 1.4 * (1 - (x / 14) ** 2), SHORE + 120]);
+  points(walk, 0x5fd8ff, night ? 5 : 3, night ? 0.8 : 0.2);           // Harbour Walk
   const yard = [];
-  for (let x = -160; x <= 160; x += 20 + rnd() * 10) yard.push([x, 9 + rnd() * 3, SHORE + 2 + rnd() * 10]);
-  points(yard, 0xffb066, night ? 9 : 5, night ? 0.75 : 0.25);
+  for (let x = -160; x <= 160; x += 14 + rnd() * 10) yard.push([x, 4 + rnd() * 4, SHORE + 6 + rnd() * 6]);
+  points(yard, 0xffb066, night ? 7 : 4, night ? 0.6 : 0.15);
   const windows = [];
   for (let i = 0; i < 70; i++) windows.push([-300 + rnd() * 600, 6 + rnd() * 26, SHORE + 70 + rnd() * 60]);
   points(windows, 0xffe2a8, 4, night ? 0.55 : 0.12);
