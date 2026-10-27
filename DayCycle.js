@@ -135,6 +135,7 @@ function sample(frames, c) {
 const skyUniforms = {
   uTop: { value: new THREE.Color() }, uHorizon: { value: new THREE.Color() }, uBottom: { value: new THREE.Color() },
   uGlow: { value: new THREE.Color() }, uGlowStrength: { value: 0 }, uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+  uRays: { value: 0 }, uTime: { value: 0 },
 };
 function skyMaterial() {
   return new THREE.ShaderMaterial({
@@ -144,7 +145,7 @@ function skyMaterial() {
       void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: `
       uniform vec3 uTop, uHorizon, uBottom, uGlow, uSunDir;
-      uniform float uGlowStrength;
+      uniform float uGlowStrength, uRays, uTime;
       varying vec3 vDir;
       void main() {
         vec3 d = normalize(vDir);
@@ -154,11 +155,42 @@ function skyMaterial() {
         float s = max(dot(d, normalize(uSunDir)), 0.0);
         // a broad warm wash toward the sun, a tight halo round it
         col += uGlow * uGlowStrength * (pow(s, 6.0) * 0.55 + pow(s, 64.0) * 0.6) * (1.0 - 0.5 * smoothstep(0.0, 0.6, h));
+        // Sun rays: streaks fanning out from the sun, slowly turning. The sky
+        // is drawn behind everything, so rooftops and trees cut into them.
+        vec3 sd = normalize(uSunDir);
+        vec3 t1 = normalize(cross(sd, abs(sd.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+        float ang = atan(dot(d, cross(sd, t1)), dot(d, t1));
+        float streak = 0.5 + 0.5 * sin(ang * 19.0 + sin(ang * 5.0 + uTime * 0.12) * 2.2) * sin(ang * 7.0 - uTime * 0.08);
+        col += uGlow * uRays * pow(streak, 3.0) * pow(s, 10.0) * 0.9;
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`,
   });
+}
+
+// Long thin streaks out from a bright core: the dazzle of looking at the sun
+let glare = null;
+function starburstTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.translate(128, 128);
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2 + (i % 2) * 0.07, len = i % 3 === 0 ? 126 : 70 + (i * 37 % 40);
+    g.save(); g.rotate(a);
+    const grad = g.createLinearGradient(0, 0, len, 0);
+    grad.addColorStop(0, 'rgba(255,248,230,0.55)'); grad.addColorStop(1, 'rgba(255,248,230,0)');
+    g.fillStyle = grad;
+    g.beginPath(); g.moveTo(0, -2.5); g.lineTo(len, 0); g.lineTo(0, 2.5); g.fill();
+    g.restore();
+  }
+  const core = g.createRadialGradient(0, 0, 0, 0, 0, 40);
+  core.addColorStop(0, 'rgba(255,250,235,0.7)'); core.addColorStop(1, 'rgba(255,250,235,0)');
+  g.fillStyle = core; g.fillRect(-40, -40, 80, 80);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 /* --- Progress ------------------------------------------------------------ */
@@ -187,6 +219,18 @@ export function startDayCycle() {
     Math.sin(rad(15)) * Math.cos(rad(24)), Math.sin(rad(24)), -Math.cos(rad(15)) * Math.cos(rad(24))).multiplyScalar(400);
   moonVisual.scale.set(52, 52, 1);
   sunVisual.scale.set(60, 60, 1);
+  // Buildings hide the sun (its glow used to show through them)
+  sunVisual.material.depthTest = true;
+  sunVisual.material.needsUpdate = true;
+  // The glare round the disc when you look at it: a starburst
+  if (!glare) {
+    glare = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: starburstTexture(), transparent: true, depthWrite: false, fog: false, blending: THREE.AdditiveBlending,
+    }));
+    glare.scale.set(190, 190, 1);
+    glare.renderOrder = -1;
+    sky.add(glare);
+  }
   stars.forEach((s) => { s.visible = true; });
   moonVisual.visible = sunVisual.visible = true;
   // Sky-lit levels (Level 1 and 2 by day) relight from the sky as it changes
@@ -212,6 +256,14 @@ function apply(c) {
   sun.intensity = v.sun;
   sunVisual.material.color.copy(v.sunCol);
   sunVisual.material.opacity = v.disc * THREE.MathUtils.smoothstep(v.el, -3, 1);
+  // Rays and glare while the sun is out and not lost in fog
+  const rays = v.disc * THREE.MathUtils.smoothstep(v.el, -2, 3) * (1 - THREE.MathUtils.smoothstep(v.fogD, 0.01, 0.025));
+  skyUniforms.uRays.value = rays;
+  if (glare) {
+    glare.position.copy(sunVisual.position);
+    glare.material.color.copy(v.sunCol);
+    glare.material.opacity = 0.55 * rays;
+  }
   hemiLight.color.copy(v.hemiSky); hemiLight.groundColor.copy(v.hemiGnd); hemiLight.intensity = v.hemi * FILL;
   ambientLight.color.copy(v.ambCol); ambientLight.intensity = v.amb * FILL;
   renderer.toneMappingExposure = v.exp * EXPOSURE;
@@ -226,6 +278,8 @@ function apply(c) {
 
 /** Every frame, from the game loop. */
 export function updateDayCycle(dt) {
+  skyUniforms.uTime.value += dt;
+  if (glare) glare.material.rotation += dt * 0.015;
   if (!frames) return;
   const raw = THREE.MathUtils.clamp(progressSource ? progressSource() : 0, 0, 1);
   if (raw < latched - 0.25) latched = shown = raw; // a restart rewinds the clock
