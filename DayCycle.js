@@ -8,7 +8,7 @@
 
      Day    L1 dawn -> sun about to rise · L2 sunrise -> sun up ·
             L3 clouds building -> thick sea fog and drizzle
-     Night  L1 last light -> streetlit night · L2 dead grid, moon over
+     Night  L1 streetlit night · L2 dead grid, moon over
             the port · L3 sea fog before dawn -> the sun breaks through
             as the cure broadcasts
 
@@ -66,28 +66,25 @@ const DAY = [
     hemiSky: 0xdfe7ee, hemi: 1.1, amb: 0.5, exp: 1.0, mist: 0xe8ecef, mistA: 0.65, rain: 0.8 },
 ];
 const NIGHT = [
-  // Level 1 begins: last light, the sun setting behind you
-  { c: 0, top: 0x3a4466, hor: 0xe08a5a, bot: 0x6a4a40, glow: 0xff8a50, gs: 0.7,
-    fog: 0x5e4e4a, fogD: 0.009, sunCol: 0xff9a5a, sun: 0.9, el: 4, az: -100, disc: 0.7,
-    hemiSky: 0xb7c8dc, hemiGnd: 0x45433d, hemi: 1.0, ambCol: 0x68717e, amb: 0.55, exp: 1.05,
-    mist: 0xb9a49a, mistA: 0.45, rain: 0, stars: 0.15, moon: 0 },
-  { c: 0.55, top: 0x3a3944, hor: 0x8a6a5c, bot: 0xb89474, glow: 0xb05a3a, gs: 0.2,
-    fog: 0x6e6258, sunCol: 0xff7a40, sun: 0, el: -4, disc: 0, hemi: 1.15, amb: 0.6, stars: 0.7 },
-  // Dark: the light swings round to the moon while it's at zero
-  { c: 0.6, sunCol: 0xb4c6ea, el: 24, az: 15 },
-  // Level 1 ends: the streetlit night, the city glow amber at the horizon
-  { c: 1, top: 0x514f5a, hor: 0x9d8270, bot: 0xe3c29a, gs: 0, fog: 0x6e6258, fogD: 0.009,
-    mist: 0xb9c4cf, mistA: 0.5, stars: 0.85, moon: 0.6 },
+  // Night means night: no sun or moonlight on the scene until the finale's
+  // sunrise. The moon and stars are in the sky; the streetlights light the
+  // street, and a faint blue fill keeps silhouettes readable.
+  // Level 1: the streetlit night, the city glow amber at the horizon
+  { c: 0, top: 0x514f5a, hor: 0x9d8270, bot: 0xe3c29a, glow: 0x9fb4d8, gs: 0,
+    fog: 0x4a4440, fogD: 0.009, sunCol: 0xb4c6ea, sun: 0, el: 24, az: 15, disc: 0,
+    hemiSky: 0x6a7a96, hemiGnd: 0x1c1a18, hemi: 0.35, ambCol: 0x3a4250, amb: 0.22, exp: 1.0,
+    mist: 0x8a909a, mistA: 0.45, rain: 0, stars: 0.85, moon: 0.9 },
+  { c: 1 },
   // Level 2, leaving downtown: the grid is dead, a cool moonlit night
   { c: 1.25, top: 0x2a354b, hor: 0x4b5a71, bot: 0x6a7992, glow: 0x9fb4d8, gs: 0.12,
-    fog: 0x1f2736, fogD: 0.0085, sun: 1.05, hemiSky: 0x5d6f92, hemiGnd: 0x15171c, hemi: 0.72,
-    ambCol: 0x1f2635, amb: 0.3, mist: 0x52607a, mistA: 0.35, stars: 1, moon: 0.95 },
+    fog: 0x1f2736, fogD: 0.0085, hemiSky: 0x5d6f92, hemiGnd: 0x15171c, hemi: 0.32,
+    ambCol: 0x1f2635, amb: 0.2, mist: 0x52607a, mistA: 0.35, stars: 1, moon: 0.95 },
   { c: 2 },
   // Level 3: sea fog before dawn, thickening as you work through the switches
   { c: 2.45, top: 0x1e2636, hor: 0x34415a, bot: 0x3e4b5e, glow: 0x9fb4d8, gs: 0.06,
-    fog: 0x182535, fogD: 0.012, sun: 0.55, hemi: 1.1, amb: 0.5, exp: 1.05, mist: 0x35475a, mistA: 0.45, stars: 0.3, moon: 0.4 },
+    fog: 0x182535, fogD: 0.012, hemi: 0.4, amb: 0.25, mist: 0x35475a, mistA: 0.45, stars: 0.3, moon: 0.4 },
   { c: 2.85, top: 0x3a4452, hor: 0x4c5664, bot: 0x4a5260, glow: 0xc08a6a, gs: 0.12,
-    fog: 0x2c3644, fogD: 0.022, sun: 0, mist: 0x4a586a, mistA: 0.6, rain: 0.25, stars: 0, moon: 0 },
+    fog: 0x2c3644, fogD: 0.022, mist: 0x4a586a, mistA: 0.6, rain: 0.25, stars: 0, moon: 0 },
   { c: 2.88, sunCol: 0xffb070, el: -3, az: 75 },
   // Level 3 ends: the cure broadcasts and the sun breaks through
   { c: 3, top: 0x5a6f92, hor: 0xf4b07a, bot: 0x7a6050, glow: 0xffb070, gs: 0.95,
@@ -180,9 +177,9 @@ export function startDayCycle() {
   const { sun, hemiLight, ambientLight, moonVisual, sunVisual } = lighting;
   // Fills always on: the timeline dims them rather than toggling them
   hemiLight.visible = ambientLight.visible = true;
-  // Shadows where the level has a sun or moon worth casting them; the
-  // night finale's sunrise does without (Level 3 is the heaviest level)
-  sun.castShadow = !(state.timeOfDay !== 'day' && state.levelId === 3);
+  // Sun shadows by day only: at night there's no main light to cast them
+  // (the finale's sunrise does without; Level 3 is the heaviest level)
+  sun.castShadow = state.timeOfDay === 'day';
   moonVisual.position.set(
     Math.sin(rad(15)) * Math.cos(rad(24)), Math.sin(rad(24)), -Math.cos(rad(15)) * Math.cos(rad(24))).multiplyScalar(400);
   moonVisual.scale.set(52, 52, 1);
