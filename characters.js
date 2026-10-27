@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {EnemyCrowd} from './EnemyCrowd.js';
 import { buildKitBuilding } from './CityKit.js';
 import { buildCityGround } from './CityGround.js';
+import { buildTown } from './CityTown.js';
 import { CircleGrid } from './SpatialGrid.js';
 import { asphaltRoughness } from './ContactShading.js';
 import { streetlightBeamMaterial } from './survivor.js';
@@ -665,7 +666,7 @@ export function loadStreetSurface() {
   road.material.userData.staticLampHeight = road.position.y;
   scene.add(road);
   // A district (state.cityKit) gets CityGround.js's slabs, kerbs and junctions
-  if (state.cityKit) buildCityGround();
+  if (state.cityKit) buildCityGround(road.material);
   else [-1, 1].forEach((side) => {
     const walk = new THREE.Mesh(
       new THREE.PlaneGeometry(4.2, STREET_LENGTH + 70),
@@ -1360,9 +1361,10 @@ export function loadBuildings() {
     // A level with its own city behind the street (state.backCity — Level
     // 2) has real blocks here; the draws above still happen so nothing
     // placed after them moves
-    if (!state.backCity) scene.add(sil);
+    if (!state.backCity && !state.cityKit) scene.add(sil); // a district builds a real town instead (CityTown.js)
   }
   const depotYard = state.skipDepot ? null : buildDepotYard();
+  if (state.cityKit) buildTown(); // after every shared rnd() draw above
   return { depotYard };
 }
 

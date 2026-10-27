@@ -4,16 +4,16 @@
    Where the story began. Behind the spawn, across the end of the street,
    stands the research annex you walked out of: its sign, the blast door
    still open, the chemical tanks the quake split, and the gas still
-   venting from its roof. Low outskirts round it, and behind everything
-   the same land Level 2 stands on (Level2Surroundings.js buildLandscape):
+   venting from its roof. Behind everything, the same land Level 2
+   stands on (Level2Surroundings.js buildLandscape):
    foothills rising to the mountain ridge, fading into the haze.
 
    The annex sits where Level 2's look-back shows it (Level 1 z ~74), so
    the two views agree. Out of reach behind the world bound (z 40), so no
    physics. A handful of draw calls; the gas is a few drifting sprites.
+   The streets and blocks either side are CityTown.js's.
 ====================================================================== */
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { scene } from './Scene.js';
 import { state } from './state.js';
 import { concreteTex, rustTex } from './characters.js';
@@ -133,23 +133,6 @@ function buildGas(vents) {
   };
 }
 
-// Low outskirts round the annex, one merged mesh
-function buildOutskirts() {
-  const rnd = seeded(0xA77E1);
-  const boxes = [];
-  for (let z = 52; z < 210; z += 20 + rnd() * 10) {
-    for (let x = -150; x < 150; x += 20 + rnd() * 10) {
-      if (Math.abs(x) < 54 && z < 100) continue; // the annex and its tanks
-      if (Math.abs(x) < 14) continue;          // the road on past the annex
-      const w = 10 + rnd() * 10, d = 10 + rnd() * 10, h = 5 + rnd() * 10;
-      boxes.push(new THREE.BoxGeometry(w, h, d).translate(x + rnd() * 4, h / 2 - 0.5, z));
-    }
-  }
-  const mesh = new THREE.Mesh(mergeGeometries(boxes), new THREE.MeshStandardMaterial({ map: concreteTex, color: 0x6e6a64, roughness: 1 }));
-  mesh.castShadow = mesh.receiveShadow = true;
-  scene.add(mesh);
-}
-
 /** Builds everything behind the Level 1 start. Returns the per-frame update. */
 export function buildLevel1Surroundings() {
   const night = state.timeOfDay === 'night';
@@ -157,7 +140,6 @@ export function buildLevel1Surroundings() {
   buildAnnex(night);
   const tanks = buildTanks();
   const gas = buildGas([...tanks, new THREE.Vector3(14, ANNEX.h + 2.4, 70)]);
-  buildOutskirts();
   let t = 0;
   return (dt) => {
     t += dt;

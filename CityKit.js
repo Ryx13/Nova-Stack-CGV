@@ -100,6 +100,80 @@ function verticalSignTexture(name) {
   return signTextures.get(key);
 }
 
+/* --- Mirror glass and sliding doors --------------------------------------
+   Some shops (and the office lobbies) have a blue mirror-glass front with
+   sliding doors. The glass gets a sky-blue sheen toward glancing angles
+   and a bright band that sweeps across every pane now and then; the doors
+   slide apart as the player walks up. All of it is one instanced mesh
+   (a draw call for the whole town), built on the first update. */
+const mirrorUniforms = { uGlintTime: { value: 0 } };
+let mirrorMaterial = null;
+function mirror() {
+  if (mirrorMaterial) return mirrorMaterial;
+  const m = new THREE.MeshStandardMaterial({ color: 0x3f86bd, metalness: 0.85, roughness: 0.08, emissive: 0x0d2740, emissiveIntensity: 1 });
+  const base = THREE.Material.prototype.onBeforeCompile; // keep the global hooks (HeightMist)
+  m.onBeforeCompile = (shader, renderer) => {
+    base.call(m, shader, renderer);
+    shader.uniforms.uGlintTime = mirrorUniforms.uGlintTime;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vGlintWorld;')
+      .replace('#include <project_vertex>', `#include <project_vertex>
+        vec4 glintWorld = vec4(transformed, 1.0);
+        #ifdef USE_INSTANCING
+          glintWorld = instanceMatrix * glintWorld;
+        #endif
+        vGlintWorld = (modelMatrix * glintWorld).xyz;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vGlintWorld;\nuniform float uGlintTime;')
+      .replace('#include <opaque_fragment>', `
+        float glintFacing = abs(dot(normalize(vViewPosition), normal));
+        float glintSheen = pow(1.0 - glintFacing, 3.0);
+        float glintSweep = fract((vGlintWorld.x + vGlintWorld.z) * 0.08 + vGlintWorld.y * 0.05 - uGlintTime * 0.18);
+        float glintBand = smoothstep(0.06, 0.0, abs(glintSweep - 0.5));
+        outgoingLight += vec3(0.55, 0.8, 1.0) * (glintSheen * 0.7 + glintBand * 0.9);
+        #include <opaque_fragment>`);
+  };
+  m.customProgramCacheKey = () => 'citykit-mirror';
+  mirrorMaterial = m;
+  return m;
+}
+const mirrorPanes = [];   // static mirror glass: { x, y, z, sx, sy, sz }
+const slidingDoors = [];  // { x, y, z, alongZ: frontage axis, open }
+const DOOR_W = 0.9, DOOR_H = 2.4, DOOR_REACH = 3.5;
+let doorMesh = null;
+const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3();
+function setDoorPanels(i) {
+  const d = slidingDoors[i], slide = DOOR_W * 0.95 * d.open;
+  for (const e of [-1, 1]) {
+    _p.set(d.x, d.y, d.z + e * (DOOR_W / 2 + slide));
+    _s.set(0.06, DOOR_H, DOOR_W);
+    doorMesh.setMatrixAt(mirrorPanes.length + i * 2 + (e > 0 ? 1 : 0), _m4.compose(_p, _q, _s));
+  }
+}
+function buildMirrorMesh() {
+  doorMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mirror(), mirrorPanes.length + slidingDoors.length * 2);
+  mirrorPanes.forEach((p, i) => doorMesh.setMatrixAt(i, _m4.compose(_p.set(p.x, p.y, p.z), _q, _s.set(p.sx, p.sy, p.sz))));
+  slidingDoors.forEach((_, i) => setDoorPanels(i));
+  doorMesh.receiveShadow = true;
+  doorMesh.userData.dynamic = true;
+  scene.add(doorMesh);
+}
+/** Every frame (Level 1's tick): the glint, and doors opening for the player. */
+export function updateCityKit(dt, playerPos) {
+  if (!mirrorPanes.length && !slidingDoors.length) return;
+  if (!doorMesh) buildMirrorMesh();
+  mirrorUniforms.uGlintTime.value += dt;
+  let moved = false;
+  slidingDoors.forEach((d, i) => {
+    const near = playerPos && Math.hypot(playerPos.x - d.x, playerPos.z - d.z) < DOOR_REACH ? 1 : 0;
+    if (Math.abs(near - d.open) < 0.001) return;
+    d.open += Math.sign(near - d.open) * Math.min(Math.abs(near - d.open), dt * 2.2);
+    setDoorPanels(i);
+    moved = true;
+  });
+  if (moved) doorMesh.instanceMatrix.needsUpdate = true;
+}
+
 /* --- Building assembly ---------------------------------------------------
    A Builder collects geometry per material in world space. Facade-local
    placement: u runs along the frontage (world z), v is height, out is the
@@ -114,14 +188,22 @@ class Builder {
   face(u, v, out, su, sv, sn, material) {
     this.add(new THREE.BoxGeometry(sn, sv, su).translate(this.fx + this.side * out, v, this.zc + u), material);
   }
+  // Mirror glass and sliding doors on the facade (instanced, see above)
+  mirrorFace(u, v, out, su, sv, sn) {
+    mirrorPanes.push({ x: this.fx + this.side * out, y: v, z: this.zc + u, sx: sn, sy: sv, sz: su });
+  }
+  slidingDoor(u) {
+    slidingDoors.push({ x: this.fx + this.side * 0.06, y: DOOR_H / 2, z: this.zc + u, open: 0 });
+  }
   // A box anywhere: centre (x, y, z), sizes along world axes
   box(x, y, z, sx, sy, sz, material) {
     this.add(new THREE.BoxGeometry(sx, sy, sz).translate(x, y, z), material);
   }
-  finish(group) {
+  finish(group, shadows = true) {
     for (const [material, geos] of this.parts) {
       const mesh = new THREE.Mesh(mergeGeometries(geos), material);
-      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.castShadow = shadows;
+      mesh.receiveShadow = true;
       group.add(mesh);
       geos.forEach((g) => g.dispose());
     }
@@ -134,25 +216,54 @@ const pick = (rnd, list) => list[Math.floor(rnd() * list.length) % list.length];
 function windowAt(b, u, v, ww, wh, look) {
   b.face(u, v, 0.06, ww + 0.24, wh + 0.24, 0.12, look.trim);
   b.face(u, v, 0.03, ww, wh, 0.06, look.glass());
+  if (look.far) return; // past the edge of the town: frame and glass only
   b.face(u, v - wh / 2 - 0.16, 0.13, ww + 0.4, 0.12, 0.26, look.trim);
   if (look.lintel) b.face(u, v + wh / 2 + 0.2, 0.08, ww + 0.34, 0.22, 0.16, look.lintel);
 }
 
-function shopfront(b, rnd, fw, night, kind = 'shop') {
+// Flower buckets on tiered stands out on the sidewalk
+const FLOWER_COLOURS = [0xe86a9a, 0xf2c84a, 0xd8453a, 0xf0ece4, 0x8a5ab8, 0xf08a3a];
+function flowerStands(b, rnd, fw) {
+  const stand = mat(0x3f6a3a), pail = mat(0x8a8e90, { roughness: 0.5, metalness: 0.4 }), leaves = mat(0x4f7a3a);
+  for (const e of [-1, 1]) {
+    const u0 = e * fw * 0.25;
+    b.face(u0, 0.35, 0.75, 2.2, 0.7, 0.8, stand);          // lower tier
+    b.face(u0, 0.75, 0.45, 2.2, 0.12, 0.45, stand);        // upper tier
+    for (let i = 0; i < 4; i++) for (const [out, y] of [[0.9, 0.7], [0.45, 0.81]]) {
+      const u = u0 - 0.8 + i * 0.53, x = b.fx + b.side * out, z = b.zc + u;
+      b.add(new THREE.CylinderGeometry(0.15, 0.12, 0.28, 8).translate(x, y + 0.14, z), pail);
+      b.add(new THREE.IcosahedronGeometry(0.17, 0).translate(x, y + 0.36, z), leaves);
+      b.add(new THREE.IcosahedronGeometry(0.13, 0).translate(x + (rnd() - 0.5) * 0.08, y + 0.45, z + (rnd() - 0.5) * 0.08), mat(pick(rnd, FLOWER_COLOURS)));
+    }
+  }
+}
+
+// kind: 'shop', 'flowers', 'mirror' (blue mirror front, sliding doors) or
+// 'lobby' (an office: mirror glass, no sign)
+function shopfront(b, rnd, fw, night, kind, far) {
   const dark = mat(pick(rnd, PALETTE.darkTrim));
   b.face(0, 0.25, 0.05, fw - 0.6, 0.5, 0.1, dark);                         // kick plate
-  const glassW = fw - 2.4, doorU = (fw / 2 - 0.9) * (rnd() < 0.5 ? -1 : 1);
-  const lit = night && rnd() < 0.45;
-  b.face(-doorU * 0.18, 1.85, 0.04, glassW, 2.6, 0.08,
-    lit ? mat(GLASS, { emissive: 0xffd08a, emissiveIntensity: 0.55, roughness: 0.3 }) : mat(GLASS, { roughness: 0.25, metalness: 0.2 }));
-  b.face(doorU, 1.2, 0.03, 1.2, 2.4, 0.06, mat(0x1c1a18));                 // door
   b.face(0, 3.25, 0.06, fw - 0.4, 0.14, 0.12, dark);                       // header
-  if (kind === 'lobby') return;
-  const tex = signTexture(pick(rnd, SHOP_NAMES), pick(rnd, SIGN_COLOURS));
+  const glassW = fw - 2.4, doorU = (fw / 2 - 0.9) * (rnd() < 0.5 ? -1 : 1);
+  if ((kind === 'mirror' || kind === 'lobby') && !far) {
+    b.mirrorFace(-doorU * 0.18 - Math.sign(doorU) * 0.4, 1.85, 0.04, glassW - 1.2, 2.6, 0.08);
+    b.face(doorU, DOOR_H / 2, 0.012, DOOR_W * 2 + 0.2, DOOR_H, 0.02, mat(0x0e1214)); // dark lobby behind the doors
+    b.face(doorU, DOOR_H + 0.1, 0.07, DOOR_W * 2 + 0.3, 0.2, 0.14, dark);            // door head
+    b.slidingDoor(doorU);
+  } else {
+    const lit = night && rnd() < 0.45;
+    b.face(-doorU * 0.18, 1.85, 0.04, glassW, 2.6, 0.08,
+      lit ? mat(GLASS, { emissive: 0xffd08a, emissiveIntensity: 0.55, roughness: 0.3 }) : mat(GLASS, { roughness: 0.25, metalness: 0.2 }));
+    b.face(doorU, 1.2, 0.03, 1.2, 2.4, 0.06, mat(0x1c1a18));               // door
+  }
+  if (kind === 'lobby' || far) return;
+  const name = kind === 'flowers' ? 'FLOWERS' : pick(rnd, SHOP_NAMES);
+  const tex = signTexture(name, kind === 'flowers' ? SIGN_COLOURS[1] : pick(rnd, SIGN_COLOURS));
   b.face(0, 3.75, 0.12, Math.min(fw - 0.6, 7), 0.85, 0.16, mat(0xffffff, { map: tex, emissive: night ? 0xffffff : 0, emissiveIntensity: night ? 0.5 : 0 }));
-  if (rnd() < 0.75) {
+  if (kind === 'flowers') flowerStands(b, rnd, fw);
+  if (kind === 'flowers' || rnd() < 0.75) {
     // Awning, sloping down toward the street, with a valance at its edge
-    const colour = mat(pick(rnd, PALETTE.awning));
+    const colour = mat(kind === 'flowers' ? PALETTE.awning[0] : pick(rnd, PALETTE.awning));
     const awn = new THREE.BoxGeometry(1.7, 0.08, fw - 0.6).rotateZ(-0.38 * b.side)
       .translate(b.fx + b.side * 0.82, 3.0, b.zc);
     b.add(awn, colour);
@@ -206,7 +317,7 @@ function splitFrontage(rnd, d) {
 const DOWNTOWN_TYPES = ['walkup', 'walkup', 'office', 'apartment', 'hotel', 'corner'];
 let lastType = null;
 
-function buildOne(b, rnd, fw, depth, lotH, night) {
+function buildOne(b, rnd, fw, depth, lotH, night, far) {
   let type = pick(rnd, DOWNTOWN_TYPES);
   if (type === lastType) type = pick(rnd, DOWNTOWN_TYPES);
   if (lotH > 34 && rnd() < 0.5) type = rnd() < 0.7 ? 'office' : 'hotel'; // the tall lots get the towers
@@ -224,7 +335,8 @@ function buildOne(b, rnd, fw, depth, lotH, night) {
   b.box(b.fx - b.side * depth / 2, H / 2, b.zc, depth, H, fw, wallMat);
   // Pilasters at the edges keep neighbouring buildings visibly separate
   for (const e of [-1, 1]) b.face(e * (fw / 2 - 0.25), H / 2, 0.06, 0.5, H, 0.12, type === 'office' ? trim : wallMat);
-  shopfront(b, rnd, fw, night, type === 'office' ? 'lobby' : 'shop');
+  const shop = rnd();
+  shopfront(b, rnd, fw, night, type === 'office' ? 'lobby' : shop < 0.12 ? 'flowers' : shop < 0.38 ? 'mirror' : 'shop', far);
   b.face(0, GROUND - 0.1, 0.08, fw, 0.25, 0.16, trim); // band over the shops
 
   const glass = () => {
@@ -245,7 +357,7 @@ function buildOne(b, rnd, fw, depth, lotH, night) {
     const bay = type === 'apartment' ? 3.0 : 2.5;
     const cols = Math.max(1, Math.floor((fw - 1.4) / bay));
     const ww = type === 'corner' ? 1.6 : 1.05, wh = type === 'hotel' ? 1.5 : 1.65;
-    const look = { trim, glass, lintel: type === 'walkup' ? trim : null };
+    const look = { trim, glass, lintel: type === 'walkup' ? trim : null, far };
     for (let s = 0; s < storeys; s++) {
       const v = GROUND + s * STOREY + 1.7;
       for (let c = 0; c < cols; c++) {
@@ -257,7 +369,7 @@ function buildOne(b, rnd, fw, depth, lotH, night) {
         }
       }
     }
-    if (type === 'walkup' && rnd() < 0.65 && fw > 5.5) fireEscape(b, (rnd() < 0.5 ? -1 : 1) * Math.min(1.2, fw / 2 - 1.8), storeys + 1, mat(IRON));
+    if (!far && type === 'walkup' && rnd() < 0.65 && fw > 5.5) fireEscape(b, (rnd() < 0.5 ? -1 : 1) * Math.min(1.2, fw / 2 - 1.8), storeys + 1, mat(IRON));
   }
   // Top: heavy cornice on the walk-ups and hotels, a parapet elsewhere
   if (type === 'walkup' || type === 'hotel') {
@@ -278,20 +390,23 @@ function buildOne(b, rnd, fw, depth, lotH, night) {
     // Setback top tier
     const th = 2 * STOREY, td = depth * 0.6, tf = fw * 0.7;
     b.box(b.fx - b.side * (depth / 2 + 0.8), H + th / 2, b.zc, td, th, tf, wallMat);
-    roofKit(b, rnd, H + th, depth, tf, type);
+    if (!far) roofKit(b, rnd, H + th, depth, tf, type);
   } else {
-    roofKit(b, rnd, H, depth, fw, type);
+    if (!far) roofKit(b, rnd, H, depth, fw, type);
   }
   return H;
 }
 
 /** Builds the stylised buildings on one street lot (centre x, z; w deep from
     the street, d along it, h the old box's height) and gives the lot its
-    collider and camera blockers. Returns the group. */
-export function buildKitBuilding(x, z, w, h, d) {
+    collider and camera blockers. Returns the group.
+    face: which way along x the facade looks (default: toward x = 0, the
+    main street). collider: false for lots out of reach. far: lighter
+    detail and no shadows, for the town past the edge. */
+export function buildKitBuilding(x, z, w, h, d, { face, collider = true, far = false } = {}) {
   const rnd = seeded(Math.round(x * 73.1) ^ Math.round(z * 131.7) ^ 0xC17E);
   const night = state.timeOfDay === 'night';
-  const side = x > 0 ? -1 : 1; // the facade faces the street (x = 0)
+  const side = face ?? (x > 0 ? -1 : 1);
   const facadeX = x + side * w / 2;
   const group = new THREE.Group();
   let z0 = z - d / 2;
@@ -300,8 +415,9 @@ export function buildKitBuilding(x, z, w, h, d) {
     z0 += fw;
     const depth = w * (0.82 + rnd() * 0.18);
     const b = new Builder(facadeX, side, zc);
-    const H = buildOne(b, rnd, fw, depth, h, night);
-    b.finish(group);
+    const H = buildOne(b, rnd, fw, depth, h, night, far);
+    b.finish(group, !far);
+    if (!collider) continue;
     // Camera blocker for this building: a plain box, indexed like baked scenery
     const occ = new THREE.Mesh(new THREE.BoxGeometry(depth, H, fw));
     occ.position.set(facadeX - side * depth / 2, H / 2, zc);
@@ -310,6 +426,6 @@ export function buildKitBuilding(x, z, w, h, d) {
     state.occluders.push(occ);
   }
   scene.add(group);
-  addStaticBox(w / 2, h / 2, d / 2, x, h / 2, z);
+  if (collider) addStaticBox(w / 2, h / 2, d / 2, x, h / 2, z);
   return group;
 }
