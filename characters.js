@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {EnemyCrowd} from './EnemyCrowd.js';
+import { buildKitBuilding } from './CityKit.js';
 import { CircleGrid } from './SpatialGrid.js';
 import { asphaltRoughness } from './ContactShading.js';
 import { streetlightBeamMaterial } from './survivor.js';
@@ -1118,7 +1119,21 @@ export function makeCollapsedBuilding(x, z, w, d, h, streetSide, spillTo) {
 /* ---------------------------------------------------------------------
    BUILDINGS
 --------------------------------------------------------------------- */
+/* A level that names a district (state.cityKit, e.g. Level 1's 'downtown')
+   gets CityKit.js's stylised buildings on the same lots. The old box
+   builder still runs first as a ghost, built and thrown away, so the
+   shared rnd() advances exactly as before and everything placed after the
+   buildings (wrecks, cars, spawns) lands where it always has. */
 export function makeBuilding(x, z, w, h, d, opts = {}) {
+  if (!state.cityKit || opts.consumeOnly) return makeBoxBuilding(x, z, w, h, d, opts);
+  makeBoxBuilding(x, z, w, h, d, { ...opts, consumeOnly: true }).traverse((o) => {
+    if (!o.isMesh) return;
+    o.geometry.dispose();
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.dispose();
+  });
+  return buildKitBuilding(x, z, w, h, d);
+}
+function makeBoxBuilding(x, z, w, h, d, opts = {}) {
   const g = new THREE.Group();
   const night = state.timeOfDay === 'night';
   const clearDay = state.timeOfDay === 'day' && state.clearDay;

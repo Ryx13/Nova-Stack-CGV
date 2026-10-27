@@ -24,6 +24,10 @@ import { playerBody } from './characters.js';
 // puddles and burning-wreck smoke — see warmDay in Scene.js.
 state.warmDay = true;
 
+// Downtown: the street's lots get CityKit.js's stylised buildings
+// (walk-ups, offices, apartments, a hotel, corner shops) instead of boxes
+state.cityKit = 'downtown';
+
 // An easier street: half as many infected (cap, opening pack, spawn rate,
 // depot guards) and their hits do half the damage, so reaching the depot
 // is a fight you can win rather than a swarm.
