@@ -531,6 +531,25 @@ function buildLevel1Backdrop() {
   };
 }
 
+/** Level 1's view of the same land: the terrain and sea built exactly as
+    here, moved 248 m north (L1_SHIFT), since Level 1 is that much further
+    up the road. Sunk a little so the flattened street corridor sits under
+    Level 1's own ground slab. Returns the per-frame update. */
+export function buildLandscape({ sinkY = 0.25 } = {}) {
+  camera.far = VIEW_FAR;
+  camera.updateProjectionMatrix();
+  sky.renderOrder = -2; // sky first: it writes no depth, so the far ridges draw over it
+  const terrain = buildTerrain(), sea = buildSea();
+  terrain.position.set(0, -sinkY, -L1_SHIFT);
+  sea.position.z = -L1_SHIFT;
+  let t = 0;
+  return (dt) => {
+    t += dt;
+    if (scene.fog) hazeUniforms.uHazeColor.value.copy(scene.fog.color);
+    sea.material.normalMap.offset.set(t * 0.004, t * 0.0025);
+  };
+}
+
 /** Builds the terrain, the sea and the back city. Call after the static merge (custom
     shader — not mergeable). Returns the per-frame tick. */
 export function buildSurroundings() {

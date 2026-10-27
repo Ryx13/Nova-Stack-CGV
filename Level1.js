@@ -11,7 +11,8 @@ import './Scene.js';
 import './characters.js';
 import './PowerUps.js';
 import './shaders.js';
-import { bootLevel } from './Actions.js';
+import { bootLevel, registerLevelTick } from './Actions.js';
+import { buildLevel1Surroundings } from './Level1Surroundings.js';
 import { state } from './state.js';
 import { startLevel1Intro } from './Level1Intro.js';
 import { registerDayProgress } from './DayCycle.js';
@@ -43,6 +44,7 @@ registerDayProgress(() => {
 
 export function startLevel(mode) {
   bootLevel({ ...LEVEL_CONFIG, mode });
+  registerLevelTick(buildLevel1Surroundings()); // the annex, the outskirts and the mountains behind the start
   // The fly-through briefing: gameplay holds from here until it ends
   startLevel1Intro();
 }
