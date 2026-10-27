@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {EnemyCrowd} from './EnemyCrowd.js';
 import { buildKitBuilding } from './CityKit.js';
+import { buildCityGround } from './CityGround.js';
 import { CircleGrid } from './SpatialGrid.js';
 import { asphaltRoughness } from './ContactShading.js';
 import { streetlightBeamMaterial } from './survivor.js';
@@ -663,7 +664,9 @@ export function loadStreetSurface() {
   road.receiveShadow = true;
   road.material.userData.staticLampHeight = road.position.y;
   scene.add(road);
-  [-1, 1].forEach((side) => {
+  // A district (state.cityKit) gets CityGround.js's slabs, kerbs and junctions
+  if (state.cityKit) buildCityGround();
+  else [-1, 1].forEach((side) => {
     const walk = new THREE.Mesh(
       new THREE.PlaneGeometry(4.2, STREET_LENGTH + 70),
       new THREE.MeshStandardMaterial({ map: sidewalkTex, roughness: 0.92 })
@@ -711,6 +714,7 @@ export function loadStreetSurface() {
   // the main road plus a stop line, so the side road reads as a real
   // intersection instead of a driveway. renderOrder + depthWrite:false
   // layer the transparent paint above the lane markings without fighting.
+  if (state.cityKit) return; // CityGround.js paints its own junctions
   const paintMat = new THREE.MeshBasicMaterial({ color: 0xd8d5c8, transparent: true, opacity: 0.5, depthWrite: false });
   const crossZ = DEPOT_POS.z + 6.5;
   for (let i = 0; i < 7; i++) {
