@@ -4,8 +4,9 @@
    Fills the district's plan (CityLayout.js layout()): kit buildings
    (CityKit.js) on lots facing every street, its parks, street trees in the
    tree pits CityGround.js laid, and lamp posts along the back streets.
-   Downtown adds the city zoo; the harbour adds the waterfront promenade
-   and Harbour Walk, the lit glass bridge over the main street.
+   Downtown adds the city zoo; the harbour adds the waterfront (boardwalk,
+   beaches, the lighthouse), sand blown onto its streets, and Harbour Walk,
+   the lit glass bridge over the main street.
 
    Lots within the playable area get colliders and camera blockers; the
    rest of the town, past the edge, is scenery only, and its far rows use
@@ -16,12 +17,12 @@
 ====================================================================== */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { scene, addStaticBox, addLight, rowX } from './Scene.js';
+import { scene, addStaticBox, addLight, rowX, STREET_HALF_W } from './Scene.js';
 import { state } from './state.js';
 import { makeStreetlight } from './characters.js';
 import { buildKitBuilding, FEATURE_SPOTS, MAIN_LOTS } from './CityKit.js';
 import { treePits } from './CityGround.js';
-import { BOUNDS, layout, lotBlocked } from './CityLayout.js';
+import { BOUNDS, SIDEWALK as SIDEWALK_W, layout, lotBlocked } from './CityLayout.js';
 
 function seeded(a) {
   return () => {
@@ -180,6 +181,10 @@ function buildPark(batch, rnd, park) {
     const tz = onSide ? z1 + 4 + t * (d - 8) : (i % 4 < 2 ? z0 - 3.5 : z1 + 3.5);
     if (clear(tx, tz, 3.5)) tree(batch, rnd, tx, tz, (1.1 + rnd() * 0.3) * Math.max(0.8, k));
   }
+  // Seaside parks: palms at the corners
+  if (park.palms) for (const [px, pz] of [[x0 + 2.5, z0 - 2.5], [x1 - 2.5, z0 - 2.5], [x0 + 2.5, z1 + 2.5], [x1 - 2.5, z1 + 2.5]]) {
+    if (clear(px, pz, 3)) palm(batch, rnd, px, pz, 1.05);
+  }
 }
 
 /* --- The city zoo ----------------------------------------------------------
@@ -299,35 +304,224 @@ function buildZoo(batch, rnd, zoo) {
   for (let i = 0; i < 10; i++) tree(batch, rnd, -76 - i * 5.2, gateZ + (i % 2 ? 4 : -4), 1 + rnd() * 0.3);
 }
 
-/* --- The waterfront promenade (harbour) -------------------------------------
-   Either side of the quay, level with it: pale paving, a white railing at
-   the water's edge with lifebuoys on it, benches facing the sea, bollards,
-   and small boats tied up just off it. */
+/* --- Things that move (Level ticks call updateTown) --------------------------- */
+const animators = [];
+/** Every frame, from the level's tick: the lighthouse beam, and the like. */
+export function updateTown(dt) { for (const a of animators) a(dt); }
+
+/* --- The waterfront (harbour) -------------------------------------------------
+   Either side of the quay: a boardwalk with palms, benches and lamps, steps
+   down to a beach that slopes into the sea. The east beach is for lying in
+   the sun (umbrellas, deck chairs, towels, beach huts, a lifeguard tower, a
+   sandcastle); the west for playing (a volleyball net, picnic tables) with
+   dune grass and driftwood. Boats moored off it, one pulled up on the sand. */
 const HULLS = [0xf0ece4, 0x2e4a7a, 0xa83a32, 0x2f6b5a, 0xd8a43a];
-function rowboat(batch, rnd, x, z) {
+const BRIGHT = [0xe86a9a, 0xf2c84a, 0x3a9ad8, 0xd8453a, 0x5ab87a, 0xf08a3a, 0xf0ece4];
+function rowboat(batch, rnd, x, z, y = 0.2) {
   const hull = flat(HULLS[Math.floor(rnd() * HULLS.length)]), trim = flat(0xf0ece4), deck = flat(0x7a5a3a);
   const len = 4 + rnd() * 1.5, ry = (rnd() - 0.5) * 0.3;
-  batch.add(hull, new THREE.BoxGeometry(len, 0.7, 1.6).rotateY(ry).translate(x, 0.2, z));
-  batch.add(hull, new THREE.ConeGeometry(0.8, 1.2, 4).rotateZ(-Math.PI / 2).rotateX(Math.PI / 4).scale(1, 0.55, 1).rotateY(ry).translate(x + Math.cos(ry) * (len / 2 + 0.55), 0.25, z - Math.sin(ry) * (len / 2 + 0.55)));
-  batch.add(deck, new THREE.BoxGeometry(len - 0.4, 0.05, 1.3).rotateY(ry).translate(x, 0.56, z));
-  if (rnd() < 0.5) batch.add(trim, new THREE.BoxGeometry(1.3, 0.8, 1.2).rotateY(ry).translate(x - Math.cos(ry) * 0.4, 0.95, z + Math.sin(ry) * 0.4));
+  batch.add(hull, new THREE.BoxGeometry(len, 0.7, 1.6).rotateY(ry).translate(x, y, z));
+  batch.add(hull, new THREE.ConeGeometry(0.8, 1.2, 4).rotateZ(-Math.PI / 2).rotateX(Math.PI / 4).scale(1, 0.55, 1).rotateY(ry).translate(x + Math.cos(ry) * (len / 2 + 0.55), y + 0.05, z - Math.sin(ry) * (len / 2 + 0.55)));
+  batch.add(deck, new THREE.BoxGeometry(len - 0.4, 0.05, 1.3).rotateY(ry).translate(x, y + 0.36, z));
+  if (rnd() < 0.5) batch.add(trim, new THREE.BoxGeometry(1.3, 0.8, 1.2).rotateY(ry).translate(x - Math.cos(ry) * 0.4, y + 0.75, z + Math.sin(ry) * 0.4));
 }
-function buildPromenade(batch, rnd, P) {
-  const paving = flat(0xc8bca4), white = flat(0xe8e8e4), buoy = flat(0xe8622a), rope = flat(0xd8d0b8);
-  for (const strip of P.strips) {
-    const x0 = Math.min(strip.x0, strip.x1), x1 = Math.max(strip.x0, strip.x1), w = x1 - x0, d = P.z0 - P.z1;
-    const cx = (x0 + x1) / 2, cz = (P.z0 + P.z1) / 2, rz = P.z1 + 0.4;
-    batch.add(paving, new THREE.BoxGeometry(w, 0.18, d).translate(cx, 0.09, cz));
-    for (let x = x0 + 0.5; x < x1; x += 2) batch.add(white, new THREE.BoxGeometry(0.08, 1.0, 0.08).translate(x, 0.68, rz));
-    for (const y of [0.75, 1.15]) batch.add(white, new THREE.BoxGeometry(w, 0.06, 0.06).translate(cx, y, rz));
-    for (let x = x0 + 9; x < x1 - 3; x += 18) {
-      batch.add(buoy, new THREE.TorusGeometry(0.35, 0.09, 6, 12).translate(x, 0.95, rz + 0.08));
-      for (const a of [0, Math.PI / 2, Math.PI, Math.PI * 1.5]) batch.add(rope, new THREE.BoxGeometry(0.06, 0.2, 0.2).rotateZ(a).translate(x + Math.cos(a) * 0.35, 0.95 + Math.sin(a) * 0.35, rz + 0.1));
-    }
-    for (let x = x0 + 4; x < x1 - 3; x += 9) bench(batch, x, rz + 2.4, Math.PI);
-    for (let x = x0 + 2; x < x1; x += 7) batch.add(IRON, new THREE.CylinderGeometry(0.18, 0.22, 0.6, 10).translate(x, 0.48, rz + 1.1));
-    for (let x = x0 + 6; x < x1 - 4; x += 11) rowboat(batch, rnd, x + (rnd() - 0.5) * 2, P.z1 - 3.5 - rnd() * 2);
+// A low-poly palm: a trunk bending in segments, a crown of drooping fronds
+const PALM_TRUNK = flat(0x8a6a4a), PALM_FROND = [flat(0x4f8a3a), flat(0x5f9a40)];
+function palm(batch, rnd, x, z, scale = 1) {
+  const lean = (rnd() - 0.5) * 0.5, dir = rnd() * Math.PI * 2;
+  let px = x, py = 0, pz = z;
+  for (let i = 0; i < 5; i++) {
+    const tilt = lean * (i / 5), len = 1.3 * scale;
+    const nx = px + Math.cos(dir) * Math.sin(tilt) * len, nz = pz + Math.sin(dir) * Math.sin(tilt) * len, ny = py + Math.cos(tilt) * len;
+    batch.add(PALM_TRUNK, new THREE.CylinderGeometry((0.16 - i * 0.015) * scale, (0.2 - i * 0.015) * scale, len, 6)
+      .rotateZ(-Math.cos(dir) * tilt).rotateX(Math.sin(dir) * tilt).translate((px + nx) / 2, (py + ny) / 2, (pz + nz) / 2));
+    px = nx; py = ny; pz = nz;
   }
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 2 + rnd() * 0.3;
+    batch.add(PALM_FROND[i % 2], new THREE.BoxGeometry(2.6 * scale, 0.05, 0.45 * scale).translate(1.3 * scale, 0, 0)
+      .rotateZ(-0.45 - rnd() * 0.25).rotateY(a).translate(px, py, pz));
+  }
+  if (inReach(x, x, z, z)) addStaticBox(0.22 * scale, 2.5, 0.22 * scale, x, 2.5, z);
+}
+function deckChair(batch, x, z, ry, cloth) {
+  const frame = new THREE.BoxGeometry(0.6, 0.06, 1.5).rotateX(-0.25).translate(0, 0.35, 0);
+  const back = new THREE.BoxGeometry(0.6, 0.06, 0.8).rotateX(0.9).translate(0, 0.65, -0.85);
+  for (const g of [frame, back]) batch.add(cloth, g.rotateY(ry).translate(x, 0.06, z));
+  for (const lx of [-0.27, 0.27]) batch.add(WOOD, new THREE.BoxGeometry(0.04, 0.35, 0.04).translate(lx, 0.18, 0.55).rotateY(ry).translate(x, 0.06, z));
+}
+function umbrella(batch, rnd, x, z) {
+  batch.add(flat(0xf0ece4), new THREE.CylinderGeometry(0.04, 0.04, 2.3, 5).rotateZ((rnd() - 0.5) * 0.2).translate(x, 1.2, z));
+  batch.add(flat(BRIGHT[Math.floor(rnd() * BRIGHT.length)]), new THREE.ConeGeometry(1.4, 0.5, 8).translate(x, 2.35, z));
+}
+function beachHut(batch, rnd, x, z) {
+  const wall = flat(BRIGHT[Math.floor(rnd() * BRIGHT.length)]), white = flat(0xf0ece4);
+  batch.add(wall, new THREE.BoxGeometry(2.2, 2.2, 2.2).translate(x, 1.16, z));
+  const roof = new THREE.Shape(); roof.moveTo(-1.35, 0); roof.lineTo(1.35, 0); roof.lineTo(0, 0.9); roof.lineTo(-1.35, 0);
+  batch.add(white, new THREE.ExtrudeGeometry(roof, { depth: 2.6, bevelEnabled: false }).translate(x, 2.26, z - 1.3));
+  batch.add(white, new THREE.BoxGeometry(0.9, 1.6, 0.05).translate(x, 0.86, z - 1.13)); // door, facing the sea
+}
+function lifeguardTower(batch, x, z) {
+  const white = flat(0xf0ece4), red = flat(0xd8453a);
+  for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) batch.add(white, new THREE.BoxGeometry(0.15, 3, 0.15).translate(x + dx, 1.5, z + dz));
+  batch.add(white, new THREE.BoxGeometry(2.6, 0.15, 2.6).translate(x, 3.05, z));
+  batch.add(red, new THREE.BoxGeometry(2.2, 1.4, 2.2).translate(x, 3.8, z));
+  batch.add(white, new THREE.BoxGeometry(2.6, 0.12, 2.6).translate(x, 4.55, z));
+  batch.add(white, new THREE.BoxGeometry(0.6, 0.06, 2.6).rotateX(0.85).translate(x, 1.5, z + 2.1)); // ladder
+  batch.add(white, new THREE.CylinderGeometry(0.03, 0.03, 2, 4).translate(x + 1.2, 5.5, z));
+  batch.add(red, new THREE.BoxGeometry(0.02, 0.5, 0.8).translate(x + 1.2, 6.2, z - 0.4)); // the red flag
+}
+function sandcastle(batch, x, z) {
+  const sand = flat(0xd0b888);
+  batch.add(sand, new THREE.CylinderGeometry(0.7, 0.8, 0.5, 8).translate(x, 0.3, z));
+  for (const [dx, dz] of [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]]) {
+    batch.add(sand, new THREE.CylinderGeometry(0.18, 0.2, 0.5, 6).translate(x + dx, 0.75, z + dz));
+    batch.add(sand, new THREE.ConeGeometry(0.2, 0.25, 6).translate(x + dx, 1.12, z + dz));
+  }
+  batch.add(flat(0xd8453a), new THREE.BoxGeometry(0.01, 0.12, 0.2).translate(x, 1.0, z + 0.1)); // a flag on a stick
+}
+function duneGrass(batch, rnd, x, z) {
+  const grass = flat(0x9aa64a);
+  for (let i = 0; i < 9; i++) batch.add(grass, new THREE.ConeGeometry(0.05, 0.55 + rnd() * 0.4, 3).rotateX((rnd() - 0.5) * 0.7).rotateZ((rnd() - 0.5) * 0.7).translate(x + (rnd() - 0.5) * 0.8, 0.3, z + (rnd() - 0.5) * 0.8));
+}
+function picnicTable(batch, x, z) {
+  batch.add(WOOD, new THREE.BoxGeometry(1.9, 0.07, 0.8).translate(x, 0.78, z));
+  for (const e of [-1, 1]) {
+    batch.add(WOOD, new THREE.BoxGeometry(1.9, 0.06, 0.3).translate(x, 0.45, z + e * 0.6));
+    batch.add(WOOD, new THREE.BoxGeometry(0.08, 0.8, 1.6).rotateX(e * 0.35).translate(x + e * 0.7, 0.4, z));
+  }
+}
+function buildWaterfront(batch, rnd, P) {
+  const plank = [flat(0x8a6a4a), flat(0x7a5a3e)], white = flat(0xe8e8e4), rope = flat(0xd8d0b8), buoy = flat(0xe8622a);
+  const towels = BRIGHT.map((c) => flat(c));
+  for (const strip of P.strips) {
+    const x0 = Math.min(strip.x0, strip.x1), x1 = Math.max(strip.x0, strip.x1), w = x1 - x0, cx = (x0 + x1) / 2;
+    // The boardwalk: planks across it, a low rope fence along the sand edge, steps down
+    const bd = P.z0 - P.z1, bz = (P.z0 + P.z1) / 2;
+    batch.add(plank[0], new THREE.BoxGeometry(w, 0.16, bd).translate(cx, 0.08, bz));
+    for (let x = x0 + 0.15, k = 0; x < x1; x += 0.3, k++) batch.add(plank[k & 1], new THREE.BoxGeometry(0.26, 0.03, bd - 0.1).translate(x, 0.17, bz));
+    const steps = [];
+    for (let x = x0 + 6; x < x1 - 4; x += 12) steps.push(x);
+    for (let x = x0 + 0.5; x < x1; x += 3) {
+      if (steps.some((sx) => Math.abs(x - sx) < 2)) continue;
+      batch.add(WOOD, new THREE.CylinderGeometry(0.07, 0.07, 0.8, 6).translate(x, 0.5, P.z1 + 0.2));
+      batch.add(rope, new THREE.BoxGeometry(3, 0.04, 0.04).translate(x + 1.5, 0.75, P.z1 + 0.2));
+    }
+    for (const sx of steps) for (let k = 0; k < 2; k++) batch.add(plank[1], new THREE.BoxGeometry(2.6, 0.08, 0.45).translate(sx, 0.12 - k * 0.06, P.z1 - 0.25 - k * 0.45));
+    for (let x = x0 + 9; x < x1 - 3; x += 18) bench(batch, x, P.z1 + 1.4, Math.PI);
+    for (let x = x0 + 4; x < x1 - 2; x += 10) palm(batch, rnd, x + (rnd() - 0.5) * 2, P.z0 - 1.2, 0.95 + rnd() * 0.2);
+    for (let x = x0 + 14; x < x1 - 3; x += 22) {
+      batch.add(buoy, new THREE.TorusGeometry(0.35, 0.09, 6, 12).translate(x, 0.9, P.z1 + 0.25));
+      for (const a of [0, Math.PI / 2, Math.PI, Math.PI * 1.5]) batch.add(rope, new THREE.BoxGeometry(0.06, 0.2, 0.2).rotateZ(a).translate(x + Math.cos(a) * 0.35, 0.9 + Math.sin(a) * 0.35, P.z1 + 0.27));
+    }
+    // The beach: dry sand by the boardwalk, wet and darker as it slopes into the sea
+    const sd = P.z1 - P.beachTo, sz = (P.z1 + P.beachTo) / 2;
+    const geo = new THREE.PlaneGeometry(w, sd, Math.ceil(w / 2), Math.ceil(sd / 1.5)).rotateX(-Math.PI / 2).translate(cx, 0, sz);
+    const pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
+    const dry = new THREE.Color(0xdcc89e), wet = new THREE.Color(0xb09a72), c = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      const vx = pos.getX(i), vz = pos.getZ(i), t = (P.z1 - vz) / sd; // 0 at the boardwalk .. 1 out in the water
+      const dune = (1 - THREE.MathUtils.smoothstep(t, 0.05, 0.3)) * 0.22 * (0.5 + 0.5 * Math.sin(vx * 0.7 + vz * 1.3));
+      pos.setY(i, 0.06 + dune - 0.55 * THREE.MathUtils.smoothstep(t, 0.3, 1));
+      c.copy(dry).lerp(wet, THREE.MathUtils.smoothstep(t, 0.45, 0.7)).toArray(col, i * 3);
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geo.computeVertexNormals();
+    batch.add(SAND, geo);
+    const onSand = (x) => x > Math.max(x0, -BOUNDS.x) + 1 && x < Math.min(x1, BOUNDS.x) - 1;
+    if (strip.beach === 'east') {
+      for (let x = x0 + 4; x < x1 - 6; x += 6.5) {
+        const z = P.z1 - 6 - rnd() * 3;
+        umbrella(batch, rnd, x, z);
+        deckChair(batch, x - 0.9, z + 0.6, Math.PI + (rnd() - 0.5) * 0.4, towels[Math.floor(rnd() * towels.length)]);
+        if (rnd() < 0.7) deckChair(batch, x + 0.9, z + 0.6, Math.PI + (rnd() - 0.5) * 0.4, towels[Math.floor(rnd() * towels.length)]);
+        if (rnd() < 0.6) batch.add(towels[Math.floor(rnd() * towels.length)], new THREE.BoxGeometry(0.9, 0.02, 1.8).rotateY((rnd() - 0.5) * 0.6).translate(x + 1.8, 0.08, z - 1.5));
+      }
+      for (let x = x0 + 2; x < x0 + 14; x += 3) beachHut(batch, rnd, x, P.z1 - 2.2);
+      lifeguardTower(batch, Math.min(x1, BOUNDS.x) - 7, P.z1 - 11);
+      sandcastle(batch, x0 + 18, P.z1 - 13);
+      batch.add(flat(0x3a9ad8), new THREE.SphereGeometry(0.25, 10, 8).translate(x0 + 20, 0.3, P.z1 - 11)); // a beach ball
+      // Ice cream cart on the boardwalk
+      const cartX = x0 + 22;
+      batch.add(flat(0xf0d8e0), new THREE.BoxGeometry(1.6, 0.9, 0.9).translate(cartX, 0.75, P.z0 - 3.3));
+      for (const e of [-1, 1]) batch.add(IRON, new THREE.CylinderGeometry(0.25, 0.25, 0.08, 10).rotateX(Math.PI / 2).translate(cartX + e * 0.55, 0.4, P.z0 - 2.8));
+      umbrella(batch, rnd, cartX, P.z0 - 3.3);
+    } else {
+      // Volleyball: two posts and a net between them
+      const vx = Math.max(x0, -BOUNDS.x) + 12, vz = P.z1 - 9;
+      for (const e of [-1, 1]) batch.add(white, new THREE.CylinderGeometry(0.06, 0.06, 2.6, 6).translate(vx, 1.3, vz + e * 4));
+      batch.add(white, new THREE.BoxGeometry(0.03, 0.9, 8).translate(vx, 2.0, vz));
+      batch.add(flat(0xf2c84a), new THREE.SphereGeometry(0.2, 8, 6).translate(vx + 3, 0.25, vz + 1));
+      for (let i = 0; i < 3; i++) picnicTable(batch, x1 - 5 - i * 4.5, P.z1 - 3.5);
+      for (let i = 0; i < 3; i++) batch.add(WOOD, new THREE.CylinderGeometry(0.18, 0.22, 2.4 + rnd(), 6).rotateZ(Math.PI / 2).rotateY(rnd() * 3).translate(x0 + 8 + rnd() * (w - 16), 0.2, P.z1 - 4 - rnd() * 6)); // driftwood
+      rowboat(batch, rnd, x1 - 10, P.z1 - 7, 0.35); // pulled up on the sand
+    }
+    for (let x = x0 + 1; x < x1 - 1; x += 3 + rnd() * 3) if (onSand(x) || rnd() < 0.4) duneGrass(batch, rnd, x, P.z1 - 1 - rnd() * 1.5);
+    for (let x = x0 + 6; x < x1 - 4; x += 11) rowboat(batch, rnd, x + (rnd() - 0.5) * 2, P.beachTo - 3 - rnd() * 3); // moored off
+  }
+}
+const SAND = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true });
+
+/* --- The lighthouse on the rocks off the west end -------------------------
+   Red and white, its beam sweeping the bay at night. */
+function buildLighthouse(batch, rnd, { x, z }) {
+  const white = flat(0xf0ece4), red = flat(0xc8323a), rock = flat(0x6a6660), dark = flat(0x2a2c2e);
+  for (let i = 0; i < 16; i++) batch.add(rock, new THREE.IcosahedronGeometry(1 + rnd() * 1.6, 0).translate(x + (rnd() - 0.5) * 7, 0, z + (rnd() - 0.5) * 7));
+  for (let i = 0; i < 6; i++) batch.add(rock, new THREE.IcosahedronGeometry(0.8 + rnd(), 0).translate(x + 3 + i * 1.6, -0.1, z + 3 + i * 1.4)); // the breakwater back to shore
+  const bands = [[0, 3.5, white], [3.5, 6, red], [6, 9.5, white], [9.5, 12, red]];
+  for (const [y0, y1, m] of bands) {
+    const r0 = 2.3 - y0 * 0.06, r1 = 2.3 - y1 * 0.06;
+    batch.add(m, new THREE.CylinderGeometry(r1, r0, y1 - y0, 14).translate(x, 1 + (y0 + y1) / 2, z));
+  }
+  batch.add(dark, new THREE.CylinderGeometry(2.3, 2.3, 0.25, 14).translate(x, 13.1, z));        // gallery
+  batch.add(dark, new THREE.TorusGeometry(2.2, 0.04, 4, 20).rotateX(Math.PI / 2).translate(x, 13.8, z));
+  const night = state.timeOfDay === 'night';
+  batch.add(flat(0xfff0b0, { emissive: 0xffd870, emissiveIntensity: night ? 2.2 : 0.3 }), new THREE.CylinderGeometry(1.1, 1.1, 1.8, 10).translate(x, 14.2, z)); // the lantern
+  batch.add(red, new THREE.ConeGeometry(1.5, 1.4, 14).translate(x, 15.8, z));
+  // The beam: two long, faint cones turning about the lantern, at night only
+  if (!night) return;
+  const beam = new THREE.Group();
+  beam.position.set(x, 14.2, z);
+  const glowMat = new THREE.MeshBasicMaterial({ color: 0xfff0b0, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  for (const e of [-1, 1]) beam.add(new THREE.Mesh(new THREE.ConeGeometry(3.5, 70, 16, 1, true).translate(0, 35, 0).rotateZ(e * Math.PI / 2), glowMat));
+  beam.userData.dynamic = true;
+  scene.add(beam);
+  animators.push((dt) => { beam.rotation.y += dt * 0.6; });
+}
+
+/* --- Sand blown onto the streets, thicker toward the water ------------------
+   Soft-edged patches as one instanced mesh, at whatever height the ground is
+   (road, sidewalk or lawn) so none hide under it. */
+function buildSandDrifts(rnd, L) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  for (let i = 0; i < 26; i++) {
+    const px = 16 + rnd() * 32, py = 16 + rnd() * 32, r = 8 + rnd() * 16;
+    const grad = g.createRadialGradient(px, py, 0, px, py, r);
+    grad.addColorStop(0, 'rgba(216,196,150,0.55)'); grad.addColorStop(1, 'rgba(216,196,150,0)');
+    g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.MeshStandardMaterial({ map: tex, transparent: true, depthWrite: false, roughness: 1, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+  const N = 260, drifts = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), mat, N);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+  const z0 = L.sandFrom, z1 = L.promenade.z0;
+  const onWalk = (x) => (Math.abs(x) > STREET_HALF_W && Math.abs(x) < rowX)
+    || L.backStreets.some((st) => Math.abs(Math.abs(x - st.x) - st.halfW - SIDEWALK_W / 2) < SIDEWALK_W / 2);
+  const onLawn = (x, z) => L.parks.some((pk) => x > pk.x0 && x < pk.x1 && z < pk.z0 && z > pk.z1);
+  for (let i = 0; i < N; i++) {
+    const z = z1 + (z0 - z1) * Math.pow(rnd(), 1.8); // most of them near the water
+    const x = (rnd() - 0.5) * 2 * BOUNDS.x;
+    p.set(x, onLawn(x, z) ? 0.095 : onWalk(x) ? 0.036 : 0.014, z);
+    const k = 1 - (z - z1) / (z0 - z1);
+    sc.set(1.5 + rnd() * 3.5 * (0.5 + k), 1, 0.8 + rnd() * 2 * (0.5 + k));
+    drifts.setMatrixAt(i, m.compose(p, q.setFromAxisAngle(up, rnd() * Math.PI), sc));
+  }
+  drifts.receiveShadow = true;
+  drifts.userData.dynamic = true;
+  scene.add(drifts);
 }
 
 /* --- Harbour Walk: the lit glass bridge over the main street ------------------
@@ -440,7 +634,9 @@ export function buildTown() {
   const greenery = new Batch();
   for (const park of L.parks) buildPark(greenery, rnd, park);
   if (L.zoo) buildZoo(greenery, rnd, L.zoo);
-  if (L.promenade) buildPromenade(greenery, rnd, L.promenade);
+  if (L.promenade) buildWaterfront(greenery, rnd, L.promenade);
+  if (L.lighthouse) buildLighthouse(greenery, rnd, L.lighthouse);
+  if (L.sandFrom !== undefined) buildSandDrifts(rnd, L);
   plantStreetTrees(greenery, rnd);
   greenery.finish();
   if (L.bridge) buildBridge(L.bridge);

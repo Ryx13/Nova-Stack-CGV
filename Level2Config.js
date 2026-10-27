@@ -51,7 +51,7 @@ state.liveStreetlights = [
   // The harbour town's (CityLayout.js harbour): Harbour Square, Gull Park
   // and the promenade either side of the quay
   { side: 1, z: -116 }, { side: 1, z: -152, blink: true }, { side: -1, z: -172 },
-  { side: -1, z: -197 }, { side: 1, z: -197 },
+  { side: -1, z: -189 }, { side: 1, z: -189 },
 ];
 // The street is battle-damaged (broken tops, blown corners, shopfronts),
 // and the two blocks flanking the collapse zone (z -120 → -165) came down:

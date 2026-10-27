@@ -20,11 +20,15 @@
 
    harbour (Level 2)
 
-     The same back streets, running down to a waterfront promenade either
-     side of the quay. Harbour Square, a park with a bandstand, takes the
-     open lot on the east side of the main street (its wrecks and coin
-     nest stay); Gull Park sits at the south end of the west block. A lit
-     glass bridge, Harbour Walk, crosses the main street mid-route.
+     The same back streets, running down to the waterfront: either side of
+     the quay a boardwalk with palms, and below it a beach sloping into
+     the sea (umbrellas and deck chairs, beach huts and a lifeguard tower
+     east; volleyball, picnic tables and dune grass west), a lighthouse
+     on the rocks off the west end. Sand drifts thicken on the streets as
+     you near it. Harbour Square, a park with a bandstand, takes the open
+     lot on the east side of the main street (its wrecks and coin nest
+     stay); Gull Park sits at the south end of the west block. A lit glass
+     bridge, Harbour Walk, crosses the main street mid-route.
 
    All roads run the full length of their district, so a later
    difficulty setting can open or close any of them.
@@ -116,13 +120,13 @@ const DOWNTOWN = {
 /* --- harbour (Level 2) ---------------------------------------------------- */
 const QUAY_Z = -186; // where the back streets meet the waterfront
 const HB_SQUARE = {
-  x0: 16.4, x1: 47, z0: -102, z1: -165, kind: 'bandstand', name: 'Harbour Square',
+  x0: 16.4, x1: 47, z0: -102, z1: -165, kind: 'bandstand', name: 'Harbour Square', palms: true,
   // Level 2's wrecks and coin nest stay in the square: keep clear of them
   avoid: [[20, -128], [34, -150], [24, -158], [38, -132], [27, -143], [6, -126]],
   openSide: -1, // the main street side has no hedge
 };
-const HB_GULL = { x0: -49, x1: -35, z0: -160, z1: -184, kind: 'fountain', name: 'Gull Park' };
-const HB_PROMENADE = [{ x0: -80, x1: -45 }, { x0: 45, x1: 80 }]; // either side of the quay, z QUAY_Z..-208
+const HB_GULL = { x0: -49, x1: -35, z0: -160, z1: -184, kind: 'fountain', name: 'Gull Park', palms: true };
+const HB_PROMENADE = [{ x0: -80, x1: -45, beach: 'west' }, { x0: 45, x1: 80, beach: 'east' }]; // either side of the quay
 const HARBOUR = {
   main: {
     zN: 55, zS: -188, // the sidewalks stop at the quay
@@ -151,7 +155,10 @@ const HARBOUR = {
     { z: -25, x0: 34, x1: 61, halfW: 4 },
   ],
   parks: [HB_SQUARE, HB_GULL],
-  promenade: { strips: HB_PROMENADE, z0: QUAY_Z, z1: -208 },
+  // The boardwalk from the quay line to z1, then the beach down into the sea
+  promenade: { strips: HB_PROMENADE, z0: QUAY_Z, z1: -192, beachTo: -213 },
+  lighthouse: { x: -86, z: -218 },
+  sandFrom: -120, // where sand drifts start on the streets
   // The glass bridge across the main street: centre z, deck height at its
   // ends and how much higher its middle arches
   bridge: { z: -86, deckY: 7.4, rise: 1.4, width: 3.6, name: 'HARBOUR WALK' },
@@ -169,7 +176,7 @@ const HARBOUR = {
   ],
   lampZ: [33, 3, -27, -57, -87, -117, -147, -177],
   parkLamps: [[HB_SQUARE.x1 - 4, -116], [HB_SQUARE.x1 - 4, -152], [HB_GULL.x0 + 3, -172]],
-  promenadeLamps: [[-62, -197], [62, -197]],
+  promenadeLamps: [[-62, -189], [62, -189]], // on the boardwalk
 };
 
 const LAYOUTS = { downtown: DOWNTOWN, harbour: HARBOUR };

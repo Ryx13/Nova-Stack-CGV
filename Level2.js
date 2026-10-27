@@ -25,6 +25,8 @@ import { finishRun } from './account.js';
 import { createNarrative } from './Narrative.js';
 import { setGirlOutcome } from './StoryProgress.js';
 import { registerDayProgress } from './DayCycle.js';
+import { updateCityKit } from './CityKit.js';
+import { updateTown } from './CityTown.js';
 import { instantiateCharacter, loadGLB, fitClip, clipsFor, boneByName } from './roster.js';
 import { holdForIntro, playIntro, updateIntro } from './Level2Intro.js';
 import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
@@ -71,6 +73,8 @@ export function startLevel(mode) {
   registerLevelTick(updateBlinkingLamps);
   // The burning wrecks' flickering firelight (state.bigFires)
   registerLevelTick(updateFireLights);
+  // The harbour town: mirror glass and sliding doors, the lighthouse beam
+  registerLevelTick((dt) => { updateCityKit(dt, playerVis?.group?.position); updateTown(dt); });
   lv2Scene = sceneHandles;
   // Reference-style HUD (objectives, distances, inventory panel).
   lv2HUD = buildLevel2HUD(sceneHandles.escapePoint);
