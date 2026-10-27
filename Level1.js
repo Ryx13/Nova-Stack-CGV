@@ -11,14 +11,14 @@ import './Scene.js';
 import './characters.js';
 import './PowerUps.js';
 import './shaders.js';
-import { bootLevel, registerLevelTick } from './Actions.js';
+import { bootLevel, registerLevelTick, registerLevelReset } from './Actions.js';
 import { buildLevel1Surroundings } from './Level1Surroundings.js';
 import { state } from './state.js';
 import { startLevel1Intro } from './Level1Intro.js';
 import { registerDayProgress } from './DayCycle.js';
 import { KILL_TARGET } from './Scene.js';
 import { playerBody, playerVis } from './characters.js';
-import { updateCityKit } from './CityKit.js';
+import { updateCityKit, resetCityKit } from './CityKit.js';
 import { updateTown } from './CityTown.js';
 
 // Day mode borrows Level 2's low-sun afternoon (sky, sun shadows, warm
@@ -68,6 +68,7 @@ export function startLevel(mode) {
   registerLevelTick(buildLevel1Surroundings()); // the annex and the mountains behind the start
   // Mirror-glass glint, and the sliding doors opening as you walk up
   registerLevelTick((dt) => { updateCityKit(dt, playerVis.group?.position); updateTown(dt); });
+  registerLevelReset(resetCityKit); // a restart is a new play: new random rays
   // The fly-through briefing: gameplay holds from here until it ends
   startLevel1Intro();
 }

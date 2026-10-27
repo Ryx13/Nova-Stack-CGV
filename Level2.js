@@ -25,7 +25,7 @@ import { finishRun } from './account.js';
 import { createNarrative } from './Narrative.js';
 import { setGirlOutcome } from './StoryProgress.js';
 import { registerDayProgress } from './DayCycle.js';
-import { updateCityKit } from './CityKit.js';
+import { updateCityKit, resetCityKit } from './CityKit.js';
 import { updateTown } from './CityTown.js';
 import { instantiateCharacter, loadGLB, fitClip, clipsFor, boneByName } from './roster.js';
 import { holdForIntro, playIntro, updateIntro } from './Level2Intro.js';
@@ -1386,6 +1386,7 @@ function updateMission(dt) {
     briefing doesn't replay, so the start ambush that follows it is
     sprung straight away. */
 function resetLevel2() {
+  resetCityKit(); // a restart is a new play: new random rays across the mirrors
   if (catchStory) { catchStory.dispose(); catchStory = null; state.narrativeBlocked = false; }
   loseCinematic = null;
   missionStartTime = 0;

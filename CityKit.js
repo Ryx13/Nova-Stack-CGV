@@ -37,7 +37,7 @@
 ====================================================================== */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { scene, renderer, addStaticBox, rowX, STREET_HALF_W } from './Scene.js';
+import { scene, renderer, lighting, addStaticBox, rowX, STREET_HALF_W } from './Scene.js';
 import { state } from './state.js';
 import { SIDEWALK, layout } from './CityLayout.js';
 
@@ -124,7 +124,8 @@ function verticalSignTexture(name) {
 
 /* --- Mirror glass and sliding doors --------------------------------------
    Some shops (and the office lobbies) have a blue mirror-glass front with
-   sliding doors that slide apart as the player walks up. The glass really
+   sliding doors that slide apart as the player walks up, and now and then a
+   thin ray of sunshine sweeps across it (see glint below). The glass really
    reflects: a reflection probe (a cube camera) renders the scene from just
    in front of the mirror nearest the player a few times a second, so the
    mirrors show what's actually in front of them, lit as it is (a vending
@@ -134,13 +135,65 @@ function verticalSignTexture(name) {
    update. */
 const PROBE_EVERY = 0.3, PROBE_REACH = 45; // s between captures; only near a mirror
 let mirrorMaterial = null, probe = null, probeTimer = 0;
+/* A ray of sunshine across the glass: now and then a thin diagonal band of
+   light travels across every pane at once, as if the sun had just caught
+   it, tinted the sun's colour (a pale glint at night). It runs in each
+   pane's own coordinates, on the glass's surface, so whatever stands in
+   front of a mirror still covers it. At least twice a play at random,
+   very different times, then every few minutes. */
+const glint = { at: -9, colour: new THREE.Color(), next: [], clock: 0 };
+const GLINT_TIME = 1.4; // s for the band to cross a pane
+function planGlints() {
+  const first = 20 + Math.random() * 60;
+  glint.next = [first, first + 70 + Math.random() * 80];
+  glint.clock = 0;
+}
+planGlints();
+const glintUniforms = { uGlint: { value: -9 }, uGlintColour: { value: glint.colour } };
 function mirror() {
   if (mirrorMaterial) return mirrorMaterial;
   const target = new THREE.WebGLCubeRenderTarget(128, { type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter });
   probe = new THREE.CubeCamera(0.3, 160, target);
-  mirrorMaterial = new THREE.MeshStandardMaterial({ color: 0x7fb4e0, metalness: 1, roughness: 0.05, envMap: target.texture, envMapIntensity: 1.1 });
-  return mirrorMaterial;
+  const m = new THREE.MeshStandardMaterial({ color: 0x7fb4e0, metalness: 1, roughness: 0.05, envMap: target.texture, envMapIntensity: 1.1 });
+  const base = THREE.Material.prototype.onBeforeCompile; // keep the global hooks (HeightMist)
+  m.onBeforeCompile = (shader, r) => {
+    base.call(m, shader, r);
+    Object.assign(shader.uniforms, glintUniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vGlintLocal;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlintLocal = position;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vGlintLocal;\nuniform float uGlint;\nuniform vec3 uGlintColour;')
+      .replace('#include <opaque_fragment>', `
+        // the pane's own unit box: z along the glass, y up; a thin diagonal band
+        float glintD = abs(vGlintLocal.z + vGlintLocal.y * 0.7 - uGlint);
+        outgoingLight += uGlintColour * ((1.0 - smoothstep(0.0, 0.04, glintD)) + 0.3 * (1.0 - smoothstep(0.0, 0.14, glintD)));
+        #include <opaque_fragment>`);
+  };
+  m.customProgramCacheKey = () => 'citykit-mirror-glint';
+  mirrorMaterial = m;
+  return m;
 }
+// Advance the ray: count play time, start a sweep when one is due
+function updateGlint(dt) {
+  if (!state.readyShown || state.cinematic || state.paused) return; // only while you can see it
+  glint.clock += dt;
+  if (glint.at < -1.5 && glint.next.length && glint.clock >= glint.next[0]) {
+    glint.next.shift();
+    if (!glint.next.length) glint.next.push(glint.clock + 120 + Math.random() * 120); // then every few minutes
+    glint.at = -1.1;
+    const sun = lighting.sun;
+    if (sun.intensity > 0.2) glint.colour.copy(sun.color).multiplyScalar(Math.min(2.2, 0.9 + sun.intensity * 0.5));
+    else glint.colour.setHex(0x9fc4ff).multiplyScalar(0.9);
+  }
+  if (glint.at >= -1.5) {
+    glint.at += dt * (2.2 / GLINT_TIME);
+    if (glint.at > 1.1) glint.at = -9; // done: off until the next one
+  }
+  glintUniforms.uGlint.value = glint.at;
+}
+/** A level restart: a fresh pair of random rays for the new run. */
+export function resetCityKit() { planGlints(); glint.at = -9; }
 // Capture the scene from in front of the mirror nearest the player
 function captureReflections(playerPos) {
   let best = null, bestD = PROBE_REACH;
@@ -192,6 +245,7 @@ export function updateCityKit(dt, playerPos) {
   if (!mirrorPanes.length && !slidingDoors.length && !displayPanes.length) return;
   if (!doorMesh) buildMirrorMesh();
   if (playerPos && (probeTimer -= dt) <= 0) { probeTimer = PROBE_EVERY; captureReflections(playerPos); }
+  updateGlint(dt);
   let moved = false;
   slidingDoors.forEach((d, i) => {
     const near = playerPos && Math.hypot(playerPos.x - d.x, playerPos.z - d.z) < DOOR_REACH ? 1 : 0;
