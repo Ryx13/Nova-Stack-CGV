@@ -8,11 +8,12 @@
    - Sidewalks of paving slabs that reach the building fronts (the old
      strips stopped 2.2 m short, leaving dirt along every facade).
    - Stone kerbs in short blocks with a gutter along the road edge.
-   - Real junctions where the street already opens to the side: the depot
-     yard (east) and the west pocket. The sidewalk and kerb break for the
-     side road, with zebra crossings either side, stop lines, lane arrows
-     and a crossing over the side street's mouth.
-   - Crossings at the spawn and at extraction.
+   - Real junctions where the street already opens to the side (in Level 1
+     the depot yard and the west pocket). The sidewalk and kerb break for
+     the side road, with zebra crossings either side, stop lines, lane
+     arrows and a crossing over the side street's mouth.
+   - Plain crossings, and the town around it all: everything comes from
+     the district's plan (CityLayout.js layout()).
    - What the quake did hours ago: fresh cracks across the asphalt and a
      few heaved slabs. Older repair patches, and tree pits with grass.
 
@@ -22,19 +23,10 @@
 ====================================================================== */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { scene, STREET_HALF_W, STREET_LENGTH, DEPOT_POS, WEST_POCKET_Z, rowX } from './Scene.js';
-import { SIDEWALK, BACK_STREETS, CROSS_STREETS, ALLEYS, KEEP_CLEAR } from './CityLayout.js';
+import { scene, STREET_HALF_W, STREET_LENGTH, rowX } from './Scene.js';
+import { SIDEWALK, layout } from './CityLayout.js';
 
-const Z_NORTH = 55, Z_SOUTH = -STREET_LENGTH - 15;  // the run of the old sidewalks
-const WALK_W = rowX - STREET_HALF_W;                // kerb to building front
-// Side roads off the main street: side (+1 east, -1 west), centre z, width,
-// and how far out from the kerb they run: up to the depot yard's slab
-// (x 29) and the west pocket's lot (x -21.4), which carry on from there
-const JUNCTIONS = [
-  { side: 1, z: DEPOT_POS.z, width: 14, reach: 19 },
-  { side: -1, z: WEST_POCKET_Z, width: 12, reach: 11.4 },
-];
-const CROSSINGS = [14, -182]; // plain zebra crossings: by the spawn, by extraction
+const WALK_W = rowX - STREET_HALF_W; // kerb to building front
 
 function seeded(a) {
   return () => {
@@ -90,10 +82,10 @@ function runsBetween(bottom, top, cuts) {
   if (top > bottom) runs.push([bottom, top]);
   return runs.filter(([lo, hi]) => hi - lo > 0.5);
 }
-// The main street's sidewalks: cut by its junctions and the annex plaza
-function mainCuts(side) {
-  return [...JUNCTIONS.filter((j) => j.side === side).map((j) => [j.z - j.width / 2, j.z + j.width / 2]),
-    ...CROSS_STREETS.filter((c) => c.main).map((c) => [c.z - c.halfW, c.z + c.halfW])];
+// The main street's sidewalks: cut by its junctions and any cross street over it
+function mainCuts(L, side) {
+  return [...L.main.junctions.filter((j) => j.side === side).map((j) => [j.z - j.width / 2, j.z + j.width / 2]),
+    ...L.crossStreets.filter((c) => c.main).map((c) => [c.z - c.halfW, c.z + c.halfW])];
 }
 
 function flatQuad(x, y, z, sx, sz, rotY = 0) {
@@ -156,16 +148,17 @@ function kerbRun(add, m, x0, x1, z0, z1) { // 1 m kerb blocks along a straight e
     add((Math.floor(t) & 1) ? m.kerbA : m.kerbB, geo);
   }
 }
-function buildTownGround(rnd, add, m) {
+function buildTownGround(L, rnd, add, m) {
   // Plaza paving under the whole town, below the roads and sidewalks
-  const plaza = flatQuad(2.5, -0.01, -42.5, 275, 395);
+  const P = L.plaza, pw = P.x1 - P.x0, pd = P.z0 - P.z1;
+  const plaza = flatQuad((P.x0 + P.x1) / 2, -0.01, (P.z0 + P.z1) / 2, pw, pd);
   const puv = plaza.attributes.uv;
-  for (let i = 0; i < puv.count; i++) puv.setXY(i, puv.getX(i) * 275 / 6, puv.getY(i) * 395 / 6);
+  for (let i = 0; i < puv.count; i++) puv.setXY(i, puv.getX(i) * pw / 6, puv.getY(i) * pd / 6);
   add(m.plaza, plaza);
 
-  const links = [...CROSS_STREETS, ...ALLEYS];
+  const links = [...L.crossStreets, ...L.alleys];
   const touches = (c, x0, x1) => Math.min(c.x0, c.x1) < x1 && Math.max(c.x0, c.x1) > x0;
-  for (const st of BACK_STREETS) {
+  for (const st of L.backStreets) {
     add(m.road, roadQuad(st.x - st.halfW, st.x + st.halfW, st.z1, st.z0));
     for (let z = st.z0 - 4; z > st.z1 + 2; z -= 7) { // centre dashes, gapped at the links
       if (!links.some((c) => Math.abs(z - c.z) < c.halfW + 2 && touches(c, st.x - st.halfW, st.x + st.halfW + 0.1))) add(m.yellow, flatQuad(st.x, 0.012, z, 0.2, 3));
@@ -176,7 +169,7 @@ function buildTownGround(rnd, add, m) {
       const w0 = Math.min(kerbX, kerbX + side * SIDEWALK), w1 = Math.max(kerbX, kerbX + side * SIDEWALK);
       const cuts = [];
       for (const c of links) if (touches(c, w0, w1)) { cuts.push([c.z - c.halfW, c.z + c.halfW]); zebras.set(c.z, c.halfW); }
-      for (const k of KEEP_CLEAR) if (k.opens && k.x0 < w1 && k.x1 > w0) cuts.push([k.z1, k.z0]);
+      for (const k of L.keepClear) if (k.opens && k.x0 < w1 && k.x1 > w0) cuts.push([k.z1, k.z0]);
       for (const [lo, hi] of cuts) if (Math.min(hi, st.z0) > Math.max(lo, st.z1)) add(m.road, roadQuad(w0, w1, Math.max(lo, st.z1), Math.min(hi, st.z0)));
       for (const [lo, hi] of runsBetween(st.z1, st.z0, cuts)) {
         const len = hi - lo, zc = (lo + hi) / 2;
@@ -200,7 +193,7 @@ function buildTownGround(rnd, add, m) {
   }
   // Cross streets and alleys: road only where no street already is, kerbed edges
   for (const c of links) {
-    const occupied = [...(c.main ? [MAIN_SPAN] : []), ...BACK_STREETS.map(streetSpan)].sort((a, b) => a[0] - b[0]);
+    const occupied = [...(c.main ? [MAIN_SPAN] : []), ...L.backStreets.map(streetSpan)].sort((a, b) => a[0] - b[0]);
     let x = Math.min(c.x0, c.x1);
     const end = Math.max(c.x0, c.x1), pieces = [];
     for (const [o0, o1] of occupied) {
@@ -220,6 +213,7 @@ function buildTownGround(rnd, add, m) {
 /** Builds the district street surface. Called from loadStreetSurface()
     with the main road's material, so every road shares its asphalt. */
 export function buildCityGround(roadMaterial) {
+  const L = layout(), M = L.main;
   const rnd = seeded(0x6A0D);
   const slabs = new THREE.MeshStandardMaterial({ map: slabTexture(rnd), roughness: 0.92, flatShading: true });
   const kerbA = new THREE.MeshStandardMaterial({ color: 0xa8a49a, roughness: 0.85, flatShading: true });
@@ -237,7 +231,7 @@ export function buildCityGround(roadMaterial) {
   // Sidewalks and kerbs, broken where the side roads cut through
   for (const side of [-1, 1]) {
     const walkX = side * (STREET_HALF_W + WALK_W / 2);
-    for (const [lo, hi] of runsBetween(Z_SOUTH, Z_NORTH, mainCuts(side))) {
+    for (const [lo, hi] of runsBetween(M.zS, M.zN, mainCuts(L, side))) {
       const len = hi - lo, zc = (lo + hi) / 2;
       const walk = flatQuad(walkX, 0.03, zc, WALK_W, len);
       const uv = walk.attributes.uv;
@@ -259,7 +253,7 @@ export function buildCityGround(roadMaterial) {
   }
 
   // Junctions: the side road surface, crossings, stop lines, arrows
-  for (const j of JUNCTIONS) {
+  for (const j of M.junctions) {
     const near = STREET_HALF_W - 0.2, far = STREET_HALF_W + j.reach;
     add(asphalt, flatQuad(j.side * (near + far) / 2, 0.012, j.z, far - near, j.width));
     for (const e of [-1, 1]) { // kerbs turning the corner into the side road
@@ -282,25 +276,25 @@ export function buildCityGround(roadMaterial) {
     add(paint, arrow(-STREET_HALF_W / 2, j.z - j.width / 2 - 9, 1, j.side < 0 ? -1 : 0));
     add(yellow, flatQuad(0, 0.0125, j.z, 0.25, j.width + 8)); // solid centre line through the junction
   }
-  for (const cz of CROSSINGS) {
+  for (const cz of M.crossings) {
     for (let x = -STREET_HALF_W + 1; x < STREET_HALF_W - 0.5; x += 1.25) add(paint, flatQuad(x, 0.012, cz, 0.6, 3.2));
   }
 
   // The quake: fresh cracks across the road and a few heaved slabs
-  for (const z of [6, -30, -78, -96, -142, -168]) crack(rnd, z + (rnd() - 0.5) * 6, (geo) => add(crackMat, geo));
-  for (const z of [-34, -100, -164]) {
+  for (const z of M.cracks) crack(rnd, z + (rnd() - 0.5) * 6, (geo) => add(crackMat, geo));
+  for (const z of M.heaves) {
     const slab = new THREE.BoxGeometry(2.2 + rnd(), 0.14, 1.6 + rnd()).rotateZ((rnd() - 0.5) * 0.12).rotateX((rnd() - 0.5) * 0.1)
       .translate((rnd() - 0.5) * 12, 0.05, z + (rnd() - 0.5) * 4);
     add(asphalt, slab);
   }
   // Older repair patches
-  for (let i = 0; i < 7; i++) add(patchMat, flatQuad((rnd() - 0.5) * 14, 0.0105, 40 - rnd() * 250, 1.5 + rnd() * 3, 1 + rnd() * 2.5, rnd() * 0.3));
-  // The annex plaza crossing the main street's sidewalks: road over the cuts
-  for (const c of CROSS_STREETS.filter((cs) => cs.main)) for (const side of [-1, 1]) {
+  for (let i = 0; i < 7; i++) add(patchMat, flatQuad((rnd() - 0.5) * 14, 0.0105, M.patchZ[0] - rnd() * (M.patchZ[0] - M.patchZ[1]), 1.5 + rnd() * 3, 1 + rnd() * 2.5, rnd() * 0.3));
+  // A cross street over the main street's sidewalks: road over the cuts
+  for (const c of L.crossStreets.filter((cs) => cs.main)) for (const side of [-1, 1]) {
     add(roadMaterial, roadQuad(side > 0 ? STREET_HALF_W : -rowX, side > 0 ? rowX : -STREET_HALF_W, c.z - c.halfW, c.z + c.halfW));
   }
 
-  buildTownGround(rnd, add, { road: roadMaterial, plaza, slabs, kerbA, kerbB, gutter, paint, yellow, soil });
+  buildTownGround(L, rnd, add, { road: roadMaterial, plaza, slabs, kerbA, kerbB, gutter, paint, yellow, soil });
 
   for (const [material, geos] of parts) {
     const mesh = new THREE.Mesh(mergeGeometries(geos), material);

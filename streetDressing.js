@@ -19,6 +19,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { scene, addStaticBox, addObstacle, STREET_HALF_W, rowX } from './Scene.js';
 import { concreteTex, streetlightSpots } from './characters.js';
+import { state } from './state.js';
 
 function seeded(a) {
   return () => {
@@ -181,7 +182,8 @@ function buildCables() {
     parts.push(new THREE.TubeGeometry(curve, 12, 0.025, 4, false).toNonIndexed());
   };
   for (const side of [-1, 1]) {
-    const posts = streetlightSpots.filter(([x, z]) => Math.sign(x) === side && z <= STREET_START && z >= STREET_END).sort((p, q) => q[1] - p[1]);
+    // The main street's own posts only (a district has more along its back streets)
+    const posts = streetlightSpots.filter(([x, z]) => Math.sign(x) === side && Math.abs(x) < STREET_HALF_W + 2 && z <= STREET_START && z >= STREET_END).sort((p, q) => q[1] - p[1]);
     for (let i = 0; i + 1 < posts.length; i++) {
       const [x0, z0] = posts[i], [x1, z1] = posts[i + 1];
       if (Math.abs(z0 - z1) > 40) continue;
@@ -221,7 +223,8 @@ function buildFallenPosts() {
 }
 
 export function buildStreetDressing() {
-  buildTrees();
+  // A district (state.cityKit) plants living street trees of its own (CityTown.js)
+  if (!state.cityKit) buildTrees();
   buildDebris();
   buildLitter();
   buildStains();

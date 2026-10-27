@@ -3,6 +3,7 @@ import {EnemyCrowd} from './EnemyCrowd.js';
 import { buildKitBuilding } from './CityKit.js';
 import { buildCityGround } from './CityGround.js';
 import { buildTown } from './CityTown.js';
+import { mainLotOpen } from './CityLayout.js';
 import { CircleGrid } from './SpatialGrid.js';
 import { asphaltRoughness } from './ContactShading.js';
 import { streetlightBeamMaterial } from './survivor.js';
@@ -1311,7 +1312,12 @@ function streetBlock(x, z, w, h, d, sx, ruin, lit) {
   const plan = lit && !ruin ? nightPlan() : null;
   if (plan?.oldLook && h > 24 && guttedLeft > 0) { plan.shape = 'gutted'; guttedLeft--; }
   const fall = ruin || plan?.collapse;
-  makeBuilding(x, z, w, h, d, { consumeOnly: !!fall, forceShape: plan?.shape, oldLook: plan?.oldLook });
+  const shape = { forceShape: plan?.shape, oldLook: plan?.oldLook };
+  // A district stands whole (collapses come later, mid-level): no ruins or
+  // dead-grid windows, and a lot its plan leaves open (a square) is only
+  // consumed. The ghost still gets the same shape, so its rnd() draws match.
+  if (state.cityKit) { makeBuilding(x, z, w, h, d, { ...shape, consumeOnly: mainLotOpen(x, z) }); return; }
+  makeBuilding(x, z, w, h, d, { consumeOnly: !!fall, ...shape });
   if (fall) { buildRuin(fall, x, z, w, d, h * 0.6, sx); return; }
   if (!plan?.windows) return;
   // Wrecked: the window stays low, under the broken top

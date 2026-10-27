@@ -22,6 +22,13 @@
      small window and a door for the rest. Flower shops, vet clinics, a
      salon and a bar with outdoor seating are placed on purpose.
 
+   Districts (DISTRICTS below) choose the building types, colours, shop
+   mix and how much is lit at night: downtown (Level 1) is walk-ups,
+   offices, apartments and a hotel; the harbour (Level 2) is mostly two or
+   three storeys, pitched tile roofs and shutters, brick terraces with
+   their gables to the street, and warehouses toward the port, full of
+   seafood restaurants, pubs and sushi bars.
+
    Built in world space and merged per material, one mesh each per
    building; mergeStatic.js then folds the whole street into a few chunks.
    Flat shading and plain colours: the stylised low-poly look.
@@ -30,8 +37,9 @@
 ====================================================================== */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { scene, addStaticBox } from './Scene.js';
+import { scene, addStaticBox, rowX, STREET_HALF_W } from './Scene.js';
 import { state } from './state.js';
+import { SIDEWALK, layout } from './CityLayout.js';
 
 const STOREY = 3.2;
 const GROUND = 4.2; // shop storey
@@ -43,6 +51,11 @@ const PALETTE = {
   trim: [0xe8e2d4, 0xd8d0bc],
   darkTrim: [0x3e3a36, 0x2f3a40],
   awning: [0x2f6b5a, 0xa83a32, 0x2e4a7a, 0xd8a43a, 0x6a3a5a],
+  // The harbour's colours: sun-faded pastels, harbour brick, tile and slate
+  pastel: [0xe8d9b8, 0x9fc4c8, 0xe0a88c, 0xd8c27a, 0xb8c8d8, 0xf0ece4, 0xc8b8d8],
+  harbourBrick: [0x8a4a3a, 0x7a5a4a, 0x9a5a44],
+  roofTile: [0xa8553a, 0x8a4a3a, 0x4a5058, 0x5a5e62],
+  shutter: [0x2f6b5a, 0x2e4a7a, 0xa83a32, 0x3a6a8a, 0x6a8a5a],
 };
 const IRON = 0x2a2c2e, GLASS = 0x2a3a48, BROKEN = 0x0c0e10, TANK = 0x7a5a3a, ROOF = 0x4e4c48, METAL = 0x8a8e90;
 const SIGN_COLOURS = [['#a83a32', '#f4e9d6'], ['#2f6b5a', '#f4e9d6'], ['#1f2d4a', '#f2c46a'], ['#151515', '#e8d37a'], ['#efe6d2', '#2a2a2a']];
@@ -195,7 +208,8 @@ export function updateCityKit(dt, playerPos) {
    placement: u runs along the frontage (world z), v is height, out is the
    distance in front of the facade plane (toward the street). */
 class Builder {
-  constructor(facadeX, side, zc) { this.fx = facadeX; this.side = side; this.zc = zc; this.parts = new Map(); }
+  // D: the district (DISTRICTS); walk: the sidewalk's width in front
+  constructor(facadeX, side, zc, D, walk) { this.fx = facadeX; this.side = side; this.zc = zc; this.D = D; this.walk = walk; this.parts = new Map(); }
   add(geo, material) {
     if (!this.parts.has(material)) this.parts.set(material, []);
     this.parts.get(material).push(geo);
@@ -233,10 +247,21 @@ const pick = (rnd, list) => list[Math.floor(rnd() * list.length) % list.length];
 // One window: proud frame, recessed glass, sill, optional lintel
 function windowAt(b, u, v, ww, wh, look) {
   b.face(u, v, 0.06, ww + 0.24, wh + 0.24, 0.12, look.trim);
+  if (look.shutters) for (const e of [-1, 1]) b.face(u + e * (ww / 2 + 0.36), v, 0.08, 0.5, wh + 0.1, 0.05, look.shutters);
   b.face(u, v, 0.03, ww, wh, 0.06, look.glass());
   if (look.far) return; // past the edge of the town: frame and glass only
   b.face(u, v - wh / 2 - 0.16, 0.13, ww + 0.4, 0.12, 0.26, look.trim);
   if (look.lintel) b.face(u, v + wh / 2 + 0.2, 0.08, ww + 0.34, 0.22, 0.16, look.lintel);
+}
+
+// Sidewalk spots taken by something else: what a level lists in
+// state.kitKeepOff ({ x, z, r }: its vending machines, props) and the
+// bridge's stair towers. Tables, stands and posts set out by a shop skip them.
+function keptOff(x, z, r = 1.2) {
+  for (const k of state.kitKeepOff || []) if (Math.hypot(x - k.x, z - k.z) < k.r + r) return true;
+  const br = layout().bridge;
+  if (br) for (const e of [-1, 1]) if (Math.abs(x - e * (rowX - 1.5)) < 1.5 + r && Math.abs(z - br.z) < 1.5 + r) return true;
+  return false;
 }
 
 // Flower buckets on tiered stands out on the sidewalk
@@ -245,6 +270,7 @@ function flowerStands(b, rnd, fw) {
   const stand = mat(0x3f6a3a), pail = mat(0x8a8e90, { roughness: 0.5, metalness: 0.4 }), leaves = mat(0x4f7a3a);
   for (const e of [-1, 1]) {
     const u0 = e * fw * 0.25;
+    if (keptOff(b.fx + b.side * 0.75, b.zc + u0, 1.4)) continue;
     b.face(u0, 0.35, 0.75, 2.2, 0.7, 0.8, stand);          // lower tier
     b.face(u0, 0.75, 0.45, 2.2, 0.12, 0.45, stand);        // upper tier
     for (let i = 0; i < 4; i++) for (const [out, y] of [[0.9, 0.7], [0.45, 0.81]]) {
@@ -259,29 +285,60 @@ function flowerStands(b, rnd, fw) {
 /* --- Shops ---------------------------------------------------------------
    front: 'display' (see-through window, something inside), 'small' (a
    window and a door), 'garage' (roll-up door) or 'mirror' (blue mirror
-   glass and sliding doors). The trades with a weight are drawn at random;
-   the rest are placed on purpose (FEATURES below, CityLayout FEATURE_LOTS). */
+   glass and sliding doors). terrace: may set tables out on the sidewalk.
+   Each district weighs which are drawn at random (DISTRICTS below); the
+   rest are placed on purpose (FEATURES below, CityLayout featureLots). */
 const SHOPS = {
-  restaurant: { weight: 0.2, front: 'display', fill: 'tables', names: ['DINER', 'PIZZA', 'NOODLES', 'CAFE', 'BISTRO', 'BURGERS', 'TACOS'] },
-  clothing: { weight: 0.13, front: 'display', fill: 'mannequins', names: ['BOUTIQUE', 'SHOES', 'TAILOR', 'DENIM', 'HATS'] },
-  garage: { weight: 0.13, front: 'garage', names: ['HARDWARE', 'AUTO PARTS', 'TIRES', 'TOOLS'] },
-  mirror: { weight: 0.18, front: 'mirror', names: ['PHARMACY', 'BANK', 'MOBILE', 'OPTICIAN', 'ELECTRONICS'] },
-  flowers: { weight: 0.07, front: 'small', names: ['FLOWERS'], sign: SIGN_COLOURS[1], awning: 0x2f6b5a, extra: flowerStands },
-  plain: { weight: 0.29, front: 'small', names: ['BAKERY', 'BOOKS', 'LAUNDROMAT', 'PAWN SHOP', 'RADIO', 'GROCERY', 'DELI', 'LIQUOR', 'BARBER'] },
+  restaurant: { front: 'display', fill: 'tables', names: ['DINER', 'PIZZA', 'NOODLES', 'CAFE', 'BISTRO', 'BURGERS', 'TACOS'] },
+  clothing: { front: 'display', fill: 'mannequins', names: ['BOUTIQUE', 'SHOES', 'TAILOR', 'DENIM', 'HATS'] },
+  garage: { front: 'garage', names: ['HARDWARE', 'AUTO PARTS', 'TIRES', 'TOOLS'] },
+  mirror: { front: 'mirror', names: ['PHARMACY', 'BANK', 'MOBILE', 'OPTICIAN', 'ELECTRONICS'] },
+  flowers: { front: 'small', names: ['FLOWERS'], sign: SIGN_COLOURS[1], awning: 0x2f6b5a, extra: flowerStands },
+  plain: { front: 'small', names: ['BAKERY', 'BOOKS', 'LAUNDROMAT', 'PAWN SHOP', 'RADIO', 'GROCERY', 'DELI', 'LIQUOR', 'BARBER'] },
+  // The harbour's trades
+  seafood: { front: 'display', fill: 'tables', terrace: true, names: ['FISH & CHIPS', 'CRAB SHACK', 'SEAFOOD', 'LOBSTER POT', 'OYSTER BAR', 'TAPAS', 'RAMEN', 'GELATO', 'CAFE'] },
+  pub: { front: 'display', fill: 'tables', terrace: true, sign: ['#2a1a10', '#e8c87a'], names: ['THE ANCHOR', 'HARBOUR TAVERN', 'SALTY SAILOR', 'THE LIGHTHOUSE', 'DOCKSIDE BAR', 'RUM & ROPE'] },
+  sushi: { front: 'display', fill: 'tables', terrace: true, sign: ['#c8323a', '#ffffff'], noAwning: true, extra: sushiFront, names: ['SUSHI', 'SUSHI BAR', 'NAMI SUSHI', 'SUSHI GO'] },
+  marine: { front: 'small', names: ['BAIT & TACKLE', 'CHANDLERY', 'SURF SHOP', 'ICE CREAM', 'NEWSAGENT', 'SOUVENIRS'] },
+  boatyard: { front: 'garage', names: ['BOAT REPAIR', 'MARINE PARTS', 'OUTBOARDS'] },
   vet: { front: 'small', names: ['VET CLINIC'], sign: ['#1f7a78', '#ffffff'], icon: 'paw', awning: 0x1f7a78, extra: vetExtras },
   salon: { front: 'display', fill: 'salon', names: ['GLAMOUR SALON'], sign: ['#e86a9a', '#ffffff'], awning: 0xd8648e },
   bar: { front: 'display', fill: 'tables', names: ['THE LUCKY DOG'], sign: ['#151515', '#f2c46a'], icon: 'paw', awning: 0x6a2a2a, extra: outdoorSeating },
 };
-const RANDOM_SHOPS = Object.entries(SHOPS).filter(([, shop]) => shop.weight);
-function pickShop(rnd) {
+function pickShop(rnd, weights) {
   let r = rnd();
-  for (const [key, shop] of RANDOM_SHOPS) if ((r -= shop.weight) < 0) return key;
-  return 'plain';
+  for (const [key, w] of Object.entries(weights)) if ((r -= w) < 0) return key;
+  return Object.keys(weights)[0];
 }
 
+/* --- Districts --------------------------------------------------------- */
+const rint = (rnd, lo, hi) => lo + Math.floor(rnd() * (hi - lo + 1));
+const DISTRICTS = {
+  downtown: {
+    types: ['walkup', 'walkup', 'office', 'apartment', 'hotel', 'corner'],
+    towers: true, // the tall lots get offices and hotels
+    storeys: { walkup: (r) => rint(r, 4, 6), office: (r) => rint(r, 8, 13), apartment: (r) => rint(r, 5, 8), hotel: (r) => rint(r, 9, 12), corner: (r) => rint(r, 1, 2) },
+    shops: { restaurant: 0.2, clothing: 0.13, garage: 0.13, mirror: 0.18, flowers: 0.07, plain: 0.29 },
+    litWindows: 0.2, broken: 0.1, litShops: 0.45, signsLit: 1,
+  },
+  harbour: {
+    types: ['townhouse', 'townhouse', 'terrace', 'shophouse', 'shophouse', 'townhouse', 'harbourhotel'],
+    storeys: { townhouse: (r) => rint(r, 2, 3), terrace: (r) => rint(r, 2, 3), shophouse: (r) => rint(r, 1, 2), warehouse: () => 2, harbourhotel: (r) => rint(r, 3, 4) },
+    shops: { seafood: 0.28, pub: 0.17, sushi: 0.12, marine: 0.15, clothing: 0.07, mirror: 0.06, flowers: 0.05, boatyard: 0.05, plain: 0.05 },
+    // The grid is dead: a few windows and shops lit by candles and generators
+    litWindows: 0.07, broken: 0.06, litShops: 0.25, signsLit: 0.2,
+    warehousesSouthOf: -150, // toward the port the blocks are warehouses
+  },
+};
+
 // Main-street features: the first lot on `side` (of x = 0) whose centre lies
-// between z0 and z1 gets these shops along its buildings
-const FEATURES = [{ side: -1, z0: 2, z1: -40, shops: ['bar', 'salon'] }];
+// between z0 and z1, or whose frontage covers `covers`, gets these shops
+// along its buildings / at least minStoreys
+const FEATURES = {
+  downtown: [{ side: -1, z0: 2, z1: -40, shops: ['bar', 'salon'] }],
+  // Harbour Walk lands on the buildings either side: they need the height
+  harbour: [{ side: -1, covers: -86, minStoreys: 3 }, { side: 1, covers: -86, minStoreys: 3 }],
+};
 /** Named spots for later: luckyDog, the bar's terrace, where the lady in
     the red dress and her chihuahua will be; vets, each clinic's facade
     { x, z, side } (side: which way along x it faces). */
@@ -291,7 +348,7 @@ export const FEATURE_SPOTS = {};
 // floor (warm-lit at night), something inside, clear glass in front
 const DRESSES = [0xc8323a, 0x2a8a8a, 0xd8a43a, 0x1a1a1a, 0xf0ece4];
 function displayCase(b, rnd, u, W, fill, night, dark) {
-  b.face(u, 1.85, 0.015, W, 2.6, 0.03, night ? mat(0x5a4630, { emissive: 0xffc27a, emissiveIntensity: 0.45 }) : mat(0x2e2a26));
+  b.face(u, 1.85, 0.015, W, 2.6, 0.03, night && rnd() < b.D.litShops * 1.6 ? mat(0x5a4630, { emissive: 0xffc27a, emissiveIntensity: 0.45 }) : mat(0x2e2a26));
   b.face(u, 0.55, 0.3, W + 0.2, 0.1, 0.6, dark);                                 // sill
   b.face(u, 3.15, 0.3, W + 0.2, 0.12, 0.6, dark);                                // head
   for (const e of [-1, 1]) b.face(u + e * (W / 2 + 0.05), 1.85, 0.3, 0.1, 2.6, 0.6, dark);
@@ -328,7 +385,7 @@ function displayCase(b, rnd, u, W, fill, night, dark) {
 // Everyone else: a window beside the door
 function smallWindow(b, rnd, u, W, night, dark) {
   b.face(u, 1.85, 0.06, W + 0.24, 1.94, 0.12, dark);
-  b.face(u, 1.85, 0.03, W, 1.7, 0.06, night && rnd() < 0.45 ? mat(GLASS, { emissive: 0xffd08a, emissiveIntensity: 0.55, roughness: 0.3 }) : mat(GLASS, { roughness: 0.25, metalness: 0.2 }));
+  b.face(u, 1.85, 0.03, W, 1.7, 0.06, night && rnd() < b.D.litShops ? mat(GLASS, { emissive: 0xffd08a, emissiveIntensity: 0.55, roughness: 0.3 }) : mat(GLASS, { roughness: 0.25, metalness: 0.2 }));
   b.face(u, 0.95, 0.13, W + 0.4, 0.12, 0.26, dark);
 }
 // Hardware and auto shops: a roll-up door, some stuck half open
@@ -373,11 +430,25 @@ function aFrame(b, x, z, line1, line2, colour = '#1a1a1a') {
   for (const e of [-1, 1]) b.add(new THREE.BoxGeometry(0.04, 0.75, 0.55).rotateZ(e * 0.2).translate(x + e * 0.08, 0.38, z), board);
 }
 
-// The Lucky Dog's terrace: tables and parasols, festoon lights, the
-// chalkboard, and what was left behind when everyone ran
-function outdoorSeating(b, rnd, fw, night) {
+// A sushi bar: red paper lanterns either side of the door, a noren curtain
+function sushiFront(b, rnd, fw, night) {
+  const lantern = mat(0xd8322a, { emissive: 0xff5a3a, emissiveIntensity: night ? 1.2 : 0.2 }), cord = mat(IRON);
+  const at = (out) => b.fx + b.side * out;
+  for (const e of [-1, 1]) {
+    const z = b.zc + b.doorU + e * 1.1;
+    b.add(new THREE.SphereGeometry(0.26, 10, 8).scale(1, 1.3, 1).translate(at(0.55), 2.75, z), lantern);
+    b.add(new THREE.CylinderGeometry(0.012, 0.012, 0.4, 4).translate(at(0.55), 3.3, z), cord);
+    b.add(new THREE.CylinderGeometry(0.2, 0.2, 0.05, 10).translate(at(0.55), 3.12, z), mat(0x1a1a1a));
+  }
+  const cloth = mat(0x1f2d4a);
+  for (let i = 0; i < 4; i++) b.face(b.doorU - 0.48 + i * 0.32, 2.15, 0.1, 0.28, 0.6, 0.02, cloth);
+}
+
+// Tables out on the sidewalk, sized to it: parasols and festoon lights to the kerb
+function terrace(b, rnd, fw, night, knockedMax = 0) {
   const wood = mat(0x7a5a3a), iron = mat(IRON), at = (out) => b.fx + b.side * out;
-  const parasols = [mat(0xa83a32), mat(0xf0ece4)];
+  const parasols = [mat(0xa83a32), mat(0xf0ece4), mat(0x2e4a7a)];
+  const outs = b.walk >= 5 ? [2.3, 4.6] : [Math.min(1.8, b.walk - 0.9)];
   const chair = (x, z, facing, knocked) => {
     const parts = [new THREE.BoxGeometry(0.42, 0.05, 0.42).translate(0, 0.45, 0), new THREE.BoxGeometry(0.42, 0.45, 0.05).translate(0, 0.7, -0.19),
       new THREE.BoxGeometry(0.05, 0.45, 0.05).translate(-0.18, 0.22, 0.18), new THREE.BoxGeometry(0.05, 0.45, 0.05).translate(0.18, 0.22, 0.18),
@@ -386,9 +457,11 @@ function outdoorSeating(b, rnd, fw, night) {
     if (knocked) g = g.rotateX(Math.PI / 2).translate(0, 0.22, 0);
     b.add(g.translate(x, 0, z), iron);
   };
-  let i = 0, knockedLeft = 2;
-  for (let u = -fw / 2 + 1.3; u <= fw / 2 - 1.2; u += 2.5) for (const out of [2.3, 4.6]) {
+  let i = 0, knockedLeft = knockedMax;
+  const colour = rint(rnd, 0, parasols.length - 1);
+  for (let u = -fw / 2 + 1.3; u <= fw / 2 - 1.2; u += 2.5) for (const out of outs) {
     const x = at(out), z = b.zc + u;
+    if (keptOff(x, z, 1.4)) continue;
     b.add(new THREE.CylinderGeometry(0.45, 0.45, 0.05, 12).translate(x, 0.75, z), wood);
     b.add(new THREE.CylinderGeometry(0.05, 0.08, 0.72, 6).translate(x, 0.37, z), iron);
     for (const e of [-1, 1]) {
@@ -398,19 +471,28 @@ function outdoorSeating(b, rnd, fw, night) {
     }
     if (i++ % 2 === 0) {
       b.add(new THREE.CylinderGeometry(0.035, 0.035, 2.4, 5).translate(x, 1.2, z), iron);
-      b.add(new THREE.ConeGeometry(1.35, 0.45, 8).translate(x, 2.35, z), parasols[(i >> 1) & 1]);
+      b.add(new THREE.ConeGeometry(1.35, 0.45, 8).translate(x, 2.35, z), parasols[(colour + (i >> 1)) % parasols.length]);
     }
   }
   // Festoon lights from two posts at the kerb back to the awning
   const bulb = mat(0xfff0c0, { emissive: 0xffc070, emissiveIntensity: night ? 1.6 : 0.15 });
+  const postOut = b.walk - 0.4;
   for (const e of [-1, 1]) {
     const pu = e * (fw / 2 - 0.4);
-    b.add(new THREE.CylinderGeometry(0.05, 0.05, 3.2, 5).translate(at(6.0), 1.6, b.zc + pu), iron);
+    if (keptOff(at(postOut), b.zc + pu, 0.5)) continue;
+    b.add(new THREE.CylinderGeometry(0.05, 0.05, 3.2, 5).translate(at(postOut), 1.6, b.zc + pu), iron);
     for (let k = 0; k <= 8; k++) {
-      const t = k / 8, out = 1.6 + t * 4.4, y = 3.15 - Math.sin(t * Math.PI) * 0.35;
+      const t = k / 8, out = 1.6 + t * (postOut - 1.6), y = 3.15 - Math.sin(t * Math.PI) * 0.35;
       b.add(new THREE.IcosahedronGeometry(0.06, 0).translate(at(out), y, b.zc + pu), bulb);
     }
   }
+}
+
+// The Lucky Dog's terrace: a terrace, the chalkboard, and what was left
+// behind when everyone ran
+function outdoorSeating(b, rnd, fw, night) {
+  terrace(b, rnd, fw, night, 2);
+  const at = (out) => b.fx + b.side * out;
   aFrame(b, at(1.2), b.zc + fw / 2 - 0.6, 'DOGS', 'WELCOME');
   // Left behind: a dog bowl under the first table, a dropped red handbag
   b.add(new THREE.CylinderGeometry(0.15, 0.12, 0.07, 10).translate(at(2.65), 0.04, b.zc - fw / 2 + 1.3), mat(0x3a6ab0));
@@ -418,7 +500,6 @@ function outdoorSeating(b, rnd, fw, night) {
   b.add(new THREE.TorusGeometry(0.09, 0.015, 4, 10, Math.PI).translate(at(3.4), 0.24, b.zc - fw / 2 + 2.2), mat(0xc8323a));
   FEATURE_SPOTS.luckyDog = { x: at(3.4), z: b.zc };
 }
-
 // kind: a SHOPS key, or 'lobby' (an office: mirror glass, no sign)
 function shopfront(b, rnd, fw, night, kind, far) {
   const dark = mat(pick(rnd, PALETTE.darkTrim));
@@ -426,6 +507,7 @@ function shopfront(b, rnd, fw, night, kind, far) {
   b.face(0, 3.25, 0.06, fw - 0.4, 0.14, 0.12, dark);                       // header
   if (shop.front !== 'garage') b.face(0, 0.25, 0.05, fw - 0.6, 0.5, 0.1, dark); // kick plate
   const doorU = (fw / 2 - 0.9) * (rnd() < 0.5 ? -1 : 1), e = Math.sign(doorU);
+  b.doorU = doorU;
   // The stretch of frontage beside the door
   const from = -e * (fw / 2 - 0.35), to = doorU - e * 0.8, sideU = (from + to) / 2, sideW = Math.abs(to - from);
   if (far) {
@@ -449,9 +531,11 @@ function shopfront(b, rnd, fw, night, kind, far) {
   }
   if (kind === 'lobby') return;
   const tex = signTexture(pick(rnd, shop.names), shop.sign || pick(rnd, SIGN_COLOURS), shop.icon);
-  b.face(0, 3.75, 0.12, Math.min(fw - 0.6, 7), 0.85, 0.16, mat(0xffffff, { map: tex, emissive: night ? 0xffffff : 0, emissiveIntensity: night ? 0.5 : 0 }));
+  const signLit = night && rnd() < b.D.signsLit;
+  b.face(0, 3.75, 0.12, Math.min(fw - 0.6, 7), 0.85, 0.16, mat(0xffffff, { map: tex, emissive: signLit ? 0xffffff : 0, emissiveIntensity: signLit ? 0.5 : 0 }));
   shop.extra?.(b, rnd, fw, night);
-  if (shop.awning !== undefined || rnd() < (shop.front === 'garage' ? 0.2 : 0.7)) {
+  if (shop.terrace && b.walk >= 2.6 && rnd() < 0.45) terrace(b, rnd, fw, night);
+  if (!shop.noAwning && (shop.awning !== undefined || rnd() < (shop.front === 'garage' ? 0.2 : 0.7))) {
     // Awning, sloping down toward the street, with a valance at its edge
     const colour = mat(shop.awning ?? pick(rnd, PALETTE.awning));
     const awn = new THREE.BoxGeometry(1.7, 0.08, fw - 0.6).rotateZ(-0.38 * b.side)
@@ -505,35 +589,62 @@ function splitFrontage(rnd, d, atLeast = 1) {
   return weights.map((w) => (w / sum) * d);
 }
 
-const DOWNTOWN_TYPES = ['walkup', 'walkup', 'office', 'apartment', 'hotel', 'corner'];
+// A tiled roof. Along the street: the ridge runs parallel to the facade.
+// Otherwise the gable faces the street, its triangle filled with wall.
+function pitchedRoof(b, depth, fw, H, rise, roof, wall, alongStreet) {
+  const over = 0.35, tri = (hw) => { const sh = new THREE.Shape(); sh.moveTo(-hw, 0); sh.lineTo(hw, 0); sh.lineTo(0, rise); sh.lineTo(-hw, 0); return sh; };
+  if (alongStreet) {
+    const g = new THREE.ExtrudeGeometry(tri(depth / 2 + over), { depth: fw + over * 2, bevelEnabled: false });
+    b.add(g.translate(b.fx - b.side * depth / 2, H, b.zc - fw / 2 - over), roof);
+  } else {
+    // Shape across the frontage, extruded back from the facade: rotateY maps
+    // the extrusion (+z) onto +x and the shape's x onto -z
+    const g = new THREE.ExtrudeGeometry(tri(fw / 2 + over), { depth: depth + over, bevelEnabled: false }).rotateY(Math.PI / 2);
+    b.add(g.translate(b.side > 0 ? b.fx - depth : b.fx - over, H, b.zc), roof);
+    const gable = new THREE.ShapeGeometry(tri(fw / 2)).rotateY(Math.PI / 2 * b.side).translate(b.fx + b.side * 0.37, H, b.zc);
+    b.add(gable, wall);
+  }
+}
+function chimney(b, rnd, depth, fw, H, rise) {
+  const x = b.fx - b.side * depth * (0.35 + rnd() * 0.3), z = b.zc + (rnd() - 0.5) * fw * 0.6;
+  b.box(x, H + rise * 0.6 + 0.6, z, 0.7, 1.6 + rise * 0.6, 0.7, mat(pick(rnd, PALETTE.harbourBrick)));
+  b.box(x, H + rise * 0.9 + 1.0, z, 0.85, 0.15, 0.85, mat(0x4a4440));
+}
+const WAREHOUSE_NAMES = ['PIER 7', 'HARBOUR STORES', 'FISH CO.', 'ROPE WORKS', 'ICE HOUSE', 'SAIL LOFT'];
+const HARBOUR_TYPES = new Set(['townhouse', 'terrace', 'shophouse', 'warehouse', 'harbourhotel']);
 let lastType = null;
 
-function buildOne(b, rnd, fw, depth, lotH, night, far, shopKind) {
-  let type = pick(rnd, DOWNTOWN_TYPES);
-  if (type === lastType) type = pick(rnd, DOWNTOWN_TYPES);
-  if (lotH > 34 && rnd() < 0.5) type = rnd() < 0.7 ? 'office' : 'hotel'; // the tall lots get the towers
+function buildOne(b, rnd, fw, depth, lotH, night, far, shopKind, minStoreys = 0) {
+  const D = b.D;
+  let type = pick(rnd, D.types);
+  if (type === lastType) type = pick(rnd, D.types);
+  if (D.towers && lotH > 34 && rnd() < 0.5) type = rnd() < 0.7 ? 'office' : 'hotel'; // the tall lots get the towers
+  if (D.warehousesSouthOf !== undefined && b.zc < D.warehousesSouthOf && rnd() < 0.6) type = 'warehouse';
   if (shopKind && type === 'office') type = 'walkup'; // a chosen shop needs a shop floor, not a lobby
+  if (minStoreys && type === 'shophouse') type = 'townhouse';
   lastType = type;
-  const storeys = {
-    walkup: 4 + Math.floor(rnd() * 3), office: 8 + Math.floor(rnd() * 6), apartment: 5 + Math.floor(rnd() * 4),
-    hotel: 9 + Math.floor(rnd() * 4), corner: 1 + Math.floor(rnd() * 2),
-  }[type];
-  const H = GROUND + storeys * STOREY;
+  const storeys = Math.max(D.storeys[type](rnd), minStoreys);
+  const storeyH = type === 'warehouse' ? 4.4 : STOREY;
+  const H = GROUND + storeys * storeyH;
+  const harbour = HARBOUR_TYPES.has(type);
   const wall = type === 'walkup' ? pick(rnd, PALETTE.brick) : type === 'office' ? pick(rnd, PALETTE.stone)
-    : type === 'hotel' ? pick(rnd, [...PALETTE.brick, ...PALETTE.stone]) : pick(rnd, PALETTE.plaster);
+    : type === 'hotel' ? pick(rnd, [...PALETTE.brick, ...PALETTE.stone])
+    : type === 'terrace' || type === 'warehouse' ? pick(rnd, PALETTE.harbourBrick)
+    : type === 'harbourhotel' ? pick(rnd, [0xf0ece4, ...PALETTE.pastel])
+    : harbour ? pick(rnd, PALETTE.pastel) : pick(rnd, PALETTE.plaster);
   const wallMat = mat(wall);
-  const trim = mat(type === 'office' ? pick(rnd, PALETTE.darkTrim) : pick(rnd, PALETTE.trim));
+  const trim = mat(type === 'office' || type === 'warehouse' ? pick(rnd, PALETTE.darkTrim) : pick(rnd, PALETTE.trim));
   // Body: the full lot depth, so neighbours of different heights show real side walls
   b.box(b.fx - b.side * depth / 2, H / 2, b.zc, depth, H, fw, wallMat);
   // Pilasters at the edges keep neighbouring buildings visibly separate
   for (const e of [-1, 1]) b.face(e * (fw / 2 - 0.25), H / 2, 0.06, 0.5, H, 0.12, type === 'office' ? trim : wallMat);
-  shopfront(b, rnd, fw, night, type === 'office' ? 'lobby' : shopKind || pickShop(rnd), far);
+  shopfront(b, rnd, fw, night, type === 'office' ? 'lobby' : shopKind || pickShop(rnd, D.shops), far);
   b.face(0, GROUND - 0.1, 0.08, fw, 0.25, 0.16, trim); // band over the shops
 
   const glass = () => {
     const r = rnd();
-    if (r < 0.1) return mat(BROKEN, { roughness: 1 });  // smashed in the quake
-    if (night && r < 0.3) return mat(0x3a3020, { emissive: 0xffc27a, emissiveIntensity: 0.9 });
+    if (r < D.broken) return mat(BROKEN, { roughness: 1 });  // smashed in the quake
+    if (night && r < D.broken + D.litWindows) return mat(0x3a3020, { emissive: 0xffc27a, emissiveIntensity: 0.9 });
     return mat(GLASS, { roughness: 0.25, metalness: 0.2 });
   };
   if (type === 'office') {
@@ -546,31 +657,50 @@ function buildOne(b, rnd, fw, depth, lotH, night, far, shopKind) {
     }
   } else {
     // Half as many windows as a bay-per-window facade: more wall between them
-    const bay = (type === 'apartment' ? 3.0 : 2.5) * 1.9;
+    const bay = (type === 'apartment' ? 3.0 : type === 'warehouse' ? 3.4 : harbour ? 2.6 : 2.5) * 1.9;
     const cols = Math.max(1, Math.floor((fw - 1.4) / bay));
-    const ww = type === 'corner' ? 1.6 : 1.05, wh = type === 'hotel' ? 1.5 : 1.65;
-    const look = { trim, glass, lintel: type === 'walkup' ? trim : null, far };
+    const ww = type === 'corner' ? 1.6 : type === 'warehouse' ? 1.4 : 1.05;
+    const wh = type === 'hotel' ? 1.5 : type === 'warehouse' ? 2.4 : 1.65;
+    const shutters = (type === 'townhouse' || type === 'terrace') && !far ? mat(pick(rnd, PALETTE.shutter)) : null;
+    const look = { trim, glass, lintel: type === 'walkup' || type === 'warehouse' ? trim : null, far, shutters };
     for (let s = 0; s < storeys; s++) {
-      const v = GROUND + s * STOREY + 1.7;
+      const v = GROUND + s * storeyH + (type === 'warehouse' ? 2.2 : 1.7);
       for (let c = 0; c < cols; c++) {
         const u = (c - (cols - 1) / 2) * bay;
         windowAt(b, u, v, ww, wh, look);
-        if (type === 'apartment') {
-          b.face(u, v - 1.65, 0.55, 2.3, 0.15, 1.1, trim);                 // balcony slab
-          b.face(u, v - 1.15, 1.07, 2.3, 0.85, 0.05, mat(IRON));           // railing
+        if (type === 'apartment' || (type === 'townhouse' && s === 0 && !far && rnd() < 0.5)) {
+          const deep = type === 'apartment' ? 1.1 : 0.6;
+          b.face(u, v - 1.65, deep / 2, 2.3, 0.15, deep, trim);              // balcony slab
+          b.face(u, v - 1.15, deep - 0.03, 2.3, 0.85, 0.05, mat(IRON));     // railing
         }
       }
     }
     if (!far && type === 'walkup' && rnd() < 0.65 && fw > 5.5) fireEscape(b, (rnd() < 0.5 ? -1 : 1) * Math.min(1.2, fw / 2 - 1.8), storeys + 1, mat(IRON));
   }
-  // Top: heavy cornice on the walk-ups and hotels, a parapet elsewhere
-  if (type === 'walkup' || type === 'hotel') {
+  // Top
+  let pitched = 0;
+  if (type === 'walkup' || type === 'hotel' || type === 'harbourhotel') {
     if (rnd() > 0.12) b.face(0, H - 0.3, 0.3, fw + 0.3, 0.55, 0.6, trim); // a few lost theirs in the quake
     b.face(0, H - 1.0, 0.12, fw, 0.22, 0.24, trim);
+  } else if (type === 'townhouse' || type === 'warehouse' || type === 'terrace') {
+    pitched = Math.min(type === 'warehouse' ? 3.2 : 4, depth * (type === 'warehouse' ? 0.24 : 0.32));
+    pitchedRoof(b, depth, fw, H, pitched, mat(pick(rnd, PALETTE.roofTile)), wallMat, type !== 'terrace');
+    b.face(0, H - 0.15, 0.2, fw + 0.1, 0.3, 0.4, trim); // eaves board
   } else {
     b.face(0, H + 0.4, -0.15, fw, 0.8, 0.3, type === 'office' ? trim : wallMat);
+    if (type === 'shophouse' && !far) b.face(0, H + 1.25, -0.35, fw - 0.4, 0.9, 0.04, mat(IRON)); // roof terrace rail
   }
-  b.box(b.fx - b.side * depth / 2, H + 0.05, b.zc, depth - 0.4, 0.1, fw - 0.4, mat(ROOF));
+  if (!pitched) b.box(b.fx - b.side * depth / 2, H + 0.05, b.zc, depth - 0.4, 0.1, fw - 0.4, mat(ROOF));
+  if (type === 'warehouse' && !far) {
+    // Its name painted big across the brick
+    const tex = signTexture(pick(rnd, WAREHOUSE_NAMES), ['#e8e0cc', '#5a2a20']);
+    b.face(0, H - 1.4, 0.05, Math.min(fw * 0.8, 8), 1.0, 0.04, mat(0xffffff, { map: tex }));
+  }
+  if (type === 'harbourhotel' && !far) {
+    const tex = signTexture(pick(rnd, ['SEAVIEW HOTEL', 'HARBOUR INN', 'THE MOORINGS']), ['#12304a', '#f4efe4']);
+    const lit = night && rnd() < 0.5;
+    b.face(0, H - 1.7, 0.1, Math.min(fw - 1, 7), 0.9, 0.12, mat(0xffffff, { map: tex, emissive: lit ? 0xffffff : 0, emissiveIntensity: lit ? 0.6 : 0 }));
+  }
   if (type === 'hotel') {
     // Vertical blade sign and an entrance canopy
     const tex = verticalSignTexture('HOTEL');
@@ -583,10 +713,36 @@ function buildOne(b, rnd, fw, depth, lotH, night, far, shopKind) {
     const th = 2 * STOREY, td = depth * 0.6, tf = fw * 0.7;
     b.box(b.fx - b.side * (depth / 2 + 0.8), H + th / 2, b.zc, td, th, tf, wallMat);
     if (!far) roofKit(b, rnd, H + th, depth, tf, type);
-  } else {
-    if (!far) roofKit(b, rnd, H, depth, fw, type);
+  } else if (pitched) {
+    if (!far && type !== 'warehouse') for (let i = 0, n = rint(rnd, 1, 2); i < n; i++) chimney(b, rnd, depth, fw, H, pitched);
+  } else if (!far) {
+    roofKit(b, rnd, H, depth, fw, type);
   }
-  return H;
+  return H + pitched;
+}
+
+/** Merges kit buildings made after the level's static merge (scenery
+    only: e.g. Level 2's view of Level 1's street) into one mesh per
+    material, so they cost a few draw calls rather than hundreds. */
+export function mergeKitGroups(groups) {
+  const byMaterial = new Map();
+  for (const g of groups) {
+    g.updateMatrixWorld(true);
+    g.traverse((o) => {
+      if (!o.isMesh) return;
+      const geo = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      geo.applyMatrix4(o.matrixWorld);
+      if (!byMaterial.has(o.material)) byMaterial.set(o.material, []);
+      byMaterial.get(o.material).push(geo);
+      o.geometry.dispose();
+    });
+    g.removeFromParent();
+  }
+  for (const [material, geos] of byMaterial) {
+    const mesh = new THREE.Mesh(mergeGeometries(geos), material);
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  }
 }
 
 /** Builds the stylised buildings on one street lot (centre x, z; w deep from
@@ -595,14 +751,23 @@ function buildOne(b, rnd, fw, depth, lotH, night, far, shopKind) {
     face: which way along x the facade looks (default: toward x = 0, the
     main street). collider: false for lots out of reach. far: lighter
     detail and no shadows, for the town past the edge. shops: SHOPS keys
-    for the lot's buildings, in order (the rest are drawn at random). */
-export function buildKitBuilding(x, z, w, h, d, { face, collider = true, far = false, shops } = {}) {
+    for the lot's buildings, in order (the rest are drawn at random).
+    district: a DISTRICTS key (default: the level's, state.cityKit).
+    minStoreys: none of its buildings lower than this. */
+/** Every main-street lot built, { side, z0 (north edge), z1 }: CityTown.js
+    fills a gap where the bridge needs a building to land on. */
+export const MAIN_LOTS = [];
+export function buildKitBuilding(x, z, w, h, d, { face, collider = true, far = false, shops, district, minStoreys = 0 } = {}) {
   const rnd = seeded(Math.round(x * 73.1) ^ Math.round(z * 131.7) ^ 0xC17E);
   const night = state.timeOfDay === 'night';
   const side = face ?? (x > 0 ? -1 : 1);
-  if (!shops && face === undefined) { // a main-street lot: is it a feature's?
-    const f = FEATURES.find((ft) => !ft.used && Math.sign(x) === ft.side && z <= ft.z0 && z >= ft.z1);
-    if (f) { f.used = true; shops = f.shops; }
+  const key = district || (DISTRICTS[state.cityKit] ? state.cityKit : 'downtown'), D = DISTRICTS[key];
+  const walk = face === undefined ? rowX - STREET_HALF_W : SIDEWALK; // the main street's sidewalks are wider
+  if (face === undefined && !district) MAIN_LOTS.push({ side: Math.sign(x), z0: z + d / 2, z1: z - d / 2 });
+  if (!shops && face === undefined && !district) { // a main-street lot: is it a feature's?
+    const f = (FEATURES[key] || []).find((ft) => !ft.used && Math.sign(x) === ft.side
+      && (ft.covers !== undefined ? ft.covers <= z + d / 2 && ft.covers >= z - d / 2 : z <= ft.z0 && z >= ft.z1));
+    if (f) { f.used = true; shops = f.shops; minStoreys = Math.max(minStoreys, f.minStoreys || 0); }
   }
   const facadeX = x + side * w / 2;
   const group = new THREE.Group();
@@ -611,8 +776,8 @@ export function buildKitBuilding(x, z, w, h, d, { face, collider = true, far = f
     const zc = z0 + fw / 2;
     z0 += fw;
     const depth = w * (0.82 + rnd() * 0.18);
-    const b = new Builder(facadeX, side, zc);
-    const H = buildOne(b, rnd, fw, depth, h, night, far, shops?.[n++]);
+    const b = new Builder(facadeX, side, zc, D, walk);
+    const H = buildOne(b, rnd, fw, depth, h, night, far, shops?.[n++], minStoreys);
     b.finish(group, !far);
     if (!collider) continue;
     // Camera blocker for this building: a plain box, indexed like baked scenery

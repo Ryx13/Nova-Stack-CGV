@@ -48,6 +48,10 @@ state.liveStreetlights = [
   { side: -1, z: -72 },
   { side: 1, z: -120, blink: true }, // edge of the collapse zone
   { side: -1, z: -192, blink: true }, // the last post, by the quay
+  // The harbour town's (CityLayout.js harbour): Harbour Square, Gull Park
+  // and the promenade either side of the quay
+  { side: 1, z: -116 }, { side: 1, z: -152, blink: true }, { side: -1, z: -172 },
+  { side: -1, z: -197 }, { side: 1, z: -197 },
 ];
 // The street is battle-damaged (broken tops, blown corners, shopfronts),
 // and the two blocks flanking the collapse zone (z -120 → -165) came down:
@@ -58,6 +62,14 @@ state.liveStreetlights = [
 // (the radar machine stands on the pavement in front of it) and has its
 // own seed so it doesn't reshuffle every later building's damage.
 state.ruinedCity = true;
+// ...but the harbour town stands whole for now (CityKit.js 'harbour', its
+// plan in CityLayout.js): the street-front lots get its buildings, the
+// collapse lot is Harbour Square, and the flags above only keep every
+// shared rnd() draw where it was. Buildings will come down mid-level.
+state.cityKit = 'harbour';
+// Sidewalk spots the town's terraces and stands must leave free: the radar
+// machine and the fallen-zombie prop (Level2.js buildLevel2Scene)
+state.kitKeepOff = [{ x: -13.4, z: 10, r: 2 }, { x: -13.2, z: -95, r: 2 }];
 state.collapsedBlocks = [
   { side: 'east', z0: -140, z1: -152 },
   { side: 'west', z0: -136, z1: -148 },

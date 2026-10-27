@@ -31,6 +31,7 @@ import * as THREE from 'three';
 import { scene, camera, sky, addStaticBox, rowX, STREET_HALF_W } from './Scene.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { state } from './state.js';
+import { buildKitBuilding, mergeKitGroups } from './CityKit.js';
 import {
   dirtTex, concreteTex, dayFacades, windowTexVariants, planarFacadeUVs, brokenBox,
   FACADE_TILE_W, FACADE_TILE_H, spawnFireEffect, addLitWindows, addLitWindowMeshes,
@@ -307,6 +308,7 @@ function buildBackCity() {
   // `face`: the outward normal of the side facing the street
   const place = (x, z, out, face) => {
     if (z < coastZ(x) + 18 || keptClear(x, z, 14)) return;
+    if (state.cityKit && Math.abs(x) < 96 && z < 52) return; // the harbour town (CityTown.js) is there
     const f = 1 - smoothstep(0, CITY_OUT, out);              // 1 by the street .. 0 at the edge
     if (rnd() > 0.35 + 0.65 * f) return;                      // sparser further out
     const w = 9 + rnd() * 14, d = 9 + rnd() * 14;
@@ -322,6 +324,7 @@ function buildBackCity() {
       broken = !tower && !collapsed;
       if (tower) { towers++; h = 24 + rnd() * 20; } else if (broken) h = Math.min(h, 6 + rnd() * 8);
     }
+    if (state.cityKit) collapsed = broken = false; // the town stands whole, for now
     if (collapsed) h = 3 + rnd() * 5;
     // Sunk a metre below the lowest ground under it
     const base = Math.min(heightAt(x - w / 2, z - d / 2), heightAt(x + w / 2, z + d / 2), heightAt(x, z)) - 1;
@@ -370,8 +373,12 @@ function buildBackCity() {
   }
   // Behind the start: Level 1's street (L1_SHIFT), the way you came. Its two
   // rows of intact blocks in Level 1's own proportions, a gap on the east
-  // side where the depot yard was. Never in reach, so no colliders.
+  // side where the depot yard was. Never in reach, so no colliders. With the
+  // harbour town in, they're Level 1's own kit buildings (lighter detail),
+  // merged by hand: they're built after the level's static merge.
+  const level1Kit = [];
   const level1Block = (x, z, w, h, d, side) => {
+    if (state.cityKit && side) { level1Kit.push(buildKitBuilding(x, z, w, h, d, { collider: false, far: true, district: 'downtown' })); return; }
     const geo = brokenBox(w, h + 1, d, 0, () => 0);
     geo.translate(x, -1, z);
     planarFacadeUVs(geo, tileW, tileH);
@@ -388,6 +395,7 @@ function buildBackCity() {
     const ww = w * (0.85 + rnd() * 0.3), hh = h * (0.7 + rnd() * 0.4);
     level1Block(-rowX - ww / 2, z + 5, ww, hh, d, -1);
   }
+  if (level1Kit.length) mergeKitGroups(level1Kit);
   // The research annex closes the far end of the street, where it all began
   level1Block(0, L1_LAB.z + 10, 64, 14, 18, 0);
 

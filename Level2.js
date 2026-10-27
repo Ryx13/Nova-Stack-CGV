@@ -596,6 +596,21 @@ function buildStreetBlockage() {
     piles, fallen scaffolding, dense wrecks, one burning. The coin cache
     in the middle is the risk/reward bait. */
 function buildCollapseZone() {
+  // In the harbour town (state.cityKit) nothing has fallen yet: the lot is
+  // Harbour Square (CityTown.js), and only its crashed cars stay
+  if (!state.cityKit) buildCollapseRubble();
+  // Wrecks in the lot + edging onto the street to constrict the road.
+  makeWreck(20, -128, 0.9);
+  makeWreck(34, -150, -0.6);
+  makeWreck(24, -158, 0.3);
+  makeWreck(38, -132, 1.4, true); // burning — the nest's beacon
+  makeWreck(6, -126, 1.15);
+  makeWreck(-6.5, -138, -1.0);
+  makeWreck(5.5, -152, 0.9);
+  if (!state.cityKit) scatterDebris(28, -142, 10, 30);
+  // (its coin cluster is placed with the rest, in placeCoinClusters)
+}
+function buildCollapseRubble() {
   const slab = new THREE.Mesh(
     new THREE.PlaneGeometry(34, 46),
     new THREE.MeshStandardMaterial({ map: concreteTex, color: 0x8a8d90, roughness: 0.96 })
@@ -613,17 +628,6 @@ function buildCollapseZone() {
   makeRubblePile(30, -160, 5);
   makeFallenScaffold(16, -138, 0.6);
   makeFallenScaffold(38, -144, -0.9);
-
-  // Wrecks in the lot + edging onto the street to constrict the road.
-  makeWreck(20, -128, 0.9);
-  makeWreck(34, -150, -0.6);
-  makeWreck(24, -158, 0.3);
-  makeWreck(38, -132, 1.4, true); // burning — the nest's beacon
-  makeWreck(6, -126, 1.15);
-  makeWreck(-6.5, -138, -1.0);
-  makeWreck(5.5, -152, 0.9);
-  scatterDebris(28, -142, 10, 30);
-  // (its coin cluster is placed with the rest, in placeCoinClusters)
 }
 
 /** ZONE DRESSING — Entrance / Centre clutter and the Final Approach
