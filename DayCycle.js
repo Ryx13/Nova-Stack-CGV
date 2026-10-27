@@ -91,6 +91,10 @@ const NIGHT = [
     hemi: 0.6, ambCol: 0x5a5048, amb: 0.32, exp: 0.95, mist: 0xd9b8a0, mistA: 0.3, rain: 0 },
 ];
 const COLOURS = ['top', 'hor', 'bot', 'glow', 'fog', 'sunCol', 'hemiSky', 'hemiGnd', 'ambCol', 'mist'];
+// Overall brightness, on top of the timelines: EXPOSURE lifts the whole
+// picture, sky included; FILL lifts the shade (hemisphere + ambient light)
+const EXPOSURE = 1.25;
+const FILL = 1.6;
 
 // Fill in what each keyframe carries over, and turn hex into Colors
 function resolve(frames) {
@@ -204,9 +208,9 @@ function apply(c) {
   sun.intensity = v.sun;
   sunVisual.material.color.copy(v.sunCol);
   sunVisual.material.opacity = v.disc * THREE.MathUtils.smoothstep(v.el, -3, 1);
-  hemiLight.color.copy(v.hemiSky); hemiLight.groundColor.copy(v.hemiGnd); hemiLight.intensity = v.hemi;
-  ambientLight.color.copy(v.ambCol); ambientLight.intensity = v.amb;
-  renderer.toneMappingExposure = v.exp;
+  hemiLight.color.copy(v.hemiSky); hemiLight.groundColor.copy(v.hemiGnd); hemiLight.intensity = v.hemi * FILL;
+  ambientLight.color.copy(v.ambCol); ambientLight.intensity = v.amb * FILL;
+  renderer.toneMappingExposure = v.exp * EXPOSURE;
   fogUniforms.uColor.value.copy(v.mist);
   fogUniforms.uOpacity.value = v.mistA;
   mistEnabled.value = v.mistA > 0.01 ? 1 : 0;
