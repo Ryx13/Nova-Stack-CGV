@@ -31,8 +31,8 @@ export const CREDITS = [
         licence: 'MIT',
       },
       {
-        name: 'three.js add-ons: GLTFLoader, SkeletonUtils, RoundedBoxGeometry',
-        what: 'Loading .glb models, cloning skinned zombie rigs, vending machine body.',
+        name: 'three.js add-ons: GLTFLoader, SkeletonUtils, RoundedBoxGeometry, BufferGeometryUtils',
+        what: 'Loading .glb models, cloning skinned zombie rigs, vending machine body, merging scenery and town buildings into a few meshes.',
         author: 'three.js contributors',
         source: 'https://github.com/mrdoob/three.js/tree/r160/examples/jsm',
         licence: 'MIT',
@@ -215,6 +215,13 @@ export const CREDITS = [
         licence: 'Widely used technique; credited as reference',
       },
       {
+        name: 'Dynamic reflections with a cube camera',
+        what: 'Reference for the mirror shopfronts: a cube camera renders the scene in front of the nearest mirror and the glass reflects it.',
+        author: 'three.js examples (CubeCamera, webgl_materials_cubemap_dynamic)',
+        source: 'https://threejs.org/examples/#webgl_materials_cubemap_dynamic',
+        licence: 'MIT',
+      },
+      {
         name: 'RaycastVehicle setup',
         what: 'Reference for the truck\'s suspension, steering and braking.',
         author: 'cannon-es examples',
@@ -235,7 +242,7 @@ export const CREDITS = [
       },
       {
         name: 'Claude Code (AI coding assistant)',
-        what: 'Character roster pipeline and select screen, clip fitting and pistol grip, vending machine lighting, Level 2 clear-day atmosphere (painted sky lighting, following sun shadows, smoke, daylight facades), ruined buildings, street dressing and scenery merging; Level 2 intro fly-through, the mountains, sea and back city around it, the getaway boat and its cinematic, the moonlit dead-grid night (lit windows and light shafts, flickering firelight), the opening zombie ambush, and the infection monitor and overrun death scene, with debugging and documentation.',
+        what: 'Character roster pipeline and select screen, clip fitting and pistol grip, vending machine lighting, Level 2 clear-day atmosphere (painted sky lighting, following sun shadows, smoke, daylight facades), ruined buildings, street dressing and scenery merging; Level 2 intro fly-through, the mountains, sea and back city around it, the getaway boat and its cinematic, the moonlit dead-grid night (lit windows and light shafts, flickering firelight), the opening zombie ambush, and the infection monitor and overrun death scene. Later: Levels 1 and 2 back on one engine and restarting in place; the stabilizer storyline scenes (CAM 03 footage, the catch at the pier, the ending line); the campaign day/night clock with its gradient sky, sun rays and glare; the look-back views between levels (Level 1’s street, the annex and mountains, the bay); the building kit and town plans for downtown, the harbour and the headland works, with their street surfaces, parks, zoo, vet clinics, the Lucky Dog terrace, beaches, lighthouse and Harbour Walk bridge; the mirror shopfronts’ reflections, sliding doors and ray of sunshine. All with debugging and documentation.',
         author: 'Anthropic',
         source: 'https://claude.com/claude-code',
         licence: '—',
