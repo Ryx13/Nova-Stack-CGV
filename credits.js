@@ -242,7 +242,7 @@ export const CREDITS = [
       },
       {
         name: 'Claude Code (AI coding assistant)',
-        what: 'Parts of the game code, debugging and documentation were written or refined with an AI coding assistant.',
+        what: 'Used by the team as a tool to help iterate on and review the campaign’s story and scene coherence, and to help implement the team’s own designs: the town layouts and building kit for each district, the parks, zoo, harbour waterfront and Harbour Walk bridge, the day/night campaign clock and sky, the look-back views between levels and the mirror reflections. Earlier it also helped with the character roster pipeline and Level 2’s atmosphere, intro and night. Also used for debugging and documentation.',
         author: 'Anthropic',
         source: 'https://claude.com/claude-code',
         licence: '—',
