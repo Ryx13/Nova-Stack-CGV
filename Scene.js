@@ -392,9 +392,24 @@ const starSpriteTex = new THREE.CanvasTexture(makeCanvas(32, 32, (ctx) => {
   g.addColorStop(1, 'rgba(230,238,255,0)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, 32, 32);
 }));
+// The stars twinkle: each one's brightness wavers at its own pace (aPhase),
+// worked out on the GPU from one shared clock (DayCycle.js advances it)
+export const starUniforms = { uTime: { value: 0 } };
+function twinkle(shader, renderer) {
+  THREE.Material.prototype.onBeforeCompile.call(this, shader, renderer); // keep the global hook (HeightMist.js)
+  shader.uniforms.uTime = starUniforms.uTime;
+  shader.vertexShader = shader.vertexShader
+    .replace('void main() {', 'uniform float uTime;\nattribute float aPhase;\nvarying float vTwinkle;\nvoid main() {')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvTwinkle = 0.6 + 0.4 * sin(uTime * (1.2 + aPhase * 2.5) + aPhase * 6.2832);');
+  shader.fragmentShader = shader.fragmentShader
+    .replace('void main() {', 'varying float vTwinkle;\nvoid main() {')
+    .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.a *= vTwinkle;');
+}
 function makeStarLayer(count, size, opacity) {
   const pos = new Float32Array(count * 3);
+  const phase = new Float32Array(count);
   for (let i = 0; i < count; i++) {
+    phase[i] = Math.random();
     // Spread over the upper dome, but kept above ~27° elevation: the
     // amber city-glow band near the horizon swallows anything fainter,
     // so stars concentrate where the sky is actually dark.
@@ -407,10 +422,13 @@ function makeStarLayer(count, size, opacity) {
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
   const mat = new THREE.PointsMaterial({
     map: starSpriteTex, size, sizeAttenuation: false, transparent: true, opacity,
     depthWrite: false, fog: false, blending: THREE.AdditiveBlending, color: 0xdfe6ff,
   });
+  mat.onBeforeCompile = twinkle;
+  mat.customProgramCacheKey = () => 'stars';
   const pts = new THREE.Points(geo, mat);
   pts.renderOrder = -1; // with the sky, behind everything else
   sky.add(pts);

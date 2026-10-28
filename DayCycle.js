@@ -11,7 +11,10 @@
             glowing through it, a light drizzle
      Night  L1 streetlit night · L2 dead grid, moon over
             the port · L3 sea fog before dawn -> the sun breaks through
-            as the cure broadcasts
+            as the cure broadcasts. The moon and stars light it: the sun's
+            light becomes a cool moonlight from the moon (no shadows), the
+            stars add a faint fill, and the sea reflects the night sky
+            (reflectNightSky)
 
    Time follows the mission, not the wall clock: each level registers a
    progress function (0..1, from its own objectives), so the sunrise lands
@@ -25,7 +28,7 @@
    boot in startDayCycle().
 ====================================================================== */
 import * as THREE from 'three';
-import { scene, renderer, sky, stars, rain, lighting, setSunDirection } from './Scene.js';
+import { scene, renderer, sky, stars, starUniforms, rain, lighting, setSunDirection } from './Scene.js';
 import { state } from './state.js';
 import { rainUniforms, fogUniforms } from './shaders.js';
 import { mistEnabled } from './HeightMist.js';
@@ -78,25 +81,27 @@ const DAY = [
     mist: 0xead8c0, mistA: 0.5, rain: 0.4 },
 ];
 const NIGHT = [
-  // Night means night: no sun or moonlight on the scene until the finale's
-  // sunrise. The moon and stars are in the sky; the streetlights light the
-  // street, and a faint blue fill keeps silhouettes readable.
+  // Night is lit by the moon and stars: the "sun" here is the moon, a cool
+  // light from where it hangs in the sky (el/az), with no shadows. The
+  // streetlights light the street, and a faint blue fill (with the stars'
+  // share, STARLIGHT) keeps silhouettes readable.
   // Level 1: the streetlit night, the city glow amber at the horizon
-  { c: 0, top: 0x514f5a, hor: 0x9d8270, bot: 0xe3c29a, glow: 0x9fb4d8, gs: 0,
-    fog: 0x4a4440, fogD: 0.009, sunCol: 0xb4c6ea, sun: 0, el: 24, az: 15, disc: 0,
+  { c: 0, top: 0x514f5a, hor: 0x9d8270, bot: 0xe3c29a, glow: 0x9fb4d8, gs: 0.06,
+    fog: 0x4a4440, fogD: 0.009, sunCol: 0xb4c6ea, sun: 0.35, el: 24, az: 15, disc: 0,
     hemiSky: 0x6a7a96, hemiGnd: 0x1c1a18, hemi: 0.35, ambCol: 0x3a4250, amb: 0.22, exp: 1.0,
     mist: 0x8a909a, mistA: 0.45, rain: 0, stars: 0.85, moon: 0.9 },
   { c: 1 },
-  // Level 2, leaving downtown: the grid is dead, a cool moonlit night
-  { c: 1.25, top: 0x2a354b, hor: 0x4b5a71, bot: 0x6a7992, glow: 0x9fb4d8, gs: 0.12,
+  // Level 2, leaving downtown: the grid is dead, a cool moonlit night, the
+  // moon over the sea ahead (the port is south, toward -z)
+  { c: 1.25, top: 0x2a354b, hor: 0x4b5a71, bot: 0x6a7992, glow: 0x9fb4d8, gs: 0.12, sun: 0.5,
     fog: 0x1f2736, fogD: 0.0085, hemiSky: 0x5d6f92, hemiGnd: 0x15171c, hemi: 0.32,
     ambCol: 0x1f2635, amb: 0.2, mist: 0x52607a, mistA: 0.35, stars: 1, moon: 0.95 },
   { c: 2 },
   // Level 3: sea fog before dawn, thickening as you work through the switches
   { c: 2.45, top: 0x1e2636, hor: 0x34415a, bot: 0x3e4b5e, glow: 0x9fb4d8, gs: 0.06,
-    fog: 0x182535, fogD: 0.012, hemi: 0.4, amb: 0.25, mist: 0x35475a, mistA: 0.45, stars: 0.3, moon: 0.4 },
+    fog: 0x182535, fogD: 0.012, hemi: 0.4, amb: 0.25, mist: 0x35475a, mistA: 0.45, stars: 0.3, moon: 0.4, sun: 0.25 },
   { c: 2.85, top: 0x3a4452, hor: 0x4c5664, bot: 0x4a5260, glow: 0xc08a6a, gs: 0.12,
-    fog: 0x2c3644, fogD: 0.022, mist: 0x4a586a, mistA: 0.6, rain: 0.25, stars: 0, moon: 0 },
+    fog: 0x2c3644, fogD: 0.022, mist: 0x4a586a, mistA: 0.6, rain: 0.25, stars: 0, moon: 0, sun: 0 },
   { c: 2.88, sunCol: 0xffb070, el: -3, az: 75 },
   // Level 3 ends: the cure broadcasts and the sun breaks through
   { c: 3, top: 0x5a6f92, hor: 0xf4b07a, bot: 0x7a6050, glow: 0xffb070, gs: 0.95,
@@ -108,6 +113,8 @@ const COLOURS = ['top', 'hor', 'bot', 'glow', 'fog', 'sunCol', 'hemiSky', 'hemiG
 // picture, sky included; FILL lifts the shade (hemisphere + ambient light)
 const EXPOSURE = 1.25;
 const FILL = 1.6;
+// Starlight: the hemisphere fill brightens by this much with a full sky of stars
+const STARLIGHT = 0.1;
 
 // Fill in what each keyframe carries over, and turn hex into Colors
 function resolve(frames) {
@@ -273,7 +280,7 @@ function apply(c) {
     glare.material.color.copy(v.sunCol);
     glare.material.opacity = 0.55 * rays;
   }
-  hemiLight.color.copy(v.hemiSky); hemiLight.groundColor.copy(v.hemiGnd); hemiLight.intensity = v.hemi * FILL;
+  hemiLight.color.copy(v.hemiSky); hemiLight.groundColor.copy(v.hemiGnd); hemiLight.intensity = (v.hemi + STARLIGHT * v.stars) * FILL;
   ambientLight.color.copy(v.ambCol); ambientLight.intensity = v.amb * FILL;
   renderer.toneMappingExposure = v.exp * EXPOSURE;
   fogUniforms.uColor.value.copy(v.mist);
@@ -288,6 +295,7 @@ function apply(c) {
 /** Every frame, from the game loop. */
 export function updateDayCycle(dt) {
   skyUniforms.uTime.value += dt;
+  starUniforms.uTime.value += dt;
   if (glare) glare.material.rotation += dt * 0.015;
   if (!frames) return;
   const raw = THREE.MathUtils.clamp(progressSource ? progressSource() : 0, 0, 1);
@@ -304,4 +312,45 @@ export function updateDayCycle(dt) {
     pmrem.dispose();
     previous?.dispose();
   }
+  if (nightSeas.length && (nightEnvTimer -= dt) <= 0) captureNightSky();
+}
+
+/* --- The night sea ------------------------------------------------------
+   By day the sea reflects the sky through scene.environment. At night there
+   is none (lighting every surface from the night sky would wash the street
+   out), so the sea gets its own: the night sky with the moon and stars,
+   captured into a reflection map and re-captured every few seconds as the
+   night changes. Smooth water plus the ripple normals stretch the moon's
+   reflection and the moonlight's highlight into a path across the water. */
+const nightSeas = [];
+let nightEnvScene = null, nightEnv = null, nightEnvTimer = 0;
+function captureNightSky() {
+  nightEnvTimer = 4;
+  if (!nightEnvScene) {
+    nightEnvScene = new THREE.Scene();
+    nightEnvScene.add(new THREE.Mesh(sky.geometry, sky.material));
+    // The moon and the star layers, sharing their materials, so they fade with the night
+    const moon = new THREE.Sprite(lighting.moonVisual.material);
+    moon.position.copy(lighting.moonVisual.position);
+    moon.scale.copy(lighting.moonVisual.scale);
+    nightEnvScene.add(moon, ...stars.map((s) => new THREE.Points(s.geometry, s.material)));
+  }
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const previous = nightEnv;
+  nightEnv = pmrem.fromScene(nightEnvScene, 0, 1, 1000).texture;
+  pmrem.dispose();
+  for (const m of nightSeas) m.envMap = nightEnv;
+  previous?.dispose();
+}
+/** A sea's material: at night, it reflects the night sky (smoother water,
+    the moon's path across it). By day it does nothing: scene.environment
+    already gives the sea the day sky. Call after bootLevel(). */
+export function reflectNightSky(material) {
+  if (state.timeOfDay === 'day') return;
+  material.roughness = 0.1;
+  material.envMapIntensity = 1;
+  nightSeas.push(material);
+  if (!nightEnv) captureNightSky();
+  material.envMap = nightEnv;
+  material.needsUpdate = true;
 }

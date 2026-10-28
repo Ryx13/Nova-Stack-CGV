@@ -20,6 +20,7 @@ import { concreteTex, rustTex } from './characters.js';
 import { instantiateCharacter, clipsFor } from './roster.js';
 import { rippleNormalTexture } from './Level2Surroundings.js';
 import { getGirlOutcome } from './StoryProgress.js';
+import { reflectNightSky } from './DayCycle.js';
 
 const WATER_Y = -0.9;
 const QUAY_Z = 65;                 // the street's ground slab ends here
@@ -59,6 +60,7 @@ function buildWater() {
   }));
   sea.position.y = WATER_Y;
   sea.receiveShadow = true;
+  reflectNightSky(sea.material); // at night, the moon and stars in the water
   scene.add(sea);
   return sea;
 }

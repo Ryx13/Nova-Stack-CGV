@@ -32,6 +32,7 @@ import { scene, camera, sky, addStaticBox, rowX, STREET_HALF_W } from './Scene.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { state } from './state.js';
 import { buildKitBuilding, mergeKitGroups } from './CityKit.js';
+import { reflectNightSky } from './DayCycle.js';
 import {
   dirtTex, concreteTex, dayFacades, windowTexVariants, planarFacadeUVs, brokenBox,
   FACADE_TILE_W, FACADE_TILE_H, spawnFireEffect, addLitWindows, addLitWindowMeshes,
@@ -216,10 +217,12 @@ export function rippleNormalTexture(size = 256) {
 
 function buildSea() {
   const normalMap = rippleNormalTexture();
+  // At night darker and smoother, mirroring the moon and stars (reflectNightSky)
   const mat = new THREE.MeshStandardMaterial({
-    color: 0x2b78a8, roughness: 0.22, metalness: 0,
+    color: state.timeOfDay === 'night' ? 0x163f5a : 0x2b78a8, roughness: 0.22, metalness: 0,
     normalMap, normalScale: new THREE.Vector2(0.55, 0.55),
   });
+  reflectNightSky(mat);
   // The open sea south of the quay line, plus strips either side of the
   // play area reaching into the bays where the coast wanders north (the
   // beach stands above them everywhere else)
