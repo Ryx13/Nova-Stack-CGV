@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { installHeightMist, mistEnabled } from './HeightMist.js';
 import * as CANNON from 'cannon-es';
 import { state } from './state.js';
+import { gfx } from './GraphicsProfile.js';
 import {levelWeapon} from './WeaponSlots.js';
 import { finishRun } from './account.js';
 import {
@@ -171,7 +172,9 @@ onSoundChange((m) => {
 /* ---------------------------------------------------------------------
    1. RENDERER / SCENE / CAMERA
 --------------------------------------------------------------------- */
-export const renderer = new THREE.WebGLRenderer({ canvas: dom.canvas, antialias: true, powerPreference: 'high-performance' });
+// MSAA off on the low profile (GraphicsProfile.js): it multiplies the memory
+// traffic of every pixel, which is what a weak GPU has least of
+export const renderer = new THREE.WebGLRenderer({ canvas: dom.canvas, antialias: gfx.antialias, powerPreference: 'high-performance' });
 // Capped at 1.5 (MAX_PIXEL_RATIO); RenderScale.js steps it down further if frames run slow
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;

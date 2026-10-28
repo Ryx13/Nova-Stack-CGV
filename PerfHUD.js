@@ -2,9 +2,12 @@ import * as THREE from 'three';
 import { renderer, scene, camera } from './Scene.js';
 import { state } from './state.js';
 import { renderScaleInfo } from './RenderScale.js';
+import { gfx } from './GraphicsProfile.js';
 
 /* ---------------------------------------------------------------------
-   PERF READOUT — F3 shows it, Shift+F3 copies it to the clipboard.
+   PERF READOUT — ` (backtick, left of 1) shows it, Shift+` copies it to
+   the clipboard. Not F3: that's the game's debug mode, and on many laptops
+   F3 without Fn is a media key that pauses the audio.
    What a frame costs and where: frame rate and hitches, CPU time split
    into game logic and render submission, GPU time (WebGL timer queries,
    where the browser offers them), draw calls and triangles for the whole
@@ -19,7 +22,7 @@ const HITCH_WINDOW = 10; // s of hitches counted
 const NEAR_ZOMBIE = 35;  // m: infected this close count as "near"
 
 let on = false, el = null;
-let gl = null, timer = null, openQuery = null;
+let gl = null, timer = null, openQuery = null, device = '';
 const pending = [], spare = [];
 let frameStart = 0, renderStart = 0, lastStart = 0, sinceRefresh = 0;
 const acc = { n: 0, interval: 0, worst: 0, logic: 0, submit: 0, gpu: 0, gpuN: 0, calls: 0, tris: 0 };
@@ -39,6 +42,12 @@ function build() {
   document.body.appendChild(el);
   gl = renderer.getContext();
   timer = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+  // Which graphics chip the browser is really drawing with: a laptop's
+  // built-in one instead of its graphics card, or software rendering
+  // (SwiftShader / Basic Render Driver), explains a slow GPU line at once
+  const info = gl.getExtension('WEBGL_debug_renderer_info');
+  device = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || 'unknown')
+    .replace(/^ANGLE \((.*)\)$/, '$1').replace(/ Direct3D.*$/, '').slice(0, 90);
 }
 
 function setOn(v) {
@@ -55,8 +64,8 @@ function setOn(v) {
 }
 
 window.addEventListener('keydown', (e) => {
-  if (e.code !== 'F3') return;
-  e.preventDefault(); // the browser's find bar
+  if (e.code !== 'Backquote') return;
+  e.preventDefault();
   if (e.repeat) return;
   if (e.shiftKey) {
     if (!on) setOn(true);
@@ -159,7 +168,9 @@ function readout() {
   let verdict;
   if (frame < 17.5 && hitches.length === 0) verdict = 'Smooth: holding the display rate';
   else if (frame < 17.5) verdict = 'Smooth, but hitching: look at what happens on those moments';
-  else if (gpu !== null && gpu > cpu) verdict = 'GPU-bound: pixels, shadows, overdraw';
+  // A GPU that's behind makes the CPU wait inside the render calls, so a
+  // big "render submit" with a big GPU time is the GPU, not draw calls
+  else if (gpu !== null && (gpu > cpu || gpu > frame * 0.5)) verdict = 'GPU-bound: pixels, shadows, overdraw';
   else if (gpu === null && cpu < frame * 0.6) verdict = 'Probably GPU-bound (no GPU timer in this browser)';
   else verdict = submit > logic ? 'CPU-bound: draw calls / scene submission' : 'CPU-bound: game logic (JS)';
 
@@ -173,6 +184,8 @@ function readout() {
     `Meshes ${k(c.meshes)} · instanced ${c.instanced} (${k(c.instances)}) · skinned ${c.skinned}`,
     `Infected alive ${alive.length} · near ${near}   pose every frame ${alive.filter((z) => (z.animEvery || 1) === 1).length} · thinned ${alive.filter((z) => z.animEvery > 1).length} · shadows ${alive.filter((z) => z.shadowOn !== false).length}`,
     `Memory geo ${mem.geometries} · tex ${mem.textures}${heap ? ` · heap ${Math.round(heap / 1048576)} MB` : ''}`,
+    `Graphics ${gfx.level} (${gfx.why}${rs.learned ? `; next load: ${rs.learned}` : ''})   MSAA ${gfx.antialias ? 'on' : 'off'}   ?gfx=low|high forces`,
+    `Device ${device}${/swiftshader|basic render|llvmpipe|software/i.test(device) ? '   ← SOFTWARE RENDERING: no GPU in use' : ''}`,
     `→ ${verdict}`,
   ].join('\n');
 }

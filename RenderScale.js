@@ -1,4 +1,5 @@
 import { renderer } from './Scene.js';
+import { gfx, rememberProfile } from './GraphicsProfile.js';
 
 /* ---------------------------------------------------------------------
    RENDER SCALE — how many pixels a frame draws. The pixel ratio is
@@ -10,17 +11,21 @@ import { renderer } from './Scene.js';
 --------------------------------------------------------------------- */
 
 export const MAX_PIXEL_RATIO = 1.5;
-const MIN_PIXEL_RATIO = 0.8;
+const MIN_PIXEL_RATIO = gfx.low ? 0.6 : 0.8; // a weak GPU may go further down
 const STEP = 0.1;
 const SLOW_MS = 20;        // median frame above this (under 50 fps): step down
 const SMOOTH_MS = 17.5;    // ...below this (at a 60 Hz display's rate): room to step up
 const WINDOW_S = 2;        // s of frames per decision
 const UP_AFTER_S = 6;      // smooth this long before trying a step up
 const HOLD_AFTER_FAIL_S = 30; // a step up that turned slow isn't retried for this long
+// Learning the profile for next time (GraphicsProfile.js): low that runs
+// smooth at full resolution this long moves up; high stuck slow at the
+// lowest resolution this long moves down
+const LEARN_UP_S = 60, LEARN_DOWN_S = 20;
 
 export const nativePixelRatio = () => Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
 
-let ratio = 0, last = 0, windowTime = 0, smoothTime = 0, holdTime = 0, raisedTo = 0;
+let ratio = 0, last = 0, windowTime = 0, smoothTime = 0, holdTime = 0, raisedTo = 0, learnTime = 0, learned = '';
 const frames = [];
 
 function setRatio(r) {
@@ -47,6 +52,7 @@ export function updateRenderScale() {
   frames.length = 0;
   windowTime = 0;
   const floor = Math.min(MIN_PIXEL_RATIO, top);
+  learnProfile(median, top, floor);
   if (median > SLOW_MS) {
     smoothTime = 0;
     if (raisedTo && ratio === raisedTo) holdTime = HOLD_AFTER_FAIL_S; // the last step up didn't fit
@@ -62,7 +68,16 @@ export function updateRenderScale() {
   } else smoothTime = 0;
 }
 
+function learnProfile(median, top, floor) {
+  if (gfx.forced || learned) return;
+  const roomy = gfx.low && ratio >= top && median < SMOOTH_MS;
+  const stuck = !gfx.low && ratio <= floor && median > SLOW_MS;
+  learnTime = roomy || stuck ? learnTime + WINDOW_S : 0;
+  if (roomy && learnTime >= LEARN_UP_S) { learned = 'high'; rememberProfile('high'); }
+  else if (stuck && learnTime >= LEARN_DOWN_S) { learned = 'low'; rememberProfile('low'); }
+}
+
 /** For the perf readout. */
 export function renderScaleInfo() {
-  return { ratio: ratio || renderer.getPixelRatio(), top: nativePixelRatio(), device: window.devicePixelRatio || 1 };
+  return { ratio: ratio || renderer.getPixelRatio(), top: nativePixelRatio(), device: window.devicePixelRatio || 1, learned };
 }

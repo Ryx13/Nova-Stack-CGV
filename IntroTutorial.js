@@ -11,6 +11,7 @@
 //      FPS camera rotation (Euler order 'YXZ'), which is the mathematically
 //      correct way to combine the two and matches this file's own
 //      sin(yaw)/cos(yaw) movement convention.
+import { gfx } from './GraphicsProfile.js';
 import * as THREE from 'three';
 import { updateLocomotion } from './Movement.js';
 import { createStoryAudio } from './StoryAudio.js';
@@ -45,7 +46,7 @@ export function startSafeRoomTutorial({ onComplete }) {
   const skip = document.createElement('button'); skip.textContent = 'Skip training';
   skip.style.cssText = 'position:absolute;right:20px;top:20px;pointer-events:auto';
   ui.root.appendChild(skip); skip.onclick = () => finish();
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: gfx.antialias });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); renderer.setSize(innerWidth, innerHeight); renderer.shadowMap.enabled = true;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   const scene = new THREE.Scene(); scene.background = new THREE.Color(0x071015); scene.fog = new THREE.Fog(0x071015, 8, 28);
