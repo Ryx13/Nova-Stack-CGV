@@ -40,6 +40,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { scene, renderer, lighting, addStaticBox, rowX, STREET_HALF_W } from './Scene.js';
 import { state } from './state.js';
 import { gfx } from './GraphicsProfile.js';
+import { perfCount } from './PerfHUD.js';
 import { SIDEWALK, layout } from './CityLayout.js';
 
 const STOREY = 3.2;
@@ -256,6 +257,7 @@ function placeProbe(playerPos) {
 }
 // Render the scene into the probe: all six faces, or just `face` (0-5)
 function renderProbe(face) {
+  perfCount.probeFaces += face === undefined ? 6 : 1;
   doorMesh.visible = false; // the glass mustn't reflect itself
   const autoShadows = renderer.shadowMap.autoUpdate;
   renderer.shadowMap.autoUpdate = false; // reuse this frame's shadow maps
@@ -281,8 +283,24 @@ function renderProbe(face) {
 let probeFace = -1; // spread captures: the next face to render, -1 between captures
 const mirrorPanes = [];   // static mirror glass: { x, y, z, sx, sy, sz }
 const displayPanes = [];  // see-through display windows, same shape
-// Every unbroken pane a bullet can crack (ImpactFX.js), same shape
+// Every unbroken pane a bullet can crack (ImpactFX.js), same shape plus
+// kind: 'window' (merged into its building), 'mirror' or 'display' (index:
+// its instance in the display-glass mesh, which a shatter can hide)
 export const glassPanes = [];
+let displayMesh = null;
+const _hide = new THREE.Matrix4().makeScale(0, 0, 0);
+/** A shattered display window: its glass is gone. */
+export function hideDisplayPane(index) {
+  if (!displayMesh) return;
+  displayMesh.setMatrixAt(index, _hide);
+  displayMesh.instanceMatrix.needsUpdate = true;
+}
+/** A restart: every display window glazed again. */
+export function restoreDisplayPanes() {
+  if (!displayMesh) return;
+  displayPanes.forEach((p, i) => displayMesh.setMatrixAt(i, _m4.compose(_p.set(p.x, p.y, p.z), _q, _s.set(p.sx, p.sy, p.sz))));
+  displayMesh.instanceMatrix.needsUpdate = true;
+}
 const slidingDoors = [];  // { x, y, z, alongZ: frontage axis, open }
 const DOOR_W = 0.9, DOOR_H = 2.4, DOOR_REACH = 3.5;
 let doorMesh = null;
@@ -309,6 +327,7 @@ function buildMirrorMesh() {
   displayPanes.forEach((p, i) => panes.setMatrixAt(i, _m4.compose(_p.set(p.x, p.y, p.z), _q, _s.set(p.sx, p.sy, p.sz))));
   panes.userData.dynamic = true;
   scene.add(panes);
+  displayMesh = panes;
 }
 /** Every frame (a level's tick): reflections, and doors opening for the player. */
 /** spreadFaces: capture one cube face a frame (six frames a capture) instead
@@ -354,12 +373,12 @@ class Builder {
   // Mirror glass and sliding doors on the facade (instanced, see above)
   mirrorFace(u, v, out, su, sv, sn) {
     mirrorPanes.push({ x: this.fx + this.side * out, y: v, z: this.zc + u, sx: sn, sy: sv, sz: su, side: this.side });
-    glassPanes.push(mirrorPanes[mirrorPanes.length - 1]);
+    glassPanes.push(Object.assign(mirrorPanes[mirrorPanes.length - 1], { kind: 'mirror' }));
   }
   // Window glass: a facade box, listed for bullets unless already smashed
   glass(u, v, out, su, sv, sn, material) {
     this.face(u, v, out, su, sv, sn, material);
-    if (material !== mat(BROKEN, { roughness: 1 })) glassPanes.push({ x: this.fx + this.side * out, y: v, z: this.zc + u, sx: sn, sy: sv, sz: su });
+    if (material !== mat(BROKEN, { roughness: 1 })) glassPanes.push({ x: this.fx + this.side * out, y: v, z: this.zc + u, sx: sn, sy: sv, sz: su, kind: 'window' });
   }
   slidingDoor(u) {
     slidingDoors.push({ x: this.fx + this.side * 0.06, y: DOOR_H / 2, z: this.zc + u, open: 0, side: this.side });
@@ -504,7 +523,7 @@ function displayCase(b, rnd, u, W, fill, night, dark) {
   b.face(u, 3.15, 0.3, W + 0.2, 0.12, 0.6, dark);                                // head
   for (const e of [-1, 1]) b.face(u + e * (W / 2 + 0.05), 1.85, 0.3, 0.1, 2.6, 0.6, dark);
   displayPanes.push({ x: b.fx + b.side * 0.58, y: 1.85, z: b.zc + u, sx: 0.03, sy: 2.5, sz: W });
-  glassPanes.push(displayPanes[displayPanes.length - 1]);
+  glassPanes.push(Object.assign(displayPanes[displayPanes.length - 1], { kind: 'display', index: displayPanes.length - 1 }));
   const at = (out) => b.fx + b.side * out;
   if (fill === 'mannequins') {
     const n = Math.max(1, Math.floor(W / 1.1));

@@ -31,6 +31,7 @@ import * as THREE from 'three';
 import { scene, renderer, sky, stars, starUniforms, rain, lighting, setSunDirection } from './Scene.js';
 import { state } from './state.js';
 import { gfx } from './GraphicsProfile.js';
+import { perfCount } from './PerfHUD.js';
 import { rainUniforms, fogUniforms } from './shaders.js';
 import { mistEnabled } from './HeightMist.js';
 
@@ -335,6 +336,7 @@ export function updateDayCycle(dt) {
   // Re-light sky-lit levels from the current sky every few seconds
   if (envScene && (envTimer -= dt) <= 0) {
     envTimer = SKY_REFRESH;
+    perfCount.skyRelights++;
     const pmrem = new THREE.PMREMGenerator(renderer);
     const previous = scene.environment;
     scene.environment = pmrem.fromScene(envScene, 0.04, 1, 1000).texture;
@@ -355,6 +357,7 @@ const nightSeas = [];
 let nightEnvScene = null, nightEnv = null, nightEnvTimer = 0;
 function captureNightSky() {
   nightEnvTimer = SKY_REFRESH;
+  perfCount.skyRelights++;
   if (!nightEnvScene) {
     nightEnvScene = new THREE.Scene();
     nightEnvScene.add(new THREE.Mesh(sky.geometry, sky.material));

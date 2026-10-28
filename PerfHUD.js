@@ -12,8 +12,12 @@ import { gfx } from './GraphicsProfile.js';
    into game logic and render submission, GPU time (WebGL timer queries,
    where the browser offers them), draw calls and triangles for the whole
    frame including shadow passes, render resolution, lights and shadow
-   casters, meshes by kind, infected, memory, and a one-line guess at the
-   bottleneck. Off, it costs nothing: every hook returns straight away.
+   casters, meshes by kind, infected, the extra renders (reflection-probe
+   faces, sky re-lights) per second, memory, and a one-line guess at the
+   bottleneck. Plus a session line since the readout was opened: average
+   FPS and the 1% low (the slowest 1% of frames: what stutter feels like),
+   so a before/after is one copy each. Off, it costs nothing: every hook
+   returns straight away.
 --------------------------------------------------------------------- */
 
 const REFRESH = 0.5;     // s between readout updates (averages over this)
@@ -28,6 +32,13 @@ let frameStart = 0, renderStart = 0, lastStart = 0, sinceRefresh = 0;
 const acc = { n: 0, interval: 0, worst: 0, logic: 0, submit: 0, gpu: 0, gpuN: 0, calls: 0, tris: 0 };
 const hitches = [];
 const _size = new THREE.Vector2();
+// Session: a histogram of frame times in 1 ms bins (the last bin holds
+// everything longer), so the 1% low never needs a sort of every frame
+const BINS = 250;
+const session = { start: 0, frames: 0, time: 0, hitches: 0, bins: new Uint32Array(BINS) };
+// Extra renders, counted by the code that does them (CityKit, DayCycle)
+export const perfCount = { probeFaces: 0, skyRelights: 0 };
+const countsAt = { probeFaces: 0, skyRelights: 0, t: 0 };
 
 function resetAcc() { for (const k in acc) acc[k] = 0; }
 
@@ -61,6 +72,10 @@ function setOn(v) {
   lastStart = 0;
   sinceRefresh = 0;
   resetAcc();
+  if (v) {
+    session.start = performance.now(); session.frames = session.time = session.hitches = 0; session.bins.fill(0);
+    Object.assign(countsAt, perfCount, { t: session.start });
+  }
 }
 
 window.addEventListener('keydown', (e) => {
@@ -102,8 +117,11 @@ export function perfFrameStart() {
     acc.n++;
     acc.interval += interval;
     acc.worst = Math.max(acc.worst, interval);
-    if (interval > HITCH_MS) hitches.push(now);
+    if (interval > HITCH_MS) { hitches.push(now); session.hitches++; }
     sinceRefresh += interval / 1000;
+    session.frames++;
+    session.time += interval;
+    session.bins[Math.min(BINS - 1, Math.floor(interval))]++;
   }
   lastStart = frameStart = renderStart = now;
   renderer.info.reset();
@@ -149,6 +167,14 @@ function census() {
   return c;
 }
 
+// The frame time the slowest 1% of the session's frames are at or over
+function onePercentLowMs() {
+  let left = Math.max(1, Math.ceil(session.frames * 0.01));
+  for (let b = BINS - 1; b >= 0; b--) if ((left -= session.bins[b]) <= 0) return b + 1;
+  return 1;
+}
+const clock = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+
 const k = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)} M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : `${Math.round(n)}`);
 
 function readout() {
@@ -162,6 +188,9 @@ function readout() {
   const alive = state.zombies.filter((z) => z.alive);
   const near = alive.filter((z) => z.mesh.position.distanceTo(camera.position) < NEAR_ZOMBIE).length;
   const mem = renderer.info.memory, heap = performance.memory?.usedJSHeapSize;
+  const span = Math.max(0.001, (now - countsAt.t) / 1000);
+  const probeRate = (perfCount.probeFaces - countsAt.probeFaces) / span, skyRate = (perfCount.skyRelights - countsAt.skyRelights) / span;
+  Object.assign(countsAt, perfCount, { t: now });
 
   // The guess: at the display's rate nothing's wrong; otherwise whichever
   // side, CPU or GPU, takes longer is what holds the frame back
@@ -183,9 +212,11 @@ function readout() {
     `Lights point ${c.point} · spot ${c.spot} · dir ${c.dir}   shadowed ${c.shadowLights} (${c.shadowPasses} passes, ${k(c.casters)} casters)`,
     `Meshes ${k(c.meshes)} · instanced ${c.instanced} (${k(c.instances)}) · skinned ${c.skinned}`,
     `Infected alive ${alive.length} · near ${near}   pose every frame ${alive.filter((z) => (z.animEvery || 1) === 1).length} · thinned ${alive.filter((z) => z.animEvery > 1).length} · shadows ${alive.filter((z) => z.shadowOn !== false).length}`,
+    `Extra renders/s  reflection faces ${probeRate.toFixed(1)} · sky re-lights ${skyRate.toFixed(2)}`,
     `Memory geo ${mem.geometries} · tex ${mem.textures}${heap ? ` · heap ${Math.round(heap / 1048576)} MB` : ''}`,
     `Graphics ${gfx.level} (${gfx.why}${rs.learned ? `; next load: ${rs.learned}` : ''})   MSAA ${gfx.antialias ? 'on' : 'off'}   ?gfx=low|high forces`,
     `Device ${device}${/swiftshader|basic render|llvmpipe|software/i.test(device) ? '   ← SOFTWARE RENDERING: no GPU in use' : ''}`,
     `→ ${verdict}`,
+    `Session ${clock(now - session.start)}   avg ${(1000 * session.frames / Math.max(1, session.time)).toFixed(0)} fps   1% low ${(1000 / onePercentLowMs()).toFixed(0)} fps   hitches ${session.hitches}`,
   ].join('\n');
 }
