@@ -87,6 +87,45 @@ function mat(hex, { emissive = 0, emissiveIntensity = 0, roughness = 0.88, metal
   return materials.get(key);
 }
 const signTextures = new Map();
+
+// A shop or hotel sign: lit at night. In a district with signsFlicker, that
+// share of the lit ones have a faulty tube: their own material (kept out of
+// the static merge), its glow stuttered by updateSignFlicker(). Math.random,
+// not the lot's rnd: the buildings stay the same.
+const flickeringSigns = [];
+function signMat(b, map, lit, intensity) {
+  if (!lit) return mat(0xffffff, { map });
+  if (Math.random() >= (b.D.signsFlicker || 0)) return mat(0xffffff, { map, emissive: 0xffffff, emissiveIntensity: intensity });
+  const m = new THREE.MeshStandardMaterial({
+    color: 0xffffff, roughness: 0.88, flatShading: true, map,
+    emissive: 0xffffff, emissiveMap: map, emissiveIntensity: intensity, envMapIntensity: 0.5,
+  });
+  b.dynamic.add(m);
+  flickeringSigns.push({ m, intensity, phase: 'on', t: 0.5 + Math.random() * 5, flick: 0, k: 1, stutterK: 1 });
+  return m;
+}
+/** Every frame (a level's tick): the faulty signs. Mostly on; every few
+    seconds a burst of rapid flicker that sometimes drops out for a moment.
+    Only emissiveIntensity changes, so nothing recompiles. */
+export function updateSignFlicker(dt) {
+  for (const f of flickeringSigns) {
+    f.t -= dt;
+    if (f.t <= 0) {
+      if (f.phase === 'on') { f.phase = 'stutter'; f.t = 0.3 + Math.random() * 1.2; }
+      else if (f.phase === 'stutter' && Math.random() < 0.35) { f.phase = 'off'; f.t = 0.3 + Math.random() * 1.5; }
+      else { f.phase = 'on'; f.t = 2 + Math.random() * 6; }
+    }
+    let k = f.phase === 'on' ? 1 : 0.05;
+    if (f.phase === 'stutter') {
+      f.flick -= dt;
+      if (f.flick <= 0) { f.flick = 0.03 + Math.random() * 0.12; f.stutterK = Math.random() < 0.5 ? 0.05 : 1; }
+      k = f.stutterK;
+    }
+    if (k === f.k) continue;
+    f.k = k;
+    f.m.emissiveIntensity = f.intensity * k;
+  }
+}
 function paw(g, x, y, r) {
   g.beginPath(); g.ellipse(x, y + r * 0.35, r, r * 0.8, 0, 0, Math.PI * 2); g.fill();
   for (const [dx, dy] of [[-0.95, -0.55], [-0.35, -1.05], [0.35, -1.05], [0.95, -0.55]]) {
@@ -268,6 +307,7 @@ function buildMirrorMesh() {
 /** spreadFaces: capture one cube face a frame (six frames a capture) instead
     of all six in one frame, so the cost never lands as a single spike. */
 export function updateCityKit(dt, playerPos, { spreadFaces = false } = {}) {
+  updateSignFlicker(dt);
   if (!mirrorPanes.length && !slidingDoors.length && !displayPanes.length) return;
   if (!doorMesh) buildMirrorMesh();
   if (probeFace >= 0) { renderProbe(probeFace); probeFace = probeFace < 5 ? probeFace + 1 : -1; }
@@ -295,7 +335,7 @@ export function updateCityKit(dt, playerPos, { spreadFaces = false } = {}) {
    distance in front of the facade plane (toward the street). */
 class Builder {
   // D: the district (DISTRICTS); walk: the sidewalk's width in front
-  constructor(facadeX, side, zc, D, walk) { this.fx = facadeX; this.side = side; this.zc = zc; this.D = D; this.walk = walk; this.parts = new Map(); }
+  constructor(facadeX, side, zc, D, walk) { this.fx = facadeX; this.side = side; this.zc = zc; this.D = D; this.walk = walk; this.parts = new Map(); this.dynamic = new Set(); }
   add(geo, material) {
     if (!this.parts.has(material)) this.parts.set(material, []);
     this.parts.get(material).push(geo);
@@ -322,6 +362,7 @@ class Builder {
       const mesh = new THREE.Mesh(mergeGeometries(mixed ? geos.map((g) => (g.index ? g.toNonIndexed() : g)) : geos), material);
       mesh.castShadow = shadows;
       mesh.receiveShadow = true;
+      if (this.dynamic.has(material)) mesh.userData.dynamic = true; // a flickering sign: stays its own mesh
       group.add(mesh);
       geos.forEach((g) => g.dispose());
     }
@@ -408,14 +449,15 @@ const DISTRICTS = {
     towers: true, // the tall lots get offices and hotels
     storeys: { walkup: (r) => rint(r, 4, 6), office: (r) => rint(r, 8, 13), apartment: (r) => rint(r, 5, 8), hotel: (r) => rint(r, 9, 12), corner: (r) => rint(r, 1, 2) },
     shops: { restaurant: 0.2, clothing: 0.13, garage: 0.13, mirror: 0.18, flowers: 0.07, plain: 0.29 },
-    litWindows: 0.2, broken: 0.1, litShops: 0.45, signsLit: 1,
+    litWindows: 0.2, broken: 0.1, litShops: 0.45, signsLit: 1, signsFlicker: 0,
   },
   harbour: {
     types: ['townhouse', 'townhouse', 'terrace', 'shophouse', 'shophouse', 'townhouse', 'harbourhotel'],
     storeys: { townhouse: (r) => rint(r, 2, 3), terrace: (r) => rint(r, 2, 3), shophouse: (r) => rint(r, 1, 2), warehouse: () => 2, harbourhotel: (r) => rint(r, 3, 4) },
     shops: { seafood: 0.28, pub: 0.17, sushi: 0.12, marine: 0.15, clothing: 0.07, mirror: 0.06, flowers: 0.05, boatyard: 0.05, plain: 0.05 },
     // The grid is dead: a few windows and shops lit by candles and generators
-    litWindows: 0.07, broken: 0.06, litShops: 0.25, signsLit: 0.2,
+    // Its signs stay on (the pubs and hotels run generators), some flickering
+    litWindows: 0.07, broken: 0.06, litShops: 0.25, signsLit: 1, signsFlicker: 0.3,
     warehousesSouthOf: -150, // toward the port the blocks are warehouses
   },
   // Level 3: the works round the quarantine compound on the headland
@@ -423,7 +465,7 @@ const DISTRICTS = {
     types: ['factory', 'factory', 'shed', 'shed', 'warehouse', 'plantoffice'],
     storeys: { factory: () => 2, shed: () => 1, warehouse: () => 2, plantoffice: (r) => rint(r, 3, 4) },
     shops: { works: 0.7, siteoffice: 0.3 },
-    litWindows: 0.08, broken: 0.05, litShops: 0.2, signsLit: 0.4,
+    litWindows: 0.08, broken: 0.05, litShops: 0.2, signsLit: 1, signsFlicker: 0.3,
   },
 };
 
@@ -628,7 +670,7 @@ function shopfront(b, rnd, fw, night, kind, far) {
   if (kind === 'lobby') return;
   const tex = signTexture(pick(rnd, shop.names), shop.sign || pick(rnd, SIGN_COLOURS), shop.icon);
   const signLit = night && rnd() < b.D.signsLit;
-  b.face(0, 3.75, 0.12, Math.min(fw - 0.6, 7), 0.85, 0.16, mat(0xffffff, { map: tex, emissive: signLit ? 0xffffff : 0, emissiveIntensity: signLit ? 0.5 : 0 }));
+  b.face(0, 3.75, 0.12, Math.min(fw - 0.6, 7), 0.85, 0.16, signMat(b, tex, signLit, 0.5));
   shop.extra?.(b, rnd, fw, night);
   if (shop.terrace && b.walk >= 2.6 && rnd() < 0.45) terrace(b, rnd, fw, night);
   if (!shop.noAwning && (shop.awning !== undefined || rnd() < (shop.front === 'garage' ? 0.2 : 0.7))) {
@@ -828,14 +870,14 @@ function buildOne(b, rnd, fw, depth, lotH, night, far, shopKind, minStoreys = 0)
   }
   if (type === 'harbourhotel' && !far) {
     const tex = signTexture(pick(rnd, ['SEAVIEW HOTEL', 'HARBOUR INN', 'THE MOORINGS']), ['#12304a', '#f4efe4']);
-    const lit = night && rnd() < 0.5;
-    b.face(0, H - 1.7, 0.1, Math.min(fw - 1, 7), 0.9, 0.12, mat(0xffffff, { map: tex, emissive: lit ? 0xffffff : 0, emissiveIntensity: lit ? 0.6 : 0 }));
+    if (night) rnd(); // was a 50/50 on the sign being lit: still drawn, so the picks after it don't change
+    b.face(0, H - 1.7, 0.1, Math.min(fw - 1, 7), 0.9, 0.12, signMat(b, tex, night, 0.6));
   }
   if (type === 'hotel') {
     // Vertical blade sign and an entrance canopy
     const tex = verticalSignTexture('HOTEL');
     b.add(new THREE.BoxGeometry(1.3, 7, 0.35).translate(b.fx + b.side * 0.75, H - 4.5, b.zc + fw / 2 - 1),
-      mat(0xffffff, { map: tex, emissive: night ? 0xffffff : 0, emissiveIntensity: night ? 0.9 : 0 }));
+      signMat(b, tex, night, 0.9));
     b.face(0, 3.4, 1.3, Math.min(fw - 1, 4), 0.2, 2.6, trim);
   }
   if (type === 'office' && rnd() < 0.6) {
@@ -887,13 +929,14 @@ export function mergeKitGroups(groups) {
     detail and no shadows, for the town past the edge. shops: SHOPS keys
     for the lot's buildings, in order (the rest are drawn at random).
     district: a DISTRICTS key (default: the level's, state.cityKit).
-    minStoreys: none of its buildings lower than this. */
+    minStoreys: none of its buildings lower than this. unlit: built as if by
+    day, no lit windows, shops or signs (a look-back street at night). */
 /** Every main-street lot built, { side, z0 (north edge), z1 }: CityTown.js
     fills a gap where the bridge needs a building to land on. */
 export const MAIN_LOTS = [];
-export function buildKitBuilding(x, z, w, h, d, { face, collider = true, far = false, shops, district, minStoreys = 0 } = {}) {
+export function buildKitBuilding(x, z, w, h, d, { face, collider = true, far = false, shops, district, minStoreys = 0, unlit = false } = {}) {
   const rnd = seeded(Math.round(x * 73.1) ^ Math.round(z * 131.7) ^ 0xC17E);
-  const night = state.timeOfDay === 'night';
+  const night = state.timeOfDay === 'night' && !unlit;
   const side = face ?? (x > 0 ? -1 : 1);
   const key = district || (DISTRICTS[state.cityKit] ? state.cityKit : 'downtown'), D = DISTRICTS[key];
   const walk = face === undefined ? rowX - STREET_HALF_W : SIDEWALK; // the main street's sidewalks are wider

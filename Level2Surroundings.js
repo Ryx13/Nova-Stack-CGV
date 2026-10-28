@@ -296,6 +296,9 @@ function buildBackCity() {
   const tileW = real ? FACADE_TILE_W : 4, tileH = real ? FACADE_TILE_H : 4;
   const VARIANTS = real ? 4 : windowTexVariants.length;
   const lit = { windows: [], rays: [] };
+  // At night only the tower nearest the start keeps its lit windows: each
+  // tower's are still drawn (same rnd() sequence), the rest thrown away
+  let nearestTower = null;
   let towers = 0;
   // Buckets per band (0 near: casts shadows, 1 far: doesn't) x facade variant
   const walls = [0, 1].map(() => Array.from({ length: VARIANTS }, bucket));
@@ -347,7 +350,11 @@ function buildBackCity() {
     planarFacadeUVs(geo, tileW, tileH);
     const l = 0.5 + rnd() * 0.25;
     tint.setHSL(0.06 + rnd() * 0.05, 0.1 + rnd() * 0.1, clearDay ? l : l * (night ? 0.45 : 0.7));
-    if (tower) addLitWindows(lit, { cx: x, cz: z, w, d, n: face, rnd, count: 2 + ((rnd() * 3) | 0), maxY: h - 1.5 });
+    if (tower) {
+      const own = { windows: [], rays: [] }, near = Math.hypot(x, z - 30);
+      addLitWindows(own, { cx: x, cz: z, w, d, n: face, rnd, count: 2 + ((rnd() * 3) | 0), maxY: h - 1.5 });
+      if (!nearestTower || near < nearestTower.near) nearestTower = { near, own };
+    }
     roofTint.setHSL(0.07, 0.05, 0.28 + rnd() * 0.1);
     const band = out < 70 ? 0 : 1;
     splitShell(geo, tint, roofTint, walls[band][(rnd() * VARIANTS) | 0], roofs[band]);
@@ -376,16 +383,18 @@ function buildBackCity() {
   // side where the depot yard was. Never in reach, so no colliders. With the
   // harbour town in, they're Level 1's own kit buildings (lighter detail),
   // merged by hand: they're built after the level's static merge.
+  // At night it's dark but for the front pair of blocks, nearest the start
   const level1Kit = [];
+  let front = true;
   const level1Block = (x, z, w, h, d, side) => {
-    if (state.cityKit && side) { level1Kit.push(buildKitBuilding(x, z, w, h, d, { collider: false, far: true, district: 'downtown' })); return; }
+    if (state.cityKit && side) { level1Kit.push(buildKitBuilding(x, z, w, h, d, { collider: false, far: true, district: 'downtown', unlit: !front })); return; }
     const geo = brokenBox(w, h + 1, d, 0, () => 0);
     geo.translate(x, -1, z);
     planarFacadeUVs(geo, tileW, tileH);
     const l = 0.55 + rnd() * 0.25;
     tint.setHSL(0.06 + rnd() * 0.05, 0.1 + rnd() * 0.1, clearDay ? l : l * (night ? 0.5 : 0.75));
     roofTint.setHSL(0.07, 0.05, 0.28 + rnd() * 0.1);
-    if (side && night && rnd() < 0.45) addLitWindows(lit, { cx: x, cz: z, w, d, n: new THREE.Vector3(-side, 0, 0), rnd, count: 2 + ((rnd() * 3) | 0), maxY: h - 1.5 });
+    if (side && night && rnd() < 0.45) addLitWindows(front ? lit : { windows: [], rays: [] }, { cx: x, cz: z, w, d, n: new THREE.Vector3(-side, 0, 0), rnd, count: 2 + ((rnd() * 3) | 0), maxY: h - 1.5 });
     const band = z < 120 ? 0 : 1;
     splitShell(geo, tint, roofTint, walls[band][(rnd() * VARIANTS) | 0], roofs[band]);
   };
@@ -394,6 +403,7 @@ function buildBackCity() {
     if (Math.abs(z - L1_DEPOT.z) > 16) level1Block(rowX + w / 2, z, w, h, d, 1);
     const ww = w * (0.85 + rnd() * 0.3), hh = h * (0.7 + rnd() * 0.4);
     level1Block(-rowX - ww / 2, z + 5, ww, hh, d, -1);
+    front = false;
   }
   if (level1Kit.length) mergeKitGroups(level1Kit);
   // The research annex closes the far end of the street, where it all began
@@ -427,6 +437,7 @@ function buildBackCity() {
     add(roofs[band], roofMat);
   });
   smokeSpots.forEach((p) => spawnFireEffect(p, 2.4));
+  if (nearestTower) { lit.windows.push(...nearestTower.own.windows); lit.rays.push(...nearestTower.own.rays); }
   addLitWindowMeshes(lit);
 }
 
@@ -481,13 +492,14 @@ function buildLevel1Backdrop() {
     scene.add(walk);
   }
 
-  // Streetlights, alternating sides every 24 m, arms over the road
+  // Streetlights, alternating sides every 24 m, arms over the road. At night
+  // only the front one, nearest the start, still burns
   const spots = [];
   for (let z = 64, s = 1; z < L1_STREET.z1 - 4; z += 24, s = -s) spots.push([s * (STREET_HALF_W + 0.8), z, s]);
   const pole = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.12, 0.16, 7, 6).translate(0, 3.5, 0),
     new THREE.MeshStandardMaterial({ color: 0x2a2d30, roughness: 0.7, metalness: 0.4 }), spots.length);
   const head = new THREE.InstancedMesh(new THREE.BoxGeometry(1.4, 0.22, 0.45).translate(-0.6, 7, 0),
-    new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffc070, emissiveIntensity: night ? 2.2 : 0.2 }), spots.length);
+    new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffc070, emissiveIntensity: night ? 0 : 0.2 }), spots.length);
   const m = new THREE.Object3D();
   spots.forEach(([x, z, s], i) => {
     m.position.set(x, 0, z); m.rotation.y = s > 0 ? 0 : Math.PI; m.updateMatrix();
@@ -496,7 +508,12 @@ function buildLevel1Backdrop() {
   scene.add(pole, head);
   const glowTex = glowTexture();
   if (night) {
-    const pts = new Float32Array(spots.flatMap(([x, z, s]) => [x - s * 1.2, 6.8, z]));
+    const lamp = new THREE.Mesh(head.geometry, new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xffc070, emissiveIntensity: 2.2 }));
+    head.getMatrixAt(0, lamp.matrix);
+    lamp.matrixAutoUpdate = false;
+    head.setMatrixAt(0, new THREE.Matrix4().makeScale(0, 0, 0)); // the lit head stands in for it
+    scene.add(lamp);
+    const pts = new Float32Array(spots.slice(0, 1).flatMap(([x, z, s]) => [x - s * 1.2, 6.8, z]));
     const geo = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(pts, 3));
     scene.add(new THREE.Points(geo, new THREE.PointsMaterial({
       map: glowTex, color: 0xffb066, size: 5, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -517,7 +534,7 @@ function buildLevel1Backdrop() {
     return mesh;
   };
   const extraction = beam(L1_EXTRACT, 0x33ff77, 2.4, 36, 0.5);
-  beam(L1_DEPOT, 0xffb347, 1.8, 28, 0.4);
+  if (!night) beam(L1_DEPOT, 0xffb347, 1.8, 28, 0.4); // at night only the nearer one, the extraction's
 
   // The gas over the lab: three slow, overlapping green clouds
   const gas = [0, 1, 2].map((i) => {

@@ -58,9 +58,10 @@ function buildAnnex(night) {
     unit.position.set(x, ANNEX.h + 1.2, z);
     g.add(unit);
   }
-  // Window bands across the front: dark glass, a few still lit (emergency power)
+  // Window bands across the front: dark glass, a faint glow by day. At night
+  // they're dark: the lights left are the door's, in front, and the sign
   const glass = new THREE.MeshStandardMaterial({
-    color: 0x10161a, roughness: 0.25, metalness: 0.3, emissive: 0x7fd8e8, emissiveIntensity: night ? 0.25 : 0.04,
+    color: 0x10161a, roughness: 0.25, metalness: 0.3, emissive: 0x7fd8e8, emissiveIntensity: night ? 0 : 0.04,
   });
   for (const y of [4.2, 9.2]) {
     const band = new THREE.Mesh(new THREE.BoxGeometry(ANNEX.w - 6, 1.6, 0.2), glass);

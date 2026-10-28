@@ -185,7 +185,9 @@ function buildFarShore(glowTex) {
     for (const l of lights) l.points.material.opacity = l.opacity * lit;
   };
 
-  // Lights: the lighthouse flashing, Harbour Walk's glow, windows along the waterfront and in the town
+  // Lights: the lighthouse flashing, Harbour Walk's glow, windows along the
+  // waterfront and in the town. At night the town is dark: only the
+  // lighthouse, the nearest light across the water, still burns.
   const night = state.timeOfDay === 'night';
   const points = (list, color, size, opacity, steady = true) => {
     const geo = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(list.flat()), 3));
@@ -199,13 +201,13 @@ function buildFarShore(glowTex) {
   const warnings = points([[-90, 18, SHORE - 8]], 0xfff0b0, 16, 0.95, false); // the lighthouse lamp
   const walk = [];
   for (let x = -14; x <= 14; x += 2) walk.push([x, 8 + 1.4 * (1 - (x / 14) ** 2), SHORE + 120]);
-  points(walk, 0x5fd8ff, night ? 5 : 3, night ? 0.8 : 0.2);           // Harbour Walk
+  if (!night) points(walk, 0x5fd8ff, 3, 0.2);                          // Harbour Walk
   const yard = [];
   for (let x = -160; x <= 160; x += 14 + rnd() * 10) yard.push([x, 4 + rnd() * 4, SHORE + 6 + rnd() * 6]);
-  points(yard, 0xffb066, night ? 7 : 4, night ? 0.6 : 0.15);
+  if (!night) points(yard, 0xffb066, 4, 0.15);
   const windows = [];
   for (let i = 0; i < 70; i++) windows.push([-300 + rnd() * 600, 6 + rnd() * 26, SHORE + 70 + rnd() * 60]);
-  points(windows, 0xffe2a8, 4, night ? 0.55 : 0.12);
+  if (!night) points(windows, 0xffe2a8, 4, 0.12);
   const warningsLit = () => 1 - THREE.MathUtils.smoothstep(scene.fog ? scene.fog.density : 0, 0.016, 0.034);
   return { warnings, shade, warningsLit };
 }

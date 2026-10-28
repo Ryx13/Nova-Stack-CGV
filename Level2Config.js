@@ -36,21 +36,21 @@ state.moonlitNight = true;
 // added lit window throws a shaft of light (loadBuildings / addLitWindows
 // in characters.js; the back city does the same in Level2Surroundings.js).
 state.deadGridNight = true;
-// Night: the grid is mostly dead. Of the 21 lamp posts only these 5
-// still have power (each one a SpotLight, the costliest thing in the
-// night shader), spread ~48 m apart down the street and alternating
-// sides, the last one by the port; the 3 with blink: true are faulty
-// and stutter. Every other post
-// stands dark — see makeStreetlight / updateBlinkingLamps in characters.js.
+// Night: the grid is mostly dead. Of the lamp posts only these 10 still
+// have power (each one a SpotLight, the costliest thing in the night
+// shader): 5 down the street, ~48 m apart on alternating sides, the last by
+// the port, and 5 in the harbour town. Five of them, picked at random each
+// play, are faulty and flicker. Every other post stands dark — see
+// makeStreetlight / updateBlinkingLamps in characters.js.
 state.liveStreetlights = [
   { side: -1, z: 24 },               // the spawn
-  { side: 1, z: -24, blink: true },
+  { side: 1, z: -24 },
   { side: -1, z: -72 },
-  { side: 1, z: -120, blink: true }, // edge of the collapse zone
-  { side: -1, z: -192, blink: true }, // the last post, by the quay
+  { side: 1, z: -120 },              // edge of the collapse zone
+  { side: -1, z: -192 },             // the last post, by the quay
   // The harbour town's (CityLayout.js harbour): Harbour Square, Gull Park
   // and the promenade either side of the quay
-  { side: 1, z: -116 }, { side: 1, z: -152, blink: true }, { side: -1, z: -172 },
+  { side: 1, z: -116 }, { side: 1, z: -152 }, { side: -1, z: -172 },
   { side: -1, z: -189 }, { side: 1, z: -189 },
 ];
 // The street is battle-damaged (broken tops, blown corners, shopfronts),

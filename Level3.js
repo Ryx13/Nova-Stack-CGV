@@ -40,7 +40,9 @@ import {
 import { state } from './state.js';
 import {
   makeBuilding, playerVis, playerBody, syncHandGun, Zombie, clampZombieX, viewmodelGun, knifeViewModel, registerLevelViewmodel,
+  updateBlinkingLamps,
 } from './characters.js';
+import { updateSignFlicker } from './CityKit.js';
 import { spawnHitSpark, spawnBlood, bootLevel, registerLevelTick, registerLevelPreTick, registerLevelPreparation, levelKeyHooks, damagePlayer, switchWeapon } from './Actions.js';
 import { buildCompoundDetails } from './Level3Environment.js';
 import {buildInteractionProp} from './Level3InteractionProps.js';
@@ -128,6 +130,7 @@ export function startLevel(mode) {
   };
   lv3.opening=createLevel3Intro({camera,state,playerVis,playerBody,syncHandGun,getGuardian:()=>lv3.preparedBoss?.guardian});
   registerLevelTick(updateLevel3Mission);
+  registerLevelTick((dt) => { updateBlinkingLamps(dt); updateSignFlicker(dt); }); // the faulty lamps, the works' flickering signs
 }
 
 let lv3 = null;

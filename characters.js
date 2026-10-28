@@ -1549,6 +1549,20 @@ export function makeBarrier(x, z, ry) {
 // overhead cables between neighbours
 export const streetlightSpots = [];
 
+// Of a level's lit lamps (state.liveStreetlights), this many flicker,
+// picked at random each play (Math.random, not rnd: the seeded layout
+// stays put)
+const FLICKERING_LAMPS = 5;
+let flickerPicks = null;
+function flickers(live) {
+  if (!flickerPicks) {
+    const list = [...state.liveStreetlights];
+    for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; }
+    flickerPicks = new Set(list.slice(0, FLICKERING_LAMPS));
+  }
+  return flickerPicks.has(live);
+}
+
 export function makeStreetlight(x, z) {
   streetlightSpots.push([x, z]);
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x2c2c2c, roughness: 0.55, metalness: 0.65 });
@@ -1563,10 +1577,11 @@ export function makeStreetlight(x, z) {
   // daylight: an unlit bulb, and none of the light, halo or cone below —
   // which also takes ~two dozen SpotLights off every lit pixel's bill.
   // A level can also keep only a few lamps powered (state.liveStreetlights,
-  // Level 2's dead grid): every post not on that list stands dark.
+  // at most ten a level): every post not on that list stands dark, and
+  // five of the lit ones, at random, are faulty and flicker.
   const live = state.liveStreetlights?.find((l) => l.side === Math.sign(x) && l.z === z);
   const lampOn = !(state.timeOfDay === 'day' && (state.clearDay || state.warmDay || state.dayLampsOff)) && (!state.liveStreetlights || !!live);
-  const blink = !!live?.blink;
+  const blink = lampOn && !!live && flickers(live);
   const lamp = new THREE.Mesh(
     new THREE.SphereGeometry(0.18, 8, 8),
     // A blinking bulb is flagged transparent purely to keep it out of the
@@ -1635,7 +1650,7 @@ export function makeStreetlight(x, z) {
   addObstacle(x, z, 0.35);
 }
 
-// Faulty lamps (a state.liveStreetlights entry with blink: true): mostly
+// Faulty lamps (five of state.liveStreetlights, see flickers()): mostly
 // on, but every few seconds the supply stutters — a burst of rapid
 // flicker that sometimes drops out for a second or two. Only intensity
 // and opacity change; the SpotLight never leaves the scene, so blinking

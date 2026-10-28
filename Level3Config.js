@@ -32,3 +32,7 @@ state.industrialDistrict = true;
 // By day the street lamps are off (characters.js makeStreetlight): the only
 // lights left are the three switch beacons and the tower console's
 state.dayLampsOff = true;
+// At night, 10 of the street's 20 posts are lit, one every 24 m on
+// alternating sides; five of them, picked at random each play, flicker
+state.liveStreetlights = [24, 0, -24, -48, -72, -96, -120, -144, -168, -192]
+  .map((z, i) => ({ side: i % 2 ? 1 : -1, z }));
