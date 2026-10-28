@@ -3,7 +3,7 @@ import {EnemyCrowd} from './EnemyCrowd.js';
 import { buildKitBuilding } from './CityKit.js';
 import { buildCityGround } from './CityGround.js';
 import { buildTown } from './CityTown.js';
-import { mainLotOpen, SIDEWALK as SIDEWALK_W, layout } from './CityLayout.js';
+import { mainLotOpen, SIDEWALK as SIDEWALK_W, layout, PLAY, inPlay } from './CityLayout.js';
 import { CircleGrid } from './SpatialGrid.js';
 import { asphaltRoughness } from './ContactShading.js';
 import { streetlightBeamMaterial } from './survivor.js';
@@ -15,15 +15,16 @@ import { state } from './state.js';
 import {
   scene, world, camera, dom, sfx, registerStreetLight, acquireEffectLight, releaseEffectLight,
   addStaticBox, addObstacle, pushKillFeed, flashDamage, markLoaded, updateObjectiveHUD,
-  STREET_HALF_W, STREET_LENGTH, KILL_TARGET, ZOMBIE_MAX_ALIVE, DEPOT_POS, WEST_POCKET_Z, rowX,
+  STREET_HALF_W, STREET_LENGTH, KILL_TARGET, ZOMBIE_MAX_ALIVE, DEPOT_POS, WEST_POCKET_Z, rowX, WORLD_BOUND_X,
   matPlayer, matChassis,
   addLight,
 } from './Scene.js';
 import { spawnPickup, spawnCoin, registerKillstreak } from './PowerUps.js';
-import { damagePlayer, spawnHitSpark, spawnBlood } from './Actions.js';
-import { spawnRunOverSplash, placeBloodSplat } from './ImpactFX.js';
+import { damagePlayer, spawnHitSpark, spawnBlood, monitorBite } from './Actions.js';
+import { spawnRunOverSplash, placeBloodSplat, spawnBloodSpray } from './ImpactFX.js';
 import { loadCitizenTemplates, ORIGINAL_WEIGHT, CRAWLER_CHANCE, GAITS } from './Citizens.js';
 import { doorways } from './CityKit.js';
+import { setNavBlocker, createNavigator, navGoal, navActive } from './ZombieNav.js';
 import { createFireMaterial, createToxicMaterial } from './shaders.js';
 import { getSelectedCharacter, instantiateCharacter, clipsFor, boneByName } from './roster.js';
 
@@ -2793,8 +2794,12 @@ export function avoidObstacles(pos, move, extra = []) {
   // on every call (once per zombie per frame). Looping the two lists back
   // to back does the same job with zero extra allocation.
   const nearby = avoidanceGrid.query(state.obstacles, pos.x, pos.z);
+  // In the city levels a building's circle (as wide as the building) would
+  // hold them off its front and its doors; its solid box does that job now
+  const skipBig = navActive();
   for (let i = 0; i < nearby.length; i++) {
     const o = nearby[i];
+    if (skipBig && o.r > 2.5) continue;
     const dx = pos.x - o.x, dz = pos.z - o.z;
     const d = Math.hypot(dx, dz) || 0.0001;
     const minD = o.r + 0.55;
@@ -2821,6 +2826,10 @@ export function avoidObstacles(pos, move, extra = []) {
 }
 
 export function clampZombieX(x, z) {
+  // The city levels: anywhere in the town. They collide with its buildings
+  // now (resolveZombieSolids) and go round them (ZombieNav.js), so the old
+  // hold on the main street would only keep them from following you
+  if (navActive()) return THREE.MathUtils.clamp(x, PLAY.x0 + 0.5, PLAY.x1 - 0.5);
   if (Math.abs(z - DEPOT_POS.z) < 18) return x;
   if (Math.abs(z - WEST_POCKET_Z) < 14) return x;
   return THREE.MathUtils.clamp(x, -STREET_HALF_W - 2.5, STREET_HALF_W + 2.5);
@@ -3066,6 +3075,8 @@ export function loadDeferredAssets() {
   pendingWreckModels.splice(0).forEach(showWreckModel);
 }
 
+const HITBOX_GEOMETRY = new THREE.CapsuleGeometry(0.35, 1.0, 4, 8);
+const HITBOX_MATERIAL = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
 export class Zombie {
   // opts.template: a specific loaded template (see zombieTemplateFor)
   constructor(pos, opts = {}) {
@@ -3139,10 +3150,10 @@ export class Zombie {
       this.mesh.add(built.group);
       this.limbs = built;
     }
-    const hitbox = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.35, 1.0, 4, 8),
-      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide })
-    );
+    // One shape and material shared by every zombie's hitbox: a fresh pair
+    // each was never freed when the zombie went (remove()), so GPU memory
+    // grew with every spawn
+    const hitbox = new THREE.Mesh(HITBOX_GEOMETRY, HITBOX_MATERIAL);
     hitbox.position.y = 1.0;
     hitbox.userData.owner = this;
     this.hitbox = hitbox;
@@ -3185,6 +3196,15 @@ export class Zombie {
     this.alive = true;
     // Some street citizens have lost the use of their legs
     if (this.clips?.crawl && template.from === 'street' && !template.runs && Math.random() < CRAWLER_CHANCE) this.makeCrawler();
+  }
+  // The way to head for target: straight, or along the street map round
+  // whatever's in the way (ZombieNav.js; the city levels)
+  navToward(target, dt) {
+    const p = this.mesh.position;
+    if (!navActive()) return new THREE.Vector3(target.x - p.x, 0, target.z - p.z).normalize();
+    this.nav ||= createNavigator();
+    const g = navGoal(this.nav, p, target, dt);
+    return new THREE.Vector3(g.x - p.x, 0, g.z - p.z).normalize();
   }
   // Drags itself along: slow, low, and hit low (the shot capsule, the
   // hitbox and the headshot line all come down with it)
@@ -3336,7 +3356,7 @@ export class Zombie {
     if (this.state === 'chase') {
       const move = this.crowd?.eligible
         ? new THREE.Vector3(this.crowd.targetX-this.mesh.position.x,0,this.crowd.targetZ-this.mesh.position.z).normalize()
-        : toPlayer.clone().normalize();
+        : this.navToward(playerPos, dt); // straight at you, or round the walls
       if(this.crowd?.eligible&&!this.crowd.mayAttack&&dist<3.2){
         // Waiting attackers go around the inner combat space, not through it.
         const radial=toPlayer.clone().multiplyScalar(-1/Math.max(.001,dist));
@@ -3395,11 +3415,15 @@ export class Zombie {
       if (this.attackCooldown <= 0 && !state.inVehicle && (!this.crowd || this.crowd.mayAttack)) {
         this.attackCooldown = 0.95;
         if (!state.shieldActive) {
+          // A bite, not a shove: it holds where it is and eats; the blood
+          // comes off you away from it. Getting away is up to you (no
+          // knockback, nothing holding you): run, and it chases again.
           damagePlayer((8 + Math.random() * 5) * state.zombieDamageMul);
           flashDamage();
-          const push = toPlayer.clone().normalize().multiplyScalar(0.12);
-          playerBody.position.x += push.x;
-          playerBody.position.z += push.z;
+          monitorBite();
+          _biteDir.copy(toPlayer).normalize();
+          _biteAt.copy(playerPos).setY(playerPos.y + 0.2).addScaledVector(_biteDir, -0.2);
+          spawnBloodSpray(_biteAt, _biteDir, Math.random() < 0.3, playerPos.y - playerHeight / 2 - 0.25); // the floor under you
         }
       }
     } else {
@@ -3630,7 +3654,79 @@ function runOver(z, speed) {
   if (!z.alive) pushKillFeed('Run over');
   else z.mesh.position.add(_shove.subVectors(z.mesh.position, chassisBody.position).setY(0).normalize().multiplyScalar(0.8 + speed * 0.12));
 }
+/* NOBODY WALKS THROUGH ANYBODY — every body is solid: the infected shoulder
+   each other aside rather than merging, part round the girl, and you're
+   stopped at their bodies, and at hers, rather than walking through. Bodies
+   are circles at the hips (where they're drawn), BODY_PUSHES passes a frame.
+   The lying (downed) and those still walking out of a doorway are left out.
+   The infected already stop just short of you (MIN_DISTANCE), so they hem
+   you in without shoving you about. Runs before the walls, which have the
+   last word (resolveZombieSolids). */
+const _biteDir = new THREE.Vector3(), _biteAt = new THREE.Vector3();
+const PLAYER_BODY_R = 0.32, GIRL_BODY_R = 0.3, BODY_PUSHES = 2;
+const bodies = [];
+const solidBody = (z) => z.alive && z instanceof Zombie && !z.emerge && z.state !== 'downed';
+const bodyRadius = (z) => ZOMBIE_BODY_R * Math.max(1, z.mesh.scale.x) * (z.runs ? RUNNER_BODY_SCALE : 1);
+function separateBodies() {
+  bodies.length = 0;
+  for (const z of state.zombies) {
+    if (!solidBody(z)) continue;
+    const pos = z.mesh.position;
+    if (z.hipBone) z.hipBone.getWorldPosition(_body); else _body.copy(pos);
+    bodies.push({ z, x: _body.x, zz: _body.z, ox: _body.x - pos.x, oz: _body.z - pos.z, r: bodyRadius(z) });
+  }
+  const girl = state.girlPos;
+  for (let pass = 0; pass < BODY_PUSHES; pass++) {
+    for (let i = 0; i < bodies.length; i++) {
+      const a = bodies[i];
+      for (let k = i + 1; k < bodies.length; k++) {
+        const b = bodies[k], dx = b.x - a.x, dz = b.zz - a.zz, min = a.r + b.r, d2 = dx * dx + dz * dz;
+        if (d2 >= min * min) continue;
+        const d = Math.sqrt(d2) || 1e-4, push = (min - d) / 2, nx = d2 ? dx / d : 1, nz = d2 ? dz / d : 0;
+        a.x -= nx * push; a.zz -= nz * push;
+        b.x += nx * push; b.zz += nz * push;
+      }
+      // The girl holds her line; they part round her
+      if (girl) {
+        const dx = a.x - girl.x, dz = a.zz - girl.z, min = a.r + GIRL_BODY_R, d2 = dx * dx + dz * dz;
+        if (d2 < min * min) { const d = Math.sqrt(d2) || 1e-4; a.x += (dx / d) * (min - d); a.zz += (dz / d) * (min - d); }
+      }
+    }
+  }
+  for (const b of bodies) { b.z.mesh.position.x = b.x - b.ox; b.z.mesh.position.z = b.zz - b.oz; }
+  // And you can't walk through them, or her
+  if (state.inVehicle || state.isDead || state.dying) return;
+  for (const b of bodies) pushPlayerFrom(b.x, b.zz, b.r);
+  if (girl) pushPlayerFrom(girl.x, girl.z, GIRL_BODY_R);
+}
+/** Keeps the player out of a body of radius r at (x, z): they're stopped
+    at it rather than walking through. */
+export function pushPlayerFrom(x, z, r) {
+  const p = playerBody.position, dx = p.x - x, dz = p.z - z, min = r + PLAYER_BODY_R, d2 = dx * dx + dz * dz;
+  if (d2 >= min * min) return;
+  const d = Math.sqrt(d2) || 1e-4, nx = d2 ? dx / d : 1, nz = d2 ? dz / d : 0;
+  p.x = x + nx * min;
+  p.z = z + nz * min;
+  // No speed left going into it
+  const into = playerBody.velocity.x * nx + playerBody.velocity.z * nz;
+  if (into < 0) { playerBody.velocity.x -= into * nx; playerBody.velocity.z -= into * nz; }
+}
+/** Pushes a body of radius r at pos out of the infected and the girl (for
+    other walkers: Level 2's lions). */
+export function pushOutOfBodies(pos, r) {
+  for (const b of bodies) {
+    const dx = pos.x - b.x, dz = pos.z - b.zz, min = r + b.r, d2 = dx * dx + dz * dz;
+    if (d2 < min * min) { const d = Math.sqrt(d2) || 1e-4; pos.x += (dx / d) * (min - d); pos.z += (dz / d) * (min - d); }
+  }
+  const girl = state.girlPos;
+  if (girl) {
+    const dx = pos.x - girl.x, dz = pos.z - girl.z, min = r + GIRL_BODY_R, d2 = dx * dx + dz * dz;
+    if (d2 < min * min) { const d = Math.sqrt(d2) || 1e-4; pos.x += (dx / d) * (min - d); pos.z += (dz / d) * (min - d); }
+  }
+}
+
 function resolveZombieSolids() {
+  separateBodies();
   refreshZombieSolids();
   const car = chassisBody && !state.skipCar ? solidBox(chassisBody, _solidZero, CAR_HALF_X, CAR_HALF_Z, _carSolid) : null;
   const speed = car && state.inVehicle ? chassisBody.velocity.length() : 0;
@@ -3657,6 +3753,35 @@ function resolveZombieSolids() {
 /** Pushes a body of radius r at pos out of every solid near it (the same
     boxes the infected and the player collide with): for other walkers,
     such as Level 2's escaped zoo animals. */
+/* Whether a solid stands between two points, for a walker NAV_R wide: the
+   street map's test (ZombieNav.js), against the boxes the infected collide
+   with, each grown by the walker's half-width (slab test in its own frame). */
+const NAV_R = 0.3;
+function segmentBlocked(ax, az, bx, bz) {
+  refreshZombieSolids();
+  const dx = bx - ax, dz = bz - az, len2 = dx * dx + dz * dz || 1e-6;
+  for (const b of zombieSolids) {
+    // Nowhere near the segment: skip
+    const t = THREE.MathUtils.clamp(((b.x - ax) * dx + (b.z - az) * dz) / len2, 0, 1);
+    const cx = ax + dx * t - b.x, cz = az + dz * t - b.z;
+    if (cx * cx + cz * cz > b.r * b.r) continue;
+    const p0x = b.c * (ax - b.x) - b.s * (az - b.z), p0z = b.s * (ax - b.x) + b.c * (az - b.z);
+    const ex = b.c * dx - b.s * dz, ez = b.s * dx + b.c * dz;
+    const hx = b.hx + NAV_R, hz = b.hz + NAV_R;
+    let t0 = 0, t1 = 1;
+    for (const [p, e, half] of [[p0x, ex, hx], [p0z, ez, hz]]) {
+      if (Math.abs(e) < 1e-9) { if (Math.abs(p) > half) { t0 = 2; break; } continue; }
+      let u0 = (-half - p) / e, u1 = (half - p) / e;
+      if (u0 > u1) [u0, u1] = [u1, u0];
+      t0 = Math.max(t0, u0); t1 = Math.min(t1, u1);
+      if (t0 > t1) break;
+    }
+    if (t0 <= t1) return true;
+  }
+  return false;
+}
+setNavBlocker(segmentBlocked);
+
 /** A solid has moved (Level 2's radar machine): read the boxes afresh. */
 export function solidsMoved() { zombieSolidCount = -1; }
 
@@ -3745,12 +3870,13 @@ function spawnPlaces(around) {
     return d > SPAWN_NEAR && d < SPAWN_FAR && around.z - z > -12;
   };
   const add = (x, z, outward, kind, extra) => {
-    if (inReach(x, z)) places.push({ x, z, facing: Math.atan2(outward, 0), kind, key: `${kind}:${x.toFixed(1)}:${z.toFixed(1)}`, ...extra });
+    if (inReach(x, z) && (!navActive() || inPlay(x, z, 0.8))) places.push({ x, z, facing: Math.atan2(outward, 0), kind, key: `${kind}:${x.toFixed(1)}:${z.toFixed(1)}`, ...extra });
   };
   // Out of a doorway on the main street's frontage: from just inside it,
   // walking out through the door into the street
   for (const d of doorways) {
-    if (Math.abs(d.x) > STREET_HALF_W + SIDEWALK_W + 1) continue;
+    // Only the main street's in the other levels (Level 3 holds them to it)
+    if (!navActive() && Math.abs(d.x) > rowX + 1) continue;
     add(d.x - d.side * EMERGE_IN, d.z, d.side, 'door', { emerge: d.side });
   }
   const main = layout().main;
@@ -3762,11 +3888,23 @@ function spawnPlaces(around) {
   for (const o of main.open || []) {
     for (let z = o.z0 - SPAWN_STEP / 2; z > o.z1; z -= SPAWN_STEP) add(o.side * (STREET_HALF_W + 2.3), z, -o.side, 'park');
   }
-  // Along a sidewalk, only where you can't see it happen
+  // Along a sidewalk, only where you can't see it happen: the main street's,
+  // and in the city levels the back streets' too
   for (let z = main.zN; z > main.zS; z -= SPAWN_STEP) {
     for (const side of [-1, 1]) {
       const x = side * (STREET_HALF_W + 1);
       if (!inView(x, z)) add(x, z, -side, 'unseen');
+    }
+  }
+  if (navActive()) {
+    for (const st of layout().backStreets) {
+      if (st.far) continue;
+      for (let z = st.z0 - SPAWN_STEP / 2; z > st.z1; z -= SPAWN_STEP) {
+        for (const side of [-1, 1]) {
+          const x = st.x + side * (st.halfW + 1.2);
+          if (!inView(x, z)) add(x, z, -side, 'unseen');
+        }
+      }
     }
   }
   return places;
@@ -3795,11 +3933,40 @@ function pickSpawnPlace(around, template) {
 const OPENING_SPOTS = [[-11.2, -14], [11.2, -19], [-11.2, -25], [11.2, -31], [-11.2, -37], [11.2, -44], [-11.2, -51], [11.2, -58]];
 const OPENING_WAIT_MS = 5000, OPENING_WAIT_LIGHT_MS = 9000; // a light boot starts citizens late
 let citizensLoading = null;
+/* THE BACK STREETS' OWN — the streets off the main road aren't empty:
+   infected already out along the back streets and the cross streets when a
+   city level starts, wandering until you come near, then coming for you
+   (ZombieNav.js gets them round the buildings). Fixed spots, every
+   RESIDENT_EVERY m down each side of each back street and halfway along
+   each cross street, as many as the difficulty allows (zombieCountMul).
+   Residents of their streets: they don't count against the spawner's cap
+   or the kill target's pacing. */
+const RESIDENT_EVERY = 30, RESIDENTS_MAX = 12;
+function spawnResidents() {
+  if (!navActive()) return;
+  const L = layout(), spots = [];
+  for (const st of L.backStreets) {
+    if (st.far) continue;
+    let k = 0;
+    for (let z = st.z0 - 14; z > st.z1 + 10; z -= RESIDENT_EVERY) spots.push([st.x + (k++ % 2 ? 1 : -1) * (st.halfW + 1.2), z]);
+  }
+  for (const c of L.crossStreets) if (!c.main) spots.push([(c.x0 + c.x1) / 2, c.z + 1]);
+  for (let i = spots.length - 1; i >= 0; i--) if (!inPlay(spots[i][0], spots[i][1], 1)) spots.splice(i, 1); // past the edge
+  const n = Math.min(spots.length, Math.round(RESIDENTS_MAX * state.zombieCountMul));
+  for (let i = 0; i < n; i++) {
+    const [x, z] = spots[Math.floor(i * spots.length / n)]; // spread down every street
+    const zom = new Zombie(new THREE.Vector3(x, 0, z), { template: pickZombieTemplate() });
+    zom.resident = true;
+    zom.mesh.rotation.y = (i * 2.4) % (Math.PI * 2);
+    state.zombies.push(zom);
+  }
+}
 function spawnOpeningCrowd() {
   if (state.levelId === 3) {
     for (let i = 0, n = Math.round(6 * state.zombieCountMul); i < n; i++) spawnZombie();
     return;
   }
+  spawnResidents();
   const start = playerBody.position;
   for (const [x, dz] of OPENING_SPOTS.slice(0, Math.round(OPENING_SPOTS.length * state.zombieCountMul))) {
     const z = start.z + dz;
@@ -3820,7 +3987,10 @@ function openingCrowdWhenReady() {
   Promise.race([loaded, new Promise((r) => setTimeout(r, wait))]).then(spawnOpeningCrowd);
 }
 export function spawnZombie() {
-  if (state.zombies.length >= Math.round(ZOMBIE_MAX_ALIVE * state.zombieCountMul) || state.spawnedTotal >= KILL_TARGET + 10) return;
+  // The back streets' residents are theirs, not the spawner's (spawnResidents)
+  let spawned = 0;
+  for (const z of state.zombies) if (!z.resident) spawned++;
+  if (spawned >= Math.round(ZOMBIE_MAX_ALIVE * state.zombieCountMul) || state.spawnedTotal >= KILL_TARGET + 10) return;
   const around = playerVis.group.position;
   const template = pickZombieTemplate();
   const place = pickSpawnPlace(around, template);

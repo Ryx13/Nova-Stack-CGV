@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { installHeightMist, mistEnabled } from './HeightMist.js';
 import * as CANNON from 'cannon-es';
 import { state } from './state.js';
+import { PLAY } from './CityLayout.js';
 import { gfx } from './GraphicsProfile.js';
 import {levelWeapon} from './WeaponSlots.js';
 import { finishRun } from './account.js';
@@ -13,6 +14,7 @@ import {
 } from './shaders.js';
 installHeightMist(fogUniforms);
 import { isMuted, onSoundChange } from './Music.js'; // master mute, shared with the music decks
+import { settings, onSettingsChange } from './Settings.js'; // the pause menu's volume
 
 /* ======================================================================
    Scene.js — RENDERER / SCENE / CAMERA / PHYSICS WORLD / HUD
@@ -93,7 +95,7 @@ export const sfx = {
     const AC = window.AudioContext || window.webkitAudioContext;
     this.ctx = new AC();
     this.master = this.ctx.createGain();
-    this.master.gain.value = isMuted() ? 0 : SFX_GAIN;
+    this.master.gain.value = isMuted() ? 0 : SFX_GAIN * settings.volume;
     this.master.connect(this.ctx.destination);
     this.engineOsc = this.ctx.createOscillator();
     this.engineOsc.type = 'sawtooth';
@@ -166,7 +168,12 @@ export const sfx = {
 // adjust; init() itself reads isMuted() for the starting value.
 onSoundChange((m) => {
   if (!sfx.ctx) return;
-  sfx.master.gain.setTargetAtTime(m ? 0 : SFX_GAIN, sfx.ctx.currentTime, 0.05);
+  sfx.master.gain.setTargetAtTime(m ? 0 : SFX_GAIN * settings.volume, sfx.ctx.currentTime, 0.05);
+});
+// And the volume slider (Settings.js), under the mute
+onSettingsChange((s) => {
+  if (!sfx.ctx || isMuted()) return;
+  sfx.master.gain.setTargetAtTime(SFX_GAIN * s.volume, sfx.ctx.currentTime, 0.05);
 });
 
 /* ---------------------------------------------------------------------
@@ -947,7 +954,9 @@ export const rowX = STREET_HALF_W + 6.4;
 
 export function loadWorldBounds() {
   addStaticBox(2, 10, STREET_LENGTH / 2 + 10, -WORLD_BOUND_X, 10, -STREET_LENGTH / 2 + 20);
-  addStaticBox(2, 10, STREET_LENGTH / 2 + 10, WORLD_BOUND_X, 10, -STREET_LENGTH / 2 + 20);
+  // The city levels: the east wall a little further out, so the east back
+  // street's far pavement is walkable up to its shopfronts (CityLayout PLAY)
+  addStaticBox(2, 10, STREET_LENGTH / 2 + 10, state.cityKit ? PLAY.x1 + 2 : WORLD_BOUND_X, 10, -STREET_LENGTH / 2 + 20);
   addStaticBox(WORLD_BOUND_X, 10, 2, 0, 10, 40);
   addStaticBox(WORLD_BOUND_X, 10, 2, 0, 10, -STREET_LENGTH + 10);
 }

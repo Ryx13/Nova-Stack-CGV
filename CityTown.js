@@ -23,7 +23,7 @@ import { state } from './state.js';
 import { makeStreetlight } from './characters.js';
 import { buildKitBuilding, FEATURE_SPOTS, MAIN_LOTS } from './CityKit.js';
 import { treePits } from './CityGround.js';
-import { BOUNDS, SIDEWALK as SIDEWALK_W, layout, lotBlocked } from './CityLayout.js';
+import { BOUNDS, PLAY, SIDEWALK as SIDEWALK_W, layout, lotBlocked } from './CityLayout.js';
 
 function seeded(a) {
   return () => {
@@ -625,6 +625,55 @@ function buildBridge(B) {
   FEATURE_SPOTS.bridge = { group, z: B.z, deckY: B.deckY, span: 2 * half };
 }
 
+/* --- Road closed -------------------------------------------------------------
+   Where a street carries on past the edge you can walk to (CityLayout PLAY:
+   the boundary walls), a barricade across it, so it reads as closed rather
+   than open road you mysteriously can't go down: concrete barriers with
+   red and white tops, and a ROAD CLOSED sign facing back into town. Across
+   the cross streets that run off east and west, the back streets' and the
+   main street's north ends, and anything that runs off the south. */
+function barricade(batch, x0, z0, x1, z1, facing) {
+  const concrete = flat(0x9a968e), stripe = flat(0xc83a2a), white = flat(0xeeeae2);
+  const len = Math.hypot(x1 - x0, z1 - z0), ux = (x1 - x0) / len, uz = (z1 - z0) / len, yaw = Math.atan2(ux, uz);
+  for (let t = 0.1; t < len - 1.9; t += 2.15) {
+    const cx = x0 + ux * (t + 1), cz = z0 + uz * (t + 1);
+    batch.add(concrete, new THREE.BoxGeometry(0.62, 0.32, 2).rotateY(yaw).translate(cx, 0.16, cz));
+    batch.add(concrete, new THREE.BoxGeometry(0.26, 0.5, 2).rotateY(yaw).translate(cx, 0.57, cz));
+    batch.add(Math.round(t / 2.15) % 2 ? stripe : white, new THREE.BoxGeometry(0.28, 0.12, 2).rotateY(yaw).translate(cx, 0.86, cz));
+  }
+  // The sign in the middle, on two posts, facing into town
+  const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
+  for (const e of [-1, 1]) batch.add(flat(0x3a3c3e), new THREE.BoxGeometry(0.08, 1.8, 0.08).translate(mx + ux * e * 0.9, 0.9, mz + uz * e * 0.9));
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.7), zooSign('ROAD CLOSED', '#b8221a', '#f4f0e8'));
+  sign.position.set(mx, 1.75, mz);
+  sign.rotation.y = facing;
+  scene.add(sign);
+}
+function buildRoadClosures(batch, L) {
+  const E = PLAY.x1 - 0.7, W = PLAY.x0 + 0.7, N = PLAY.zN - 0.7, S = PLAY.zS + 0.7;
+  for (const c of L.crossStreets) {
+    if (c.z >= PLAY.zN || c.z <= PLAY.zS) continue; // wholly past the north or south edge: the streets into it are closed instead
+    const w = c.halfW + 1;
+    if (Math.max(c.x0, c.x1) > PLAY.x1) barricade(batch, E, c.z - w, E, c.z + w, -Math.PI / 2);
+    if (Math.min(c.x0, c.x1) < PLAY.x0) barricade(batch, W, c.z - w, W, c.z + w, Math.PI / 2);
+  }
+  for (const st of L.backStreets) {
+    if (st.far || st.x - st.halfW > PLAY.x1 || st.x + st.halfW < PLAY.x0) continue;
+    const xa = Math.max(PLAY.x0 + 0.3, st.x - st.halfW - SIDEWALK_W), xb = Math.min(PLAY.x1 - 0.3, st.x + st.halfW + SIDEWALK_W);
+    if (st.z0 > PLAY.zN) barricade(batch, xa, N, xb, N, Math.PI);
+    if (st.z1 < PLAY.zS) barricade(batch, xa, S, xb, S, 0);
+  }
+  if (L.main.zN > PLAY.zN) barricade(batch, -rowX, N, rowX, N, Math.PI); // the main street north (a low line: Level 1's lab still shows over it)
+  if (L.main.zS < PLAY.zS) barricade(batch, -rowX, S, rowX, S, 0);          // and south (Level 1: past extraction)
+  // The harbour's beaches run down past the south edge either side of the
+  // quay (the pier between them stays clear: the boat leaves from it)
+  for (const strip of L.promenade?.strips || []) {
+    if ((L.promenade.beachTo ?? L.promenade.z1) >= PLAY.zS) continue;
+    const xa = Math.max(Math.min(strip.x0, strip.x1), PLAY.x0 + 0.3), xb = Math.min(Math.max(strip.x0, strip.x1), PLAY.x1 - 0.3);
+    if (xb - xa > 2) barricade(batch, xa, S, xb, S, 0);
+  }
+}
+
 /* --- Lamps ---------------------------------------------------------------- */
 // Back-street posts sit on the kerb away from the main street, so their
 // arms (which always reach toward x = 0) hang over their own road. Their z
@@ -651,6 +700,7 @@ export function buildTown() {
   if (L.lighthouse) buildLighthouse(greenery, rnd, L.lighthouse);
   if (L.sandFrom !== undefined) buildSandDrifts(rnd, L);
   plantStreetTrees(greenery, rnd);
+  buildRoadClosures(greenery, L);
   greenery.finish();
   if (L.bridge) buildBridge(L.bridge);
   buildLamps(L);

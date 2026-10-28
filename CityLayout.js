@@ -38,6 +38,13 @@ import { state } from './state.js';
 
 export const SIDEWALK = 3;
 export const BOUNDS = { x: 78, zN: 40, zS: -210 };
+// Where you can actually walk to in the city levels: the inside faces of
+// the boundary walls (Scene.js loadWorldBounds). The east wall stands a
+// little further out than BOUNDS.x so the east back street's far pavement
+// reaches its shopfronts (x 79). Streets that carry on past these edges are
+// barricaded where they meet them (CityTown.js).
+export const PLAY = { x0: -BOUNDS.x + 2, x1: BOUNDS.x + 0.8, zN: BOUNDS.zN - 2, zS: BOUNDS.zS + 2 };
+export const inPlay = (x, z, margin = 0) => x > PLAY.x0 + margin && x < PLAY.x1 - margin && z < PLAY.zN - margin && z > PLAY.zS + margin;
 
 /* --- downtown (Level 1) --------------------------------------------------- */
 // The zoo as it's laid out (CityTown.js buildZoo); a district places it
@@ -126,6 +133,24 @@ const HB_SQUARE = {
   openSide: -1, // the main street side has no hedge
 };
 const HB_ZOO_SHIFT = 45;
+// Three buildings you can walk into (Hideouts.js), out in the back streets:
+// where Level 2's girl hides on Impossible. facadeX, side (the way the
+// front faces), zc (centre z), L (frontage along z), D (depth).
+// sideDoor: the wall she escapes through ('north' / 'south'), onto a
+// cross street; escape: her way from there to the main street, joining her
+// route at waypoint `join`.
+const HB_HIDEOUTS = [
+  { id: 'diner', facadeX: 61, side: 1, zc: -95.5, L: 15, D: 14, sideDoor: 'south',
+    escape: [[51, -106.5], [40, -110], [24, -111], [8, -111]], join: 7 },
+  { id: 'pharmacy', facadeX: -49, side: -1, zc: -40.5, L: 15, D: 13, sideDoor: 'south',
+    escape: [[-38, -51.5], [-33, -56], [-15, -55], [-4, -58]], join: 4 },
+  { id: 'lobby', facadeX: -49, side: -1, zc: -75, L: 15, D: 13, sideDoor: 'north',
+    escape: [[-36, -61], [-28, -56], [-15, -55], [-4, -58]], join: 4 },
+];
+const footprint = (h) => {
+  const xa = h.facadeX, xb = h.facadeX - h.side * h.D;
+  return { x0: Math.min(xa, xb) - 0.5, x1: Math.max(xa, xb) + 0.5, z0: h.zc + h.L / 2 + 0.5, z1: h.zc - h.L / 2 - 0.5 };
+};
 const HB_GULL = { x0: -49, x1: -35, z0: -160, z1: -184, kind: 'fountain', name: 'Gull Park', palms: true };
 const HB_PROMENADE = [{ x0: -80, x1: -45, beach: 'west' }, { x0: 45, x1: 80, beach: 'east' }]; // either side of the quay
 const HARBOUR = {
@@ -162,6 +187,7 @@ const HARBOUR = {
   // North enough to clear the quay: the gate at z -95, the lions' broken
   // fence onto the west street near the bridge
   zoo: { ...ZOO, shiftZ: HB_ZOO_SHIFT },
+  hideouts: HB_HIDEOUTS,
   sandFrom: -120, // where sand drifts start on the streets
   // The glass bridge across the main street: centre z, deck height at its
   // ends and how much higher its middle arches
@@ -170,6 +196,7 @@ const HARBOUR = {
     { x0: -42, x1: -20, z0: -44, z1: -66 },   // west pocket lot
     HB_SQUARE, HB_GULL,
     { x0: ZOO.x0 - 2, x1: ZOO.x1 + 3, z0: ZOO.z0 + HB_ZOO_SHIFT, z1: ZOO.z1 + HB_ZOO_SHIFT },
+    ...HB_HIDEOUTS.map(footprint), // the walk-in buildings stand there
     ...HB_PROMENADE.map((p) => ({ x0: Math.min(p.x0, p.x1) - 40, x1: Math.max(p.x0, p.x1) + 40, z0: QUAY_Z + 1, z1: -240 })),
   ],
   featureLots: [],

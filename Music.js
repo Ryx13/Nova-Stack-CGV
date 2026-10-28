@@ -38,6 +38,7 @@
    All three tracks are CC-BY licensed — credits.js carries the full
    attribution.
 ====================================================================== */
+import { settings, onSettingsChange } from './Settings.js';
 
 export const TRACKS = {
   menu:   { src: 'assets/music/gfz-hell.mp3',           volume: 0.5 },
@@ -105,7 +106,9 @@ function deckFor(key) {
 
 let cinematicDuck=1;
 export function setCinematicDuck(value=1){cinematicDuck=Math.max(0,Math.min(1,value));applyContext();}
-function targetVolume(key) { return TRACKS[key].volume*cinematicDuck; }
+// The pause menu's volume (Settings.js) scales every track
+function targetVolume(key) { return TRACKS[key].volume*cinematicDuck*settings.volume; }
+onSettingsChange(() => { if (!muted) applyContext(); });
 
 function applyContext() {
   if (!currentKey) return;

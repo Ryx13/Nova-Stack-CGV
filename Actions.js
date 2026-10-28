@@ -15,6 +15,7 @@ import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
 import { retryLevel, setRestartHandler } from './account.js';
 import {levelWeapon,levelWeaponIds,nextWeapon} from './WeaponSlots.js';
 import { startDayCycle, updateDayCycle } from './DayCycle.js';
+import { settings, bindSettingsUI } from './Settings.js';
 import {
   scene, world, camera, renderer, dom, sfx, sky,
   pushKillFeed, doDeath, doWin, checkExtraction, updateExtractRing,
@@ -668,7 +669,7 @@ function startDying() {
     z.feed = { spot: new THREE.Vector3(body.x + Math.sin(a) * 0.95, 0, body.z + Math.cos(a) * 0.95), k: 0, phase: Math.random() * 6 };
     z.mesh.rotation.order = 'YXZ'; // the hunch tips forward from wherever it faces
   });
-  state.dying = { t: 0, eaters: near, camFrom: camera.position.clone(), caption: buildOverrunCaption() };
+  state.dying = { t: 0, eaters: near, camFrom: camera.position.clone(), caption: buildOverrunCaption(), bite: 0.25, pool: 0 };
   sfx.hurt();
 }
 
@@ -695,10 +696,44 @@ function buildOverrunCaption() {
   return el;
 }
 
+/* THE BLOOD OF BEING OVERRUN — while the infected are at your body, they
+   bite: every OVERRUN_BITE_S or so a spurt of blood off the body on the
+   side of whoever's biting, a spike on the infection monitor, a bite sound;
+   a pool spreading out under you; the blood at the screen's edges pulsing.
+   The pooled blood effects (ImpactFX.js), no new draw calls. */
+const OVERRUN_BITE_S = [0.3, 0.7], OVERRUN_REACH = 2.6, OVERRUN_POOL_EVERY = 0.45;
+const _biteDir = new THREE.Vector3(), _biteAt = new THREE.Vector3();
+function updateOverrunBlood(d, dt, body) {
+  // Who's at the body: the feeders when they feed, else whoever got close
+  const biters = (d.eaters.length ? d.eaters : state.zombies).filter((z) => z.alive && z.state !== 'downed' && z.mesh.position.distanceTo(body) < OVERRUN_REACH);
+  if (biters.length && (d.bite -= dt) <= 0) {
+    d.bite = OVERRUN_BITE_S[0] + Math.random() * (OVERRUN_BITE_S[1] - OVERRUN_BITE_S[0]);
+    const z = biters[Math.floor(Math.random() * biters.length)];
+    // Out of the body, away from the bite
+    _biteDir.subVectors(body, z.mesh.position).setY(0);
+    if (_biteDir.lengthSq() < 1e-4) _biteDir.set(1, 0, 0);
+    _biteDir.normalize();
+    _biteAt.copy(body).setY(body.y + 0.35).addScaledVector(_biteDir, -0.25);
+    spawnBloodSpray(_biteAt, _biteDir, Math.random() < 0.4, body.y);
+    monitorBite();
+    sfx.hurt();
+    if (dom.bloodVig) dom.bloodVig.style.opacity = '1';
+  }
+  // The pool spreading under the body
+  if (biters.length && (d.pool += dt) >= OVERRUN_POOL_EVERY) {
+    d.pool = 0;
+    const r = Math.min(1.6, 0.3 + d.t * 0.35), a = Math.random() * Math.PI * 2;
+    placeBloodSplat(_biteAt.set(body.x + Math.cos(a) * r * Math.random(), body.y, body.z + Math.sin(a) * r * Math.random()));
+  }
+  // Between bites the screen's edges ease back a little
+  if (dom.bloodVig) dom.bloodVig.style.opacity = String(Math.max(0.75, Number(dom.bloodVig.style.opacity || 1) - dt * 0.6));
+}
+
 function updateDying(dt) {
   const d = state.dying;
   d.t += dt;
   const body = playerVis.group.position;
+  updateOverrunBlood(d, dt, body);
   // The player: the fall plays out and holds
   if (playerVis.mixer) playerVis.mixer.update(dt);
   if (playerVis.rigObj) groundClampRig(playerVis.rigObj, playerVis.footBoneL, playerVis.footBoneR, dt, 10, playerVis.ankleToSole);
@@ -860,8 +895,11 @@ export function updateCameraOnFoot(dt) {
   camRayHelper.far = origin.distanceTo(desired);
   const hits = camRayHelper.intersectObjects(cameraCandidates.query(state.occluders, camRayHelper.ray, camRayHelper.far), false);
   let finalPos = desired;
-  if (hits.length && hits[0].distance > 0.9) {
-    finalPos = origin.clone().add(desired.clone().sub(origin).normalize().multiplyScalar(Math.max(1.15, hits[0].distance * 0.88)));
+  // A wall between you and the camera brings it in on this side of the wall,
+  // however close the wall is (it used to give up under 0.9 m, and never came
+  // nearer than 1.15 m, so hugging a wall put the camera inside it)
+  if (hits.length && hits[0].distance > 0.05) {
+    finalPos = origin.clone().add(desired.clone().sub(origin).normalize().multiplyScalar(Math.max(0.35, hits[0].distance * 0.85)));
   }
   camera.position.lerp(finalPos, 0.28);
   if (state.shake > 0.002) {
@@ -1157,8 +1195,9 @@ function initInputHandlers() {
   window.addEventListener('keyup', (e) => { state.keys[e.code] = false; });
   dom.canvas.addEventListener('mousemove', (e) => {
     if (!state.pointerLocked || state.narrativeBlocked) return;
-    state.yaw -= e.movementX * 0.002;
-    state.pitch -= e.movementY * 0.002;
+    const turn = 0.002 * settings.sensitivity; // the pause menu's slider (Settings.js)
+    state.yaw -= e.movementX * turn;
+    state.pitch -= e.movementY * turn;
     state.pitch = THREE.MathUtils.clamp(state.pitch, -1.05, 0.72);
   });
   dom.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -1221,6 +1260,7 @@ function initInputHandlers() {
   });
   if (dom.pauseBtn) dom.pauseBtn.addEventListener('click', () => togglePause());
   if (dom.resumeBtn) dom.resumeBtn.addEventListener('click', () => togglePause());
+  bindSettingsUI(); // sensitivity and volume, in the pause menu
   // Quit to the title screen: a fresh page load is the clean teardown (the
   // level owns a renderer, physics world and timers). Asks twice so a
   // stray click doesn't throw away a run.
@@ -1363,7 +1403,7 @@ export function restartLevel() {
   resetCharacters();
   resetPowerUps();
   if (missionTracker) missionTracker.reset();
-  state.activeSparks.forEach((s) => scene.remove(s));
+  state.activeSparks.forEach((s) => { scene.remove(s); s.material.dispose(); }); // each spark owns its material
   state.activeSparks.length = 0;
   state.activeTracers.forEach((tr) => { scene.remove(tr); tr.geometry.dispose(); tr.material.dispose(); });
   state.activeTracers.length = 0;

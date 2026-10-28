@@ -5,7 +5,7 @@
 <head>
 
 <meta charset="UTF-8">
-<meta name="deadway-build" content="20261028-escort-4">
+<meta name="deadway-build" content="20261028-james-3">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
@@ -678,6 +678,10 @@
   #winscreen .end-title{color:#5fe07f;text-shadow:0 0 30px rgba(60,220,110,.6);}
 
   .end-sub{margin-top:10px;color:#c8c2b4;letter-spacing:2px;font-size:14px;}
+  #settings-panel{margin:18px auto 4px;display:grid;gap:10px;width:min(340px,86vw);color:#c8c2b4;font-size:13px;letter-spacing:1px;}
+  #settings-panel label{display:grid;grid-template-columns:1fr 130px 46px;align-items:center;gap:10px;text-align:left;}
+  #settings-panel input{accent-color:#d8a040;width:100%;}
+  #settings-panel output{text-align:right;color:#f2ede2;}
 
   .end-screen button{margin-top:28px;padding:12px 34px;font-family:'Oswald',sans-serif;letter-spacing:3px;
 
@@ -1375,6 +1379,11 @@
 
   <button id="resume-btn">Resume</button>
 
+  <div id="settings-panel">
+    <label>Mouse sensitivity <input type="range" id="set-sensitivity" min="0.3" max="2.5" step="0.1"> <output id="set-sensitivity-value"></output></label>
+    <label>Volume <input type="range" id="set-volume" min="0" max="1" step="0.05"> <output id="set-volume-value"></output></label>
+  </div>
+
   <button type="button" id="pause-restart-btn" class="menu-exit">↻ Restart Level</button>
 
   <button type="button" id="pause-menu-btn" class="menu-exit">← Main Menu</button>
@@ -1495,93 +1504,96 @@
     "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
     "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js",
-    "./main.js": "./main.js?v=20261028-escort-4",
-    "./Level3CombatRoute.js": "./Level3CombatRoute.js?v=20261028-escort-4",
-    "./Level3Vendor.js": "./Level3Vendor.js?v=20261028-escort-4",
-    "./Level3SwitchProps.js": "./Level3SwitchProps.js?v=20261028-escort-4",
-    "./Level3InteractionProps.js": "./Level3InteractionProps.js?v=20261028-escort-4",
-    "./Level3Environment.js": "./Level3Environment.js?v=20261028-escort-4",
-    "./Level3Quarantine.js": "./Level3Quarantine.js?v=20261028-escort-4",
-    "./StaticLampCache.js": "./StaticLampCache.js?v=20261028-escort-4",
-    "./GuardianAwakening.js": "./GuardianAwakening.js?v=20261028-escort-4",
-    "./Music.js": "./Music.js?v=20261028-escort-4",
-    "./Level3.js": "./Level3.js?v=20261028-escort-4",
-    "./PhysicsStep.js": "./PhysicsStep.js?v=20261028-escort-4",
-    "./AnimatedRaycast.js": "./AnimatedRaycast.js?v=20261028-escort-4",
-    "./Actions.js": "./Actions.js?v=20261028-escort-4",
-    "./Scene.js": "./Scene.js?v=20261028-escort-4",
-    "./EnemyCrowd.js": "./EnemyCrowd.js?v=20261028-escort-4",
-    "./characters.js": "./characters.js?v=20261028-escort-4",
-    "./Level3Systems.js": "./Level3Systems.js?v=20261028-escort-4",
-    "./WeaponSlots.js": "./WeaponSlots.js?v=20261028-escort-4",
-    "./CureProjector.js": "./CureProjector.js?v=20261028-escort-4",
-    "./GuardianCombat.js": "./GuardianCombat.js?v=20261028-escort-4",
-    "./GuardianAppearance.js": "./GuardianAppearance.js?v=20261028-escort-4",
-    "./Guardian.js": "./Guardian.js?v=20261028-escort-4",
-    "./Level3HumanityDialogue.js": "./Level3HumanityDialogue.js?v=20261028-escort-4",
-    "./assets/human-recovery/HumanRecovery.js": "./assets/human-recovery/HumanRecovery.js?v=20261028-escort-4",
-    "./account.js": "./account.js?v=20261028-escort-4",
-    "./BottleDistraction.js": "./BottleDistraction.js?v=20261028-escort-4",
-    "./characterSelect.js": "./characterSelect.js?v=20261028-escort-4",
-    "./cloud.js": "./cloud.js?v=20261028-escort-4",
-    "./ContactShading.js": "./ContactShading.js?v=20261028-escort-4",
-    "./credits.js": "./credits.js?v=20261028-escort-4",
-    "./firebase-config.js": "./firebase-config.js?v=20261028-escort-4",
-    "./HeightMist.js": "./HeightMist.js?v=20261028-escort-4",
-    "./Intro.js": "./Intro.js?v=20261028-escort-4",
-    "./IntroTutorial.js": "./IntroTutorial.js?v=20261028-escort-4",
-    "./Level1.js": "./Level1.js?v=20261028-escort-4",
-    "./Level1Intro.js": "./Level1Intro.js?v=20261028-escort-4",
-    "./LevelBriefing.js": "./LevelBriefing.js?v=20261028-escort-4",
-    "./Level2Quake.js": "./Level2Quake.js?v=20261028-escort-4",
-    "./ZooAnimals.js": "./ZooAnimals.js?v=20261028-escort-4",
-    "./Difficulty.js": "./Difficulty.js?v=20261028-escort-4",
-    "./Level2.js": "./Level2.js?v=20261028-escort-4",
-    "./Level2Config.js": "./Level2Config.js?v=20261028-escort-4",
-    "./Level2Intro.js": "./Level2Intro.js?v=20261028-escort-4",
-    "./Level2Surroundings.js": "./Level2Surroundings.js?v=20261028-escort-4",
-    "./Level3Config.js": "./Level3Config.js?v=20261028-escort-4",
-    "./Level3Detection.js": "./Level3Detection.js?v=20261028-escort-4",
-    "./Level3Stealth.js": "./Level3Stealth.js?v=20261028-escort-4",
-    "./mergeStatic.js": "./mergeStatic.js?v=20261028-escort-4",
-    "./Movement.js": "./Movement.js?v=20261028-escort-4",
-    "./Narrative.js": "./Narrative.js?v=20261028-escort-4",
-    "./StoryProgress.js": "./StoryProgress.js?v=20261028-escort-4",
-    "./Level3Arrival.js": "./Level3Arrival.js?v=20261028-escort-4",
-    "./DayCycle.js": "./DayCycle.js?v=20261028-escort-4",
-    "./Level1Surroundings.js": "./Level1Surroundings.js?v=20261028-escort-4",
-    "./CityKit.js": "./CityKit.js?v=20261028-escort-4",
-    "./ImpactFX.js": "./ImpactFX.js?v=20261028-escort-4",
-    "./PerfHUD.js": "./PerfHUD.js?v=20261028-escort-4",
-    "./RenderScale.js": "./RenderScale.js?v=20261028-escort-4",
-    "./GraphicsProfile.js": "./GraphicsProfile.js?v=20261028-escort-4",
-    "./CameraShock.js": "./CameraShock.js?v=20261028-escort-4",
-    "./Citizens.js": "./Citizens.js?v=20261028-escort-4",
-    "./CityGround.js": "./CityGround.js?v=20261028-escort-4",
-    "./CityLayout.js": "./CityLayout.js?v=20261028-escort-4",
-    "./CityTown.js": "./CityTown.js?v=20261028-escort-4",
-    "./Level3Industry.js": "./Level3Industry.js?v=20261028-escort-4",
-    "./OcclusionTrial.js": "./OcclusionTrial.js?v=20261028-escort-4",
-    "./PowerUps.js": "./PowerUps.js?v=20261028-escort-4",
-    "./PuddleInstances.js": "./PuddleInstances.js?v=20261028-escort-4",
-    "./RayCandidates.js": "./RayCandidates.js?v=20261028-escort-4",
-    "./roster.js": "./roster.js?v=20261028-escort-4",
-    "./saferoomSupplyCatalog.js": "./saferoomSupplyCatalog.js?v=20261028-escort-4",
-    "./shaders.js": "./shaders.js?v=20261028-escort-4",
-    "./SpatialGrid.js": "./SpatialGrid.js?v=20261028-escort-4",
-    "./state.js": "./state.js?v=20261028-escort-4",
-    "./StoryAudio.js": "./StoryAudio.js?v=20261028-escort-4",
-    "./StreetAtmosphere.js": "./StreetAtmosphere.js?v=20261028-escort-4",
-    "./streetDressing.js": "./streetDressing.js?v=20261028-escort-4",
-    "./survivor.js": "./survivor.js?v=20261028-escort-4",
-    "./TutorialAvatar.js": "./TutorialAvatar.js?v=20261028-escort-4",
-    "./VendingMachine.js": "./VendingMachine.js?v=20261028-escort-4",
-    "./assets/human-recovery/SurvivorFace.js": "./assets/human-recovery/SurvivorFace.js?v=20261028-escort-4"
+    "./main.js": "./main.js?v=20261028-james-3",
+    "./Level3CombatRoute.js": "./Level3CombatRoute.js?v=20261028-james-3",
+    "./Level3Vendor.js": "./Level3Vendor.js?v=20261028-james-3",
+    "./Level3SwitchProps.js": "./Level3SwitchProps.js?v=20261028-james-3",
+    "./Level3InteractionProps.js": "./Level3InteractionProps.js?v=20261028-james-3",
+    "./Level3Environment.js": "./Level3Environment.js?v=20261028-james-3",
+    "./Level3Quarantine.js": "./Level3Quarantine.js?v=20261028-james-3",
+    "./StaticLampCache.js": "./StaticLampCache.js?v=20261028-james-3",
+    "./GuardianAwakening.js": "./GuardianAwakening.js?v=20261028-james-3",
+    "./Music.js": "./Music.js?v=20261028-james-3",
+    "./Settings.js": "./Settings.js?v=20261028-james-3",
+    "./Level3.js": "./Level3.js?v=20261028-james-3",
+    "./PhysicsStep.js": "./PhysicsStep.js?v=20261028-james-3",
+    "./AnimatedRaycast.js": "./AnimatedRaycast.js?v=20261028-james-3",
+    "./Actions.js": "./Actions.js?v=20261028-james-3",
+    "./Scene.js": "./Scene.js?v=20261028-james-3",
+    "./EnemyCrowd.js": "./EnemyCrowd.js?v=20261028-james-3",
+    "./characters.js": "./characters.js?v=20261028-james-3",
+    "./Level3Systems.js": "./Level3Systems.js?v=20261028-james-3",
+    "./WeaponSlots.js": "./WeaponSlots.js?v=20261028-james-3",
+    "./CureProjector.js": "./CureProjector.js?v=20261028-james-3",
+    "./GuardianCombat.js": "./GuardianCombat.js?v=20261028-james-3",
+    "./GuardianAppearance.js": "./GuardianAppearance.js?v=20261028-james-3",
+    "./Guardian.js": "./Guardian.js?v=20261028-james-3",
+    "./Level3HumanityDialogue.js": "./Level3HumanityDialogue.js?v=20261028-james-3",
+    "./assets/human-recovery/HumanRecovery.js": "./assets/human-recovery/HumanRecovery.js?v=20261028-james-3",
+    "./account.js": "./account.js?v=20261028-james-3",
+    "./BottleDistraction.js": "./BottleDistraction.js?v=20261028-james-3",
+    "./characterSelect.js": "./characterSelect.js?v=20261028-james-3",
+    "./cloud.js": "./cloud.js?v=20261028-james-3",
+    "./ContactShading.js": "./ContactShading.js?v=20261028-james-3",
+    "./credits.js": "./credits.js?v=20261028-james-3",
+    "./firebase-config.js": "./firebase-config.js?v=20261028-james-3",
+    "./HeightMist.js": "./HeightMist.js?v=20261028-james-3",
+    "./Intro.js": "./Intro.js?v=20261028-james-3",
+    "./IntroTutorial.js": "./IntroTutorial.js?v=20261028-james-3",
+    "./Level1.js": "./Level1.js?v=20261028-james-3",
+    "./Level1Intro.js": "./Level1Intro.js?v=20261028-james-3",
+    "./LevelBriefing.js": "./LevelBriefing.js?v=20261028-james-3",
+    "./Level2Quake.js": "./Level2Quake.js?v=20261028-james-3",
+    "./ZooAnimals.js": "./ZooAnimals.js?v=20261028-james-3",
+    "./Difficulty.js": "./Difficulty.js?v=20261028-james-3",
+    "./Hideouts.js": "./Hideouts.js?v=20261028-james-3",
+    "./ZombieNav.js": "./ZombieNav.js?v=20261028-james-3",
+    "./Level2.js": "./Level2.js?v=20261028-james-3",
+    "./Level2Config.js": "./Level2Config.js?v=20261028-james-3",
+    "./Level2Intro.js": "./Level2Intro.js?v=20261028-james-3",
+    "./Level2Surroundings.js": "./Level2Surroundings.js?v=20261028-james-3",
+    "./Level3Config.js": "./Level3Config.js?v=20261028-james-3",
+    "./Level3Detection.js": "./Level3Detection.js?v=20261028-james-3",
+    "./Level3Stealth.js": "./Level3Stealth.js?v=20261028-james-3",
+    "./mergeStatic.js": "./mergeStatic.js?v=20261028-james-3",
+    "./Movement.js": "./Movement.js?v=20261028-james-3",
+    "./Narrative.js": "./Narrative.js?v=20261028-james-3",
+    "./StoryProgress.js": "./StoryProgress.js?v=20261028-james-3",
+    "./Level3Arrival.js": "./Level3Arrival.js?v=20261028-james-3",
+    "./DayCycle.js": "./DayCycle.js?v=20261028-james-3",
+    "./Level1Surroundings.js": "./Level1Surroundings.js?v=20261028-james-3",
+    "./CityKit.js": "./CityKit.js?v=20261028-james-3",
+    "./ImpactFX.js": "./ImpactFX.js?v=20261028-james-3",
+    "./PerfHUD.js": "./PerfHUD.js?v=20261028-james-3",
+    "./RenderScale.js": "./RenderScale.js?v=20261028-james-3",
+    "./GraphicsProfile.js": "./GraphicsProfile.js?v=20261028-james-3",
+    "./CameraShock.js": "./CameraShock.js?v=20261028-james-3",
+    "./Citizens.js": "./Citizens.js?v=20261028-james-3",
+    "./CityGround.js": "./CityGround.js?v=20261028-james-3",
+    "./CityLayout.js": "./CityLayout.js?v=20261028-james-3",
+    "./CityTown.js": "./CityTown.js?v=20261028-james-3",
+    "./Level3Industry.js": "./Level3Industry.js?v=20261028-james-3",
+    "./OcclusionTrial.js": "./OcclusionTrial.js?v=20261028-james-3",
+    "./PowerUps.js": "./PowerUps.js?v=20261028-james-3",
+    "./PuddleInstances.js": "./PuddleInstances.js?v=20261028-james-3",
+    "./RayCandidates.js": "./RayCandidates.js?v=20261028-james-3",
+    "./roster.js": "./roster.js?v=20261028-james-3",
+    "./saferoomSupplyCatalog.js": "./saferoomSupplyCatalog.js?v=20261028-james-3",
+    "./shaders.js": "./shaders.js?v=20261028-james-3",
+    "./SpatialGrid.js": "./SpatialGrid.js?v=20261028-james-3",
+    "./state.js": "./state.js?v=20261028-james-3",
+    "./StoryAudio.js": "./StoryAudio.js?v=20261028-james-3",
+    "./StreetAtmosphere.js": "./StreetAtmosphere.js?v=20261028-james-3",
+    "./streetDressing.js": "./streetDressing.js?v=20261028-james-3",
+    "./survivor.js": "./survivor.js?v=20261028-james-3",
+    "./TutorialAvatar.js": "./TutorialAvatar.js?v=20261028-james-3",
+    "./VendingMachine.js": "./VendingMachine.js?v=20261028-james-3",
+    "./assets/human-recovery/SurvivorFace.js": "./assets/human-recovery/SurvivorFace.js?v=20261028-james-3"
   }
 }
 </script>
 
-<script type="module" src="main.js?v=20261028-escort-4"></script>
+<script type="module" src="main.js?v=20261028-james-3"></script>
 
 </body>
 

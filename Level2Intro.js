@@ -22,7 +22,7 @@ export function playIntro({ prices, onDone }) {
   void playBriefing([
     hunt ? {
       id: 'lv2-girl', speaker: 'BRIEFING / THE TARGET', title: 'The girl from CAM 03',
-      text: "She has your stabilizer. She's half-turned and using it to stay human, so the infected leave her alone. She's gone to ground somewhere near the start of the street, and she can't be reached where she hides.\n\nGet the radar to find her. Come within 20 m and she'll smell you and run for her boat: catch her before she reaches it, right next to her, E.",
+      text: "She has your stabilizer. She's half-turned and using it to stay human, so the infected leave her alone. She's hiding inside one of the buildings out in the far parts of town, and she won't come out for you.\n\nGet the radar to find her. Come within 20 m and she'll smell you and run for her boat: catch her before she reaches it, right next to her, E.",
       keys: [['E', 'Catch her']],
     } : {
       id: 'lv2-girl', speaker: 'BRIEFING / THE TARGET', title: 'The girl from CAM 03',
@@ -43,7 +43,7 @@ export function playIntro({ prices, onDone }) {
       id: 'lv2-supplies', speaker: 'BRIEFING / SUPPLIES', title: 'Two machines on the way',
       text: [
         hunt
-          ? `Radar machine: somewhere off the main street, a different place every time: a side street, a back street, by Harbour Square. Look for its lime glow. A radar costs ${prices.radar} coins and shows you where she is.`
+          ? `Radar machine: somewhere off the main street, a different place every time, out in the back streets. ${state.riddleWhere === 'board' ? 'A survivor painted a riddle on a board near the start' : `Someone left a riddle written in blood across ${state.riddleShop || 'the shop window'} on your ${state.riddleWhere}, just ahead of where you start`}: work out where it means, and look for the lime glow. A radar costs ${prices.radar} coins and shows you where she is.`
           : `Radar machine: just up the road on the west side, glowing lime. A radar costs ${prices.radar} coins and tracks her on your radar and compass.`,
         `Adrenaline machine: off the main road, down the side street to the west, glowing pink. A shot costs ${prices.adrenaline} coins and gives a 3 second burst of speed. Buy as many as you can afford.`,
       ].join('\n\n'),

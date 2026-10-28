@@ -373,7 +373,7 @@ function blastGlass(pos, radius) {
     if (d > radius) continue;
     _blastDir.subVectors(_hit, pos).normalize();
     const { ua, va, ext } = paneAxes(p);
-    if (d < radius * 0.55 && shattered < 6 && Math.max(ext[ua], ext[va]) <= SHATTER_MAX_M) { shatterPane(p, _hit.clone(), _blastDir.clone()); shattered++; }
+    if (d < radius * 0.55 && shattered < 6 && !p.painted && Math.max(ext[ua], ext[va]) <= SHATTER_MAX_M) { shatterPane(p, _hit.clone(), _blastDir.clone()); shattered++; }
     else if (cracked < 10) { crackPane(p, _hit.clone(), _blastDir.clone()); cracked++; }
   }
   for (const m of liveGlassMeshes()) {
@@ -543,7 +543,7 @@ function updateBlasts(dt) {
 function crackPane(p, point, dir) {
   p.hits = (p.hits || 0) + 1;
   const { ax, ua, va, ext } = paneAxes(p);
-  if (p.hits >= SHATTER_HITS && Math.max(ext[ua], ext[va]) <= SHATTER_MAX_M) { shatterPane(p, point, dir); return; }
+  if (p.hits >= SHATTER_HITS && !p.painted && Math.max(ext[ua], ext[va]) <= SHATTER_MAX_M) { shatterPane(p, point, dir); return; } // a painted pane (Level 2's riddle) only cracks
   const size = Math.min(0.9, ext[ua], ext[va]) * (0.75 + Math.random() * 0.25);
   _n.set(0, 0, 0)[ax] = dir[ax] > 0 ? -1 : 1;
   _p.copy(point).addScaledVector(_n, 0.006);
