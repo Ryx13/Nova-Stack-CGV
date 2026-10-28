@@ -7,7 +7,8 @@
    next level (account.js playNextLevel) and picks the timeline:
 
      Day    L1 dawn -> sun about to rise · L2 sunrise -> late morning ·
-            L3 clouds building -> thick sea fog and drizzle
+            L3 golden light through incoming cloud -> warm sea fog, the sun
+            glowing through it, a light drizzle
      Night  L1 streetlit night · L2 dead grid, moon over
             the port · L3 sea fog before dawn -> the sun breaks through
             as the cure broadcasts
@@ -63,14 +64,18 @@ const DAY = [
     fog: 0xc8c0aa, fogD: 0.0035, sunCol: 0xffe2b8, sun: 3.0, el: 50, az: 120, disc: 0.85,
     hemiSky: 0xd8ccb8, hemiGnd: 0x40362c, hemi: 0.16, ambCol: 0x5a5048, amb: 0.08, exp: 0.78,
     mist: 0xe0caa8, mistA: 0 },
-  // Level 3, the first switch or so: cloud coming in off the sea
-  { c: 2.35, top: 0x8e9cab, hor: 0xc4ccd2, bot: 0x7a7e80, glow: 0xf4f2ec, gs: 0.2,
-    fog: 0xaab3ba, fogD: 0.008, sunCol: 0xf4f0e6, sun: 1.5, el: 52, az: 130, disc: 0.3,
-    hemiSky: 0xd0d8de, hemi: 0.75, amb: 0.35, mist: 0xc8d0d6, mistA: 0.35 },
-  // Level 3 ends: thick sea fog and drizzle
-  { c: 3, top: 0xa4acb2, hor: 0xb4bbbf, bot: 0x9a9fa2, glow: 0xe8eaea, gs: 0.05,
-    fog: 0x9aa2a8, fogD: 0.03, sunCol: 0xe6e8ea, sun: 0.45, el: 55, az: 140, disc: 0,
-    hemiSky: 0xdfe7ee, hemi: 1.1, amb: 0.5, exp: 1.0, mist: 0xe8ecef, mistA: 0.65, rain: 0.8 },
+  // Level 3, the first switch or so: cloud coming in off the sea, the sun
+  // still breaking through it golden
+  { c: 2.35, top: 0x9aa4b0, hor: 0xf0d0a8, bot: 0x8a7a6a, glow: 0xffc890, gs: 0.5,
+    fog: 0xd8c0a4, fogD: 0.007, sunCol: 0xffc890, sun: 2.4, el: 50, az: 140, disc: 0.6,
+    hemiSky: 0xf0dcc4, hemiGnd: 0x40362c, hemi: 0.45, ambCol: 0x5a5048, amb: 0.22, exp: 0.9,
+    mist: 0xe8d4b8, mistA: 0.3, rain: 0 },
+  // Level 3 ends: warm sea fog, the sun low and orange glowing through it,
+  // a light drizzle. Bright weather closing in, not grey murk.
+  { c: 3, top: 0xb0aca4, hor: 0xe8c8a0, bot: 0xa08a74, glow: 0xffb878, gs: 0.35,
+    fog: 0xd0b898, fogD: 0.02, sunCol: 0xffb070, sun: 1.2, el: 40, az: 160, disc: 0.35,
+    hemiSky: 0xf0e0cc, hemiGnd: 0x4a4038, hemi: 0.85, ambCol: 0x6a5a4a, amb: 0.4, exp: 0.95,
+    mist: 0xead8c0, mistA: 0.5, rain: 0.4 },
 ];
 const NIGHT = [
   // Night means night: no sun or moonlight on the scene until the finale's
@@ -237,8 +242,8 @@ export function startDayCycle() {
   }
   stars.forEach((s) => { s.visible = true; });
   moonVisual.visible = sunVisual.visible = true;
-  // Sky-lit levels (Level 1 and 2 by day) relight from the sky as it changes
-  if (scene.environment) {
+  // By day every level is lit by its sky too, relit as the sky changes
+  if (state.timeOfDay === 'day') {
     envScene = new THREE.Scene();
     envScene.add(new THREE.Mesh(sky.geometry, sky.material));
   }
