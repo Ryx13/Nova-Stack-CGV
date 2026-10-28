@@ -7,6 +7,7 @@ import { createStreetAtmosphere } from './StreetAtmosphere.js';
 import { updateLocomotion } from './Movement.js';
 import { RayCandidates } from './RayCandidates.js';
 import { addContactShading } from './ContactShading.js';
+import { perfFrameStart, perfRenderStart, perfFrameEnd } from './PerfHUD.js';
 import { placeBloodSplat, spawnBloodSpray, crackGlassAlong, updateImpactFX, clearImpactFX } from './ImpactFX.js';
 import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
 import { retryLevel, setRestartHandler } from './account.js';
@@ -1372,6 +1373,7 @@ function startAnimationLoop() {
     requestAnimationFrame(animate);
     const dt = Math.min(clock.getDelta(), 0.05);
     if (!initialFrameReady) return;
+    perfFrameStart();
     try {
     if (muzzleFlashTime > 0) {
       muzzleFlashTime = Math.max(0, muzzleFlashTime - dt);
@@ -1474,8 +1476,10 @@ function startAnimationLoop() {
     // gameplay code. Each tick guards itself on paused/dead as needed.
     for (const tick of levelTicks) tick(dt);
 
+    perfRenderStart();
     renderer.render(scene, camera);
     renderViewmodels(renderer);
+    perfFrameEnd();
     } catch (error) {
       showRenderFailure(error);
     }
