@@ -46,7 +46,7 @@ export function startSafeRoomTutorial({ onComplete }) {
   skip.style.cssText = 'position:absolute;right:20px;top:20px;pointer-events:auto';
   ui.root.appendChild(skip); skip.onclick = () => finish();
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.setSize(innerWidth, innerHeight); renderer.shadowMap.enabled = true;
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); renderer.setSize(innerWidth, innerHeight); renderer.shadowMap.enabled = true;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   const scene = new THREE.Scene(); scene.background = new THREE.Color(0x071015); scene.fog = new THREE.Fog(0x071015, 8, 28);
   const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, .05, 100); camera.position.set(0, 1.65, 5.5);

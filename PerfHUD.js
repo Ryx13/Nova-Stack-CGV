@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { renderer, scene, camera } from './Scene.js';
 import { state } from './state.js';
+import { renderScaleInfo } from './RenderScale.js';
 
 /* ---------------------------------------------------------------------
    PERF READOUT — F3 shows it, Shift+F3 copies it to the clipboard.
@@ -148,6 +149,7 @@ function readout() {
   const gpu = acc.gpuN ? acc.gpu / acc.gpuN : null;
   const c = census();
   renderer.getDrawingBufferSize(_size);
+  const rs = renderScaleInfo();
   const alive = state.zombies.filter((z) => z.alive);
   const near = alive.filter((z) => z.mesh.position.distanceTo(camera.position) < NEAR_ZOMBIE).length;
   const mem = renderer.info.memory, heap = performance.memory?.usedJSHeapSize;
@@ -166,7 +168,7 @@ function readout() {
     `CPU ${cpu.toFixed(1)} ms   logic ${logic.toFixed(1)} · render submit ${submit.toFixed(1)}`,
     `GPU ${gpu === null ? 'n/a (no timer query)' : `${gpu.toFixed(1)} ms   main view + viewmodels`}`,
     `Draws ${Math.round(acc.calls / n)}   tris ${k(acc.tris / n)}   programs ${renderer.info.programs?.length ?? '?'}`,
-    `Pixels ${_size.x}×${_size.y} @${renderer.getPixelRatio().toFixed(2)} = ${(_size.x * _size.y / 1e6).toFixed(1)} MP`,
+    `Pixels ${_size.x}×${_size.y} @${rs.ratio.toFixed(2)} = ${(_size.x * _size.y / 1e6).toFixed(1)} MP   (cap ${rs.top.toFixed(2)}, screen ${rs.device.toFixed(2)}${rs.ratio < rs.top ? ', auto-lowered' : ''})`,
     `Lights point ${c.point} · spot ${c.spot} · dir ${c.dir}   shadowed ${c.shadowLights} (${c.shadowPasses} passes, ${k(c.casters)} casters)`,
     `Meshes ${k(c.meshes)} · instanced ${c.instanced} (${k(c.instances)}) · skinned ${c.skinned}`,
     `Infected alive ${alive.length} · near ${near}`,

@@ -172,7 +172,8 @@ onSoundChange((m) => {
    1. RENDERER / SCENE / CAMERA
 --------------------------------------------------------------------- */
 export const renderer = new THREE.WebGLRenderer({ canvas: dom.canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// Capped at 1.5 (MAX_PIXEL_RATIO); RenderScale.js steps it down further if frames run slow
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;

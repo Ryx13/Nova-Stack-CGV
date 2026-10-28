@@ -7,6 +7,7 @@ import { createStreetAtmosphere } from './StreetAtmosphere.js';
 import { updateLocomotion } from './Movement.js';
 import { RayCandidates } from './RayCandidates.js';
 import { addContactShading } from './ContactShading.js';
+import { updateRenderScale } from './RenderScale.js';
 import { perfFrameStart, perfRenderStart, perfFrameEnd } from './PerfHUD.js';
 import { placeBloodSplat, spawnBloodSpray, crackGlassAlong, updateImpactFX, clearImpactFX } from './ImpactFX.js';
 import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
@@ -1374,6 +1375,7 @@ function startAnimationLoop() {
     const dt = Math.min(clock.getDelta(), 0.05);
     if (!initialFrameReady) return;
     perfFrameStart();
+    updateRenderScale();
     try {
     if (muzzleFlashTime > 0) {
       muzzleFlashTime = Math.max(0, muzzleFlashTime - dt);
