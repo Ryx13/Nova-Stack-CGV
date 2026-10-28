@@ -37,11 +37,16 @@ export const state = {
   // sun shadows, warm grade, daylight facades, lamps off) but keeps Level 1's
   // own drizzle, puddles and burning-wreck smoke — see warmDay in Scene.js.
   warmDay: false,
-  // Set by Level1.js to ease the street: fraction of the usual infected
-  // (cap, opening pack, spawn rate, depot guards) and of the damage their
-  // hits deal. 1 = the stock balance, which Levels 2/3 keep.
+  // The difficulty picked before the level (Difficulty.js): 'easy' or
+  // 'impossible', and its levers — the fraction of the usual infected (spawn
+  // rate, alive cap, opening crowd, each level's own waves), of the damage
+  // their hits deal, and of the Level 3 Guardian's health. 1 = as built.
+  difficulty: 'impossible',
   zombieCountMul: 1,
   zombieDamageMul: 1,
+  harmMul: 1,          // every hit the player takes, scaled (damagePlayer)
+  bossHealthMul: 1,
+  assist: null,        // Easy's help: health back, ammo topped up (Actions.js updateAssist)
   // Set by a level's config (Level2Config.js): street-row buildings are
   // battle-damaged (broken tops, blown corners, shopfronts) and the
   // blocks named in collapsedBlocks [{ side, z0, z1 }] lie in ruins —

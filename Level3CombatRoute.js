@@ -7,7 +7,8 @@ export const ROAD_AMBUSHES=Object.freeze([
   {id:'road-compound',label:'Compound approach',z:-142,count:8},
 ]);
 export class CombatRoute {
-  constructor(){this.queue=[];this.active=null;this.scheduled=new Set();this.completed=new Set();this.spawnTimer=0;this.seeded=false;}
+  // countMul: each encounter's size as a fraction of its listed count (the difficulty's, Difficulty.js)
+  constructor({countMul=1}={}){this.queue=[];this.active=null;this.scheduled=new Set();this.completed=new Set();this.spawnTimer=0;this.seeded=false;this.countMul=countMul;}
   get pending(){return !!this.active||this.queue.length>0;}
   adoptOpening(enemies){
     if(this.seeded)return;
@@ -18,7 +19,7 @@ export class CombatRoute {
   }
   enqueue({id,label,count,switchKey=null}){
     if(this.scheduled.has(id))return false;
-    this.scheduled.add(id);this.queue.push({id,label,remaining:count,targets:new Set(),switchKey});return true;
+    this.scheduled.add(id);this.queue.push({id,label,remaining:Math.max(1,Math.round(count*this.countMul)),targets:new Set(),switchKey});return true;
   }
   advance(position){for(const ambush of ROAD_AMBUSHES)if(position.z<=ambush.z)this.enqueue(ambush);}
   tick(dt,enemies,spawn,onComplete=()=>{}){

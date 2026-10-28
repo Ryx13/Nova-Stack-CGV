@@ -13,7 +13,7 @@ import { state } from './state.js';
 import {
   initCloud, onSessionChanged, getSession, signIn, signUp, signInWithGoogle,
   resetPassword, playAsGuest, signOut, reportRunEnd, fetchLeaderboard, formatTime,
-  cloudConfigured,
+  cloudConfigured, boardKey,
 } from './cloud.js';
 import './credits.js'; // wires every [data-open-credits] button
 
@@ -109,28 +109,32 @@ function renderSession({ user, profile, syncState }) {
   document.querySelectorAll('#level-buttons [data-level]').forEach((btn) => {
     let tag = btn.querySelector('.lvl-stat');
     if (!tag) { tag = document.createElement('span'); tag.className = 'lvl-stat'; btn.appendChild(tag); }
-    const L = profile && profile.levels[btn.dataset.level];
+    const hard = profile && profile.levels[btn.dataset.level], easy = profile && profile.levels[boardKey(btn.dataset.level, 'easy')];
+    const L = hard?.plays ? hard : easy, suffix = L === easy ? ' (Easy)' : '';
     if (!L || !L.plays) { tag.textContent = 'Not played yet'; btn.classList.remove('cleared'); return; }
     btn.classList.toggle('cleared', L.wins > 0);
-    tag.textContent = L.wins > 0 ? `✓ Best ${formatTime(L.bestTimeSec)}` : `${L.plays} attempt${L.plays === 1 ? '' : 's'}`;
+    tag.textContent = L.wins > 0 ? `✓ Best ${formatTime(L.bestTimeSec)}${suffix}` : `${L.plays} attempt${L.plays === 1 ? '' : 's'}${suffix}`;
   });
 }
 
 /* ---------------------------------------------------------------------
    LEADERBOARD SCREEN
 --------------------------------------------------------------------- */
-let lbLevel = '1';
+let lbLevel = '1', lbDifficulty = 'impossible';
+// 'Impossible' / 'Easy', for the end screen
+const difficultyName = () => (state.difficulty === 'easy' ? 'Easy' : 'Impossible');
 async function renderLeaderboard() {
   document.querySelectorAll('#lb-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.level === lbLevel));
+  document.querySelectorAll('#lb-difficulty button').forEach((b) => b.classList.toggle('active', b.dataset.difficulty === lbDifficulty));
   const body = $('lb-body');
   const { user, profile } = getSession();
-  const mine = profile && profile.levels[lbLevel];
+  const mine = profile && profile.levels[boardKey(lbLevel, lbDifficulty)];
   $('lb-mine').innerHTML = mine && mine.bestTimeSec != null
     ? `Your best: <b>${formatTime(mine.bestTimeSec)}</b> · ${mine.wins} win${mine.wins === 1 ? '' : 's'} / ${mine.plays} run${mine.plays === 1 ? '' : 's'}`
     : 'You haven\'t cleared this level yet.';
   if (!cloudConfigured) { body.innerHTML = '<p class="lb-empty">Online leaderboard isn\'t set up for this build.</p>'; return; }
   body.innerHTML = '<p class="lb-empty">Loading…</p>';
-  const rows = await fetchLeaderboard(lbLevel, 10);
+  const rows = await fetchLeaderboard(lbLevel, 10, lbDifficulty);
   if (!rows.length) { body.innerHTML = '<p class="lb-empty">No times yet — be the first.</p>'; return; }
   body.innerHTML = `<ol class="lb-list">${rows.map((r, i) => `
     <li class="${user && r.uid === user.uid ? 'me' : ''}">
@@ -140,12 +144,22 @@ async function renderLeaderboard() {
   if (user && user.isGuest) body.insertAdjacentHTML('beforeend', '<p class="lb-empty">Guests don\'t appear here — sign in to post your times.</p>');
 }
 export function openLeaderboard(level) {
-  if (level) lbLevel = String(level);
+  if (level) { lbLevel = String(level); lbDifficulty = state.difficulty === 'easy' ? 'easy' : 'impossible'; }
   $('leaderboard-screen').classList.remove('hidden');
   renderLeaderboard();
 }
 function wireLeaderboard() {
   document.querySelectorAll('#lb-tabs button').forEach((b) => b.addEventListener('click', () => { lbLevel = b.dataset.level; renderLeaderboard(); }));
+  // A second row of tabs: each difficulty has its own board
+  const tabs = $('lb-tabs');
+  if (tabs && !$('lb-difficulty')) {
+    const row = document.createElement('div');
+    row.className = 'tabs';
+    row.id = 'lb-difficulty';
+    row.innerHTML = '<button type="button" data-difficulty="impossible" class="active">Impossible</button><button type="button" data-difficulty="easy">Easy</button>';
+    tabs.after(row);
+    row.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { lbDifficulty = b.dataset.difficulty; renderLeaderboard(); }));
+  }
   $('lb-close').addEventListener('click', () => $('leaderboard-screen').classList.add('hidden'));
   document.addEventListener('click', (e) => {
     if (e.target.closest('[data-open-leaderboard]')) {
@@ -178,13 +192,13 @@ export async function finishRun(result, endScreenEl) {
       const firstBtn = endScreenEl.querySelector('button');
       endScreenEl.insertBefore(box, firstBtn || null);
     }
-    box.innerHTML = `<div class="rs-line">Time ${formatTime(timeSec)} · saving…</div>`;
+    box.innerHTML = `<div class="rs-line">${difficultyName()} · Time ${formatTime(timeSec)} · saving…</div>`;
     addEndScreenButtons(endScreenEl, result);
   }
 
   let res;
   try {
-    res = await reportRunEnd({ level, result, kills: state.kills, coins: state.coins, timeSec });
+    res = await reportRunEnd({ level, difficulty: state.difficulty, result, kills: state.kills, coins: state.coins, timeSec });
   } catch (err) {
     console.error('[account] run report failed', err);
   }
@@ -199,7 +213,7 @@ export async function finishRun(result, endScreenEl) {
       ? `<div class="rs-record">${res.previousBest == null ? 'FIRST CLEAR' : 'NEW PERSONAL BEST'} — ${formatTime(res.bestTimeSec)}</div>`
       : `<div class="rs-line">Personal best ${formatTime(res.bestTimeSec)}</div>`;
   }
-  box.innerHTML = `${record}<div class="rs-line">Time ${formatTime(timeSec)} · ${where}</div>`;
+  box.innerHTML = `${record}<div class="rs-line">${difficultyName()} · Time ${formatTime(timeSec)} · ${where}</div>`;
 }
 
 /* Every end screen gets the same menu: retry, main menu, leaderboard,

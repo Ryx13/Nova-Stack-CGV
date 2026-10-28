@@ -1,4 +1,5 @@
 import { playStoryboard, playLevelTransition } from './Intro.js';
+import { chooseDifficulty, applyDifficulty, showDifficultyBadge } from './Difficulty.js';
 // main.js — ENTRY POINT
 //
 // Runs before any of Scene/characters/Actions/PowerUps are ever loaded,
@@ -156,12 +157,15 @@ function initModeSelect() {
       }
 
       modeSelect.classList.add('hidden');
-      await launchLevel(levelId, mode);
+      // Then Easy or Impossible; Back returns to Day / Night
+      const difficulty = await chooseDifficulty(levelId);
+      if (!difficulty) { modeSelect.classList.remove('hidden'); modeChosen = false; return; }
+      await launchLevel(levelId, mode, difficulty);
     });
   });
 }
 
-async function launchLevel(levelId, mode) {
+async function launchLevel(levelId, mode, difficulty = 'impossible') {
   const loading = document.getElementById('loading');
   const loadLevel = LEVEL_LOADERS[levelId];
   if (!loadLevel) return;
@@ -172,7 +176,9 @@ async function launchLevel(levelId, mode) {
   setMusicContext(`level${levelId}`);
   try {
     const levelModule = await loadLevel();
+    applyDifficulty(Number(levelId), difficulty); // after the level's own config, which it overrides
     levelModule.startLevel(mode);
+    showDifficultyBadge();
   } catch (err) {
     state.loadFailed = true;
     console.error(`Level ${levelId} failed to load:`, err);
@@ -215,7 +221,8 @@ async function handleResume() {
   if (!getSession().user) return; // signed out in between — normal flow
   introScreen.classList.add('hidden');
   if (req.transitionFrom) await playLevelTransition(req.transitionFrom);
-  await launchLevel(String(req.level), req.mode || 'night');
+  const difficulty = await chooseDifficulty(String(req.level), { canGoBack: false });
+  await launchLevel(String(req.level), req.mode || 'night', difficulty);
 }
 
 if (document.readyState === 'loading') {

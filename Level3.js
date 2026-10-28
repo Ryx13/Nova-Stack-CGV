@@ -1,5 +1,4 @@
 import {createGuardianAwakening} from './GuardianAwakening.js';
-import {createLevel3Intro} from './Level3Intro.js';
 import {CombatRoute,MAX_ROUTE_ENEMIES} from './Level3CombatRoute.js';
 import {createLevel3Vendor} from './Level3Vendor.js';
 // Level3.js — LEVEL 3 "THE BROADCAST TOWER"
@@ -100,7 +99,7 @@ export function startLevel(mode) {
     phase: 'switches', // 'switches' -> 'boss' -> 'dispersion' -> 'done'
     bossZombie: null,
     dispersion: null,
-    curedCount: 0, pulseSaved: 0, broadcastCured: 0, guardianSpared:false, guardianDefeated:false, route:new CombatRoute(), defendingSwitch:null,
+    curedCount: 0, pulseSaved: 0, broadcastCured: 0, guardianSpared:false, guardianDefeated:false, route:new CombatRoute({countMul:state.zombieCountMul}), defendingSwitch:null,
     savedInfected: new Set(), activeCures: new Set(),
     hold: 0, defenseTime: 0, waveRemaining: 0, waveTimer: 0, elapsed: 0,
   };
@@ -129,7 +128,7 @@ export function startLevel(mode) {
     if(state.currentWeapon==='cure')switchWeapon(lv3.pulse.previousWeapon||'gun');
     else {lv3.pulse.previousWeapon=state.currentWeapon;switchWeapon('cure');}
   };
-  lv3.opening=createLevel3Intro({camera,state,playerVis,playerBody,syncHandGun,getGuardian:()=>lv3.preparedBoss?.guardian});
+  // No camera fly-through (it lagged): the level opens on Dr. James's story cards (playOpeningConversation)
   registerLevelTick(updateLevel3Mission);
   registerLevelTick((dt) => { updateBlinkingLamps(dt); updateSignFlicker(dt); }); // the faulty lamps, the works' flickering signs
 }
@@ -139,10 +138,11 @@ let lv3 = null;
 function seedLevel3Combat(){
   if(!state.readyShown||lv3.route.seeded)return;
   const initial=state.zombies.filter(z=>z.alive&&!z.isBoss);
-  for(let i=initial.length;i<MAX_ROUTE_ENEMIES;i++){
+  const routeEnemies=routeCap();
+  for(let i=initial.length;i<routeEnemies;i++){
     const enemy=new Zombie(new THREE.Vector3());initial.push(enemy);state.zombies.push(enemy);state.spawnedTotal++;
   }
-  initial.slice(0,MAX_ROUTE_ENEMIES).forEach((enemy,i)=>{
+  initial.slice(0,routeEnemies).forEach((enemy,i)=>{
     enemy.mesh.position.set((i%4-1.5)*2.8,0,12-Math.floor(i/4)*5);
     enemy.speed=.95;enemy.mesh.rotation.y=0;
   });
@@ -416,7 +416,7 @@ async function prepareLevel3Guardian(){
 function createBossActor(){
   const spawnPos = TOWER_POS.clone().add(BOSS_SPAWN_OFFSET);
   const boss = new Zombie(spawnPos);
-  boss.health = boss.maxHealth = BOSS_MAX_HEALTH;
+  boss.health = boss.maxHealth = Math.round(BOSS_MAX_HEALTH * (state.bossHealthMul ?? 1)); // Easy: a weaker Guardian
   boss.speed = .65; // Metres per second; matches the authored heavy walk cycle.
   boss.mesh.scale.setScalar(BOSS_SCALE);
   boss.isBoss = true;
@@ -771,7 +771,6 @@ function showLevel3EndScreen() {
 function updateLevel3Mission(dt) {
   if (!state.readyShown || !lv3) return;
   if(lv3.awakening?.active){if(!state.paused)lv3.awakening.update(dt);return;}
-  if(lv3.opening?.active){if(!state.paused)lv3.opening.update(dt);return;}
   // Weapon switching is handled by the shared input listener even after
   // gameplay ends. Keep both overlays hidden throughout the finale.
   if (lv3.phase === 'dispersion' || lv3.phase === 'done') { viewmodelGun.visible = false; knifeViewModel.visible = false; }
@@ -862,9 +861,11 @@ function readTerminal() {
   if (i < 0) return;
   lv3.story.narrative.show({id:'research-'+i,mode:'radio',speaker:'DR. JAMES / RESEARCH '+(i+1),text:NOTES[i],duration:12});
 }
+// The most regular infected out at once: the route's eight, fewer on Easy (Difficulty.js)
+function routeCap(){return Math.max(2,Math.round(MAX_ROUTE_ENEMIES*state.zombieCountMul));}
 function spawnReinforcement(pos) {
   if (lv3.phase === 'boss' && state.zombies.filter(z => z.alive && !z.isBoss && z.state !== 'downed' && z.mesh.position.distanceTo(pos) < 24).length >= 4) return false;
-  if (state.zombies.length >= 64 || state.zombies.filter(z => z.alive && !z.isBoss && z.state !== 'cured').length >= MAX_ROUTE_ENEMIES) return false;
+  if (state.zombies.length >= 64 || state.zombies.filter(z => z.alive && !z.isBoss && z.state !== 'cured').length >= routeCap()) return false;
   // Retry clear street positions; never place an ambush on the player or inside cover.
   for(let attempt=0;attempt<16;attempt++){
     const side=rnd()<.5?-1:1;

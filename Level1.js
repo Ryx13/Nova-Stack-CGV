@@ -44,11 +44,8 @@ state.liveStreetlights = [
   { side: 1, z: -52 }, { side: 1, z: -112.5 },
 ];
 
-// An easier street: half as many infected (cap, opening pack, spawn rate,
-// depot guards) and their hits do half the damage, so reaching the depot
-// is a fight you can win rather than a swarm.
-state.zombieCountMul = 0.5;
-state.zombieDamageMul = 0.5;
+// How many infected and how hard they hit are the difficulty's (Difficulty.js):
+// Easy is the eased street this level always had, Impossible the full one.
 
 const LEVEL_CONFIG = {
   id: 1,

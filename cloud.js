@@ -267,13 +267,18 @@ export async function saveSettings(partial) {
   await pushProfile();
 }
 
+/** Where a level's scores live for a difficulty: Impossible keeps the
+    original boards ('1' -> leaderboards/level1, profile.levels['1']), Easy
+    has its own ('1-easy'), so the two never compete. */
+export const boardKey = (level, difficulty) => (difficulty === 'easy' ? `${level}-easy` : String(level));
+
 /**
  * Call once when a run ends. result: 'win' | 'loss'.
  * Returns { newBest, previousBest, leaderboardSubmitted }.
  */
-export async function reportRunEnd({ level, result, kills = 0, coins = 0, timeSec = 0 }) {
+export async function reportRunEnd({ level, difficulty = 'impossible', result, kills = 0, coins = 0, timeSec = 0 }) {
   if (!profile) await useGuest();
-  const key = String(level);
+  const key = boardKey(level, difficulty);
   const L = profile.levels[key] || (profile.levels[key] = blankLevelStats());
   const previousBest = L.bestTimeSec;
   L.plays += 1;
@@ -306,13 +311,13 @@ export async function reportRunEnd({ level, result, kills = 0, coins = 0, timeSe
   return { newBest, previousBest, leaderboardSubmitted, bestTimeSec: L.bestTimeSec };
 }
 
-/** Top `n` fastest wins for a level. [] when offline/unconfigured. */
-export async function fetchLeaderboard(level, n = 10) {
+/** Top `n` fastest wins for a level on a difficulty. [] when offline/unconfigured. */
+export async function fetchLeaderboard(level, n = 10, difficulty = 'impossible') {
   const f = await loadFirebase();
   if (!f) return [];
   try {
     const q = f.f.query(
-      f.f.collection(f.db, 'leaderboards', `level${level}`, 'entries'),
+      f.f.collection(f.db, 'leaderboards', `level${boardKey(level, difficulty)}`, 'entries'),
       f.f.orderBy('timeSec', 'asc'),
       f.f.limit(n),
     );

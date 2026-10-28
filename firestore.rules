@@ -14,7 +14,7 @@ service cloud.firestore {
       allow read: if true;
       allow create, update: if request.auth != null
         && request.auth.uid == uid
-        && board in ['level1', 'level2', 'level3']
+        && board in ['level1', 'level2', 'level3', 'level1-easy', 'level2-easy', 'level3-easy']
         && request.resource.data.keys().hasOnly(['callsign', 'timeSec', 'kills', 'at'])
         && request.resource.data.callsign is string
         && request.resource.data.callsign.size() > 0
