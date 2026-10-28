@@ -43,13 +43,14 @@ const DAY = [
   { c: 0, top: 0x1d2740, hor: 0x6e5866, bot: 0x2a2630, glow: 0xe07a50, gs: 0.35,
     fog: 0x3a3d48, fogD: 0.011, sunCol: 0xff9a6a, sun: 0, el: -8, az: 75, disc: 0,
     hemiSky: 0x7a88a6, hemiGnd: 0x2a2826, hemi: 1.1, ambCol: 0x48505e, amb: 0.55, exp: 1.05,
-    mist: 0x6a7080, mistA: 0.45, rain: 0, stars: 0.45, moon: 0 },
+    mist: 0x6a7080, mistA: 0.45, rain: 0, stars: 0.45, moon: 0,
+    sat: 0.72, warm: -0.6, con: 1.08, bri: 0.97 },
   // Level 1, nearing extraction: first light, the sun just below the rooftops
-  { c: 0.8, top: 0x3e5478, hor: 0xe8a070, bot: 0x3a3436, glow: 0xffa060, gs: 0.75,
+  { c: 0.8, warm: -0.25, top: 0x3e5478, hor: 0xe8a070, bot: 0x3a3436, glow: 0xffa060, gs: 0.75,
     fog: 0x7a6c6a, fogD: 0.008, sunCol: 0xff8a50, sun: 0.35, el: -1,
     hemiSky: 0x9aa4bc, hemiGnd: 0x3a3430, hemi: 1.0, ambCol: 0x5a5a62, amb: 0.5, mist: 0x9a8c88, mistA: 0.4, stars: 0.05 },
   // Level 1 ends / Level 2 begins: sunrise
-  { c: 1, top: 0x6584ab, hor: 0xf6c08c, bot: 0x5a4c44, glow: 0xffb878, gs: 0.95,
+  { c: 1, sat: 0.78, warm: 0.3, con: 1.07, bri: 1, top: 0x6584ab, hor: 0xf6c08c, bot: 0x5a4c44, glow: 0xffb878, gs: 0.95,
     fog: 0xc2a088, fogD: 0.0055, sunCol: 0xffb070, sun: 1.8, el: 3, disc: 0.9,
     hemiSky: 0xc8b8a8, hemiGnd: 0x3a3028, hemi: 0.3, ambCol: 0x5a5048, amb: 0.18, exp: 0.82,
     mist: 0xd9c4a6, mistA: 0.3, stars: 0 },
@@ -57,7 +58,7 @@ const DAY = [
   // street is no longer one long shadow and buildings cast crisp ones
   { c: 1.15, sun: 2.6, el: 12, az: 85, hemi: 0.16, amb: 0.08 },
   // Level 2, halfway: a bright morning, the sun still a little warm
-  { c: 1.5, top: 0x5f8cc0, hor: 0xead6b4, bot: 0x7a6a5a, glow: 0xffd8a8, gs: 0.55,
+  { c: 1.5, sat: 0.8, warm: 0.25, top: 0x5f8cc0, hor: 0xead6b4, bot: 0x7a6a5a, glow: 0xffd8a8, gs: 0.55,
     fog: 0xccbca0, sunCol: 0xffd6a8, sun: 2.8, el: 35, az: 105 },
   // Level 2 ends / Level 3 begins: a clear late morning, the sun high.
   // Level 2 is lit by its own sky as well, so the fills stay low, the sun
@@ -69,13 +70,13 @@ const DAY = [
     mist: 0xe0caa8, mistA: 0 },
   // Level 3, the first switch or so: cloud coming in off the sea, the sun
   // still breaking through it golden
-  { c: 2.35, top: 0x9aa4b0, hor: 0xf0d0a8, bot: 0x8a7a6a, glow: 0xffc890, gs: 0.5,
+  { c: 2.35, warm: 0.4, top: 0x9aa4b0, hor: 0xf0d0a8, bot: 0x8a7a6a, glow: 0xffc890, gs: 0.5,
     fog: 0xd8c0a4, fogD: 0.007, sunCol: 0xffc890, sun: 2.4, el: 50, az: 140, disc: 0.6,
     hemiSky: 0xf0dcc4, hemiGnd: 0x40362c, hemi: 0.45, ambCol: 0x5a5048, amb: 0.22, exp: 0.9,
     mist: 0xe8d4b8, mistA: 0.3, rain: 0 },
   // Level 3 ends: warm sea fog, the sun low and orange glowing through it,
   // a light drizzle. Bright weather closing in, not grey murk.
-  { c: 3, top: 0xb0aca4, hor: 0xe8c8a0, bot: 0xa08a74, glow: 0xffb878, gs: 0.35,
+  { c: 3, warm: 0.45, top: 0xb0aca4, hor: 0xe8c8a0, bot: 0xa08a74, glow: 0xffb878, gs: 0.35,
     fog: 0xd0b898, fogD: 0.02, sunCol: 0xffb070, sun: 1.2, el: 40, az: 160, disc: 0.35,
     hemiSky: 0xf0e0cc, hemiGnd: 0x4a4038, hemi: 0.85, ambCol: 0x6a5a4a, amb: 0.4, exp: 0.95,
     mist: 0xead8c0, mistA: 0.5, rain: 0.4 },
@@ -89,22 +90,23 @@ const NIGHT = [
   { c: 0, top: 0x514f5a, hor: 0x9d8270, bot: 0xe3c29a, glow: 0x9fb4d8, gs: 0.06,
     fog: 0x4a4440, fogD: 0.009, sunCol: 0xb4c6ea, sun: 0.35, el: 24, az: 15, disc: 0,
     hemiSky: 0x6a7a96, hemiGnd: 0x1c1a18, hemi: 0.35, ambCol: 0x3a4250, amb: 0.22, exp: 1.0,
-    mist: 0x8a909a, mistA: 0.45, rain: 0, stars: 0.85, moon: 0.9 },
+    mist: 0x8a909a, mistA: 0.45, rain: 0, stars: 0.85, moon: 0.9,
+    sat: 0.7, warm: -0.5, con: 1.1, bri: 0.96 },
   { c: 1 },
   // Level 2, leaving downtown: the grid is dead, a cool moonlit night, the
   // moon over the sea ahead (the port is south, toward -z)
-  { c: 1.25, top: 0x2a354b, hor: 0x4b5a71, bot: 0x6a7992, glow: 0x9fb4d8, gs: 0.12, sun: 0.5,
+  { c: 1.25, sat: 0.66, warm: -0.75, top: 0x2a354b, hor: 0x4b5a71, bot: 0x6a7992, glow: 0x9fb4d8, gs: 0.12, sun: 0.5,
     fog: 0x1f2736, fogD: 0.0085, hemiSky: 0x5d6f92, hemiGnd: 0x15171c, hemi: 0.32,
     ambCol: 0x1f2635, amb: 0.2, mist: 0x52607a, mistA: 0.35, stars: 1, moon: 0.95 },
   { c: 2 },
   // Level 3: sea fog before dawn, thickening as you work through the switches
-  { c: 2.45, top: 0x1e2636, hor: 0x34415a, bot: 0x3e4b5e, glow: 0x9fb4d8, gs: 0.06,
+  { c: 2.45, warm: -0.6, top: 0x1e2636, hor: 0x34415a, bot: 0x3e4b5e, glow: 0x9fb4d8, gs: 0.06,
     fog: 0x182535, fogD: 0.012, hemi: 0.4, amb: 0.25, mist: 0x35475a, mistA: 0.45, stars: 0.3, moon: 0.4, sun: 0.25 },
-  { c: 2.85, top: 0x3a4452, hor: 0x4c5664, bot: 0x4a5260, glow: 0xc08a6a, gs: 0.12,
+  { c: 2.85, warm: -0.35, top: 0x3a4452, hor: 0x4c5664, bot: 0x4a5260, glow: 0xc08a6a, gs: 0.12,
     fog: 0x2c3644, fogD: 0.022, mist: 0x4a586a, mistA: 0.6, rain: 0.25, stars: 0, moon: 0, sun: 0 },
   { c: 2.88, sunCol: 0xffb070, el: -3, az: 75 },
   // Level 3 ends: the cure broadcasts and the sun breaks through
-  { c: 3, top: 0x5a6f92, hor: 0xf4b07a, bot: 0x7a6050, glow: 0xffb070, gs: 0.95,
+  { c: 3, sat: 0.78, warm: 0.35, con: 1.07, bri: 1, top: 0x5a6f92, hor: 0xf4b07a, bot: 0x7a6050, glow: 0xffb070, gs: 0.95,
     fog: 0xb48c74, fogD: 0.008, sun: 2, el: 4, disc: 0.9, hemiSky: 0xc8b8a8, hemiGnd: 0x3a3028,
     hemi: 0.9, ambCol: 0x5a5048, amb: 0.45, exp: 1.0, mist: 0xd9b8a0, mistA: 0.3, rain: 0 },
 ];
@@ -224,6 +226,7 @@ const rad = THREE.MathUtils.degToRad;
 export function startDayCycle() {
   frames = TIMELINES[state.timeOfDay === 'day' ? 'day' : 'night'];
   latched = shown = 0;
+  gradeKey = ''; // applyTimeOfDay just set its own filter on the canvas
   sky.material = skyMaterial();
   const { sun, hemiLight, ambientLight, moonVisual, sunVisual } = lighting;
   // Fills always on: the timeline dims them rather than toggling them
@@ -290,6 +293,49 @@ function apply(c) {
   rainUniforms.uOpacity.value = 0.35 * v.rain;
   stars.forEach((s, i) => { s.material.opacity = starBase[i] * v.stars; });
   moonVisual.material.opacity = 0.95 * v.moon;
+  applyGrade(v);
+}
+
+/* --- Colour grade -------------------------------------------------------
+   One grade over the whole picture, following the timeline: colour drained
+   (sat), a cold blue cast by night turning to warm amber by day (warm, -1
+   to 1), a touch of contrast (con) and brightness (bri). Done by the
+   compositor on the canvas, not a render pass. Chromium gets one SVG colour
+   matrix, which can tint blue without turning red to cyan (hue-rotate
+   would); elsewhere a plain CSS chain does warm only, no cold cast. */
+const GRADE_ID = 'nova-grade';
+let gradeMatrix = null, gradeKey = '';
+function gradeFilter(sat, warm, con, bri) {
+  if (!window.chrome) return `saturate(${sat}) sepia(${Math.max(0, warm) * 0.3}) contrast(${con}) brightness(${bri})`;
+  if (!gradeMatrix) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('width', '0'); svg.setAttribute('height', '0');
+    svg.style.position = 'absolute';
+    const filter = document.createElementNS(NS, 'filter');
+    filter.id = GRADE_ID;
+    filter.setAttribute('color-interpolation-filters', 'sRGB'); // like CSS filters, not linear light
+    gradeMatrix = document.createElementNS(NS, 'feColorMatrix');
+    gradeMatrix.setAttribute('type', 'matrix');
+    filter.appendChild(gradeMatrix); svg.appendChild(filter); document.body.appendChild(svg);
+  }
+  // Saturation toward luma, then a per-channel tint, then contrast round mid-grey
+  const L = [0.2126, 0.7152, 0.0722];
+  const tint = [1 + 0.07 * warm, 1 + 0.015 * warm, 1 - 0.09 * warm];
+  const rows = [];
+  for (let r = 0; r < 3; r++) {
+    const gain = bri * con * tint[r];
+    const row = L.map((l, c) => gain * ((1 - sat) * l + (r === c ? sat : 0)));
+    rows.push(...row.map((x) => x.toFixed(4)), 0, (bri * 0.5 * (1 - con)).toFixed(4));
+  }
+  gradeMatrix.setAttribute('values', `${rows.join(' ')} 0 0 0 1 0`);
+  return `url(#${GRADE_ID})`;
+}
+function applyGrade(v) {
+  const key = `${v.sat.toFixed(3)}|${v.warm.toFixed(3)}|${v.con.toFixed(3)}|${v.bri.toFixed(3)}`;
+  if (key === gradeKey) return; // the timeline eases slowly; most frames change nothing
+  gradeKey = key;
+  renderer.domElement.style.filter = gradeFilter(v.sat, v.warm, v.con, v.bri);
 }
 
 /** Every frame, from the game loop. */
