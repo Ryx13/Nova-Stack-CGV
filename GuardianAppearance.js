@@ -16,17 +16,19 @@ export function styleGuardian(root){
    m.color.setHex(0xffffff);m.roughness=.94;m.metalness=0;
   }else if(name.includes('decontamination suit')){
    counts.fabric++;m.color.setHex(0xffffff);m.roughness=.97;m.metalness=0;
-   m.onBeforeCompile=shader=>{shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`#include <map_fragment>
+   const previousCompile=m.onBeforeCompile, previousKey=m.customProgramCacheKey();
+   m.onBeforeCompile=function(shader,renderer){previousCompile.call(this,shader,renderer);shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`#include <map_fragment>
     float wornFabricLuma=dot(diffuseColor.rgb,vec3(.2126,.7152,.0722));
     diffuseColor.rgb=mix(diffuseColor.rgb,vec3(wornFabricLuma),.92)*vec3(.94,.89,.83);`);};
-   m.customProgramCacheKey=()=> 'guardian-worn-workwear-v1';
+   m.customProgramCacheKey=()=> previousKey+'|guardian-worn-workwear-v1';
   }else if(name.includes('containment metal')){
    counts.metal++;m.color.setHex(0xffffff);m.roughness=.91;m.metalness=.35;
-   m.onBeforeCompile=shader=>{shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`#include <map_fragment>
+   const previousCompile=m.onBeforeCompile, previousKey=m.customProgramCacheKey();
+   m.onBeforeCompile=function(shader,renderer){previousCompile.call(this,shader,renderer);shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`#include <map_fragment>
     float ironLuma=dot(diffuseColor.rgb,vec3(.2126,.7152,.0722));
     float oxide=smoothstep(.015,.16,diffuseColor.r-diffuseColor.g);
     diffuseColor.rgb=mix(vec3(ironLuma*.82,ironLuma*.83,ironLuma*.80),vec3(ironLuma*1.18,ironLuma*.68,ironLuma*.40),oxide);`);};
-   m.customProgramCacheKey=()=> 'guardian-rusted-industrial-iron-v1';
+   m.customProgramCacheKey=()=> previousKey+'|guardian-rusted-industrial-iron-v1';
   }else if(name.includes('swollen tissue')){m.color.setHex(0xaaa09a);m.roughness=.95;m.metalness=0;}
   else if(name.includes('necrotic fissures')){m.color.setHex(0x35282c);m.roughness=.96;}
   else if(name.includes('hose rubber')){m.color.setHex(0x252323);m.roughness=.97;}

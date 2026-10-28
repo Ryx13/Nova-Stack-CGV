@@ -2,10 +2,10 @@ import * as THREE from 'three';
 import {setCinematicDuck} from './Music.js';
 
 // A visual-only entrance: no damage, AI or new particle/light allocations.
-export function createGuardianAwakening({camera,state,scene,boss,sfx}){
+export function createGuardianAwakening({camera,state,scene,boss,sfx,lights=[]}){
  const home=camera.position.clone(),rotation=camera.quaternion.clone();
  const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
- const lamps=[];scene.traverse(o=>{if(o.isPointLight&&lamps.length<8)lamps.push({o,color:o.color.clone(),intensity:o.intensity});});
+ const lamps=lights.filter(o=>o.isPointLight&&o.parent).map(o=>({o,color:o.color.clone(),intensity:o.intensity}));
  let active=true,time=0,hissed=false,roared=false;
  const target=new THREE.Vector3(0,3,-181),returnFrom=new THREE.Vector3(3,3.1,-172),up=new THREE.Vector3(0,1,0);
  const returnRotation=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(returnFrom,target,up));
@@ -35,7 +35,7 @@ export function createGuardianAwakening({camera,state,scene,boss,sfx}){
   overlay.style.background=time<3?'radial-gradient(ellipse at center,transparent 5%,rgba(0,0,0,.82) 100%)':time<6?'rgba(0,0,0,.22)':time<10?'rgba(110,0,0,.09)':'transparent';
   if(time>=3&&!hissed){hissed=true;caption.textContent='Containment has failed.';}
   if(time>=7&&!roared){roared=true;setCinematicDuck(0);sfx.noise(.9,.15,95);sfx.burst('sawtooth',46,1.4,.1);caption.textContent='Move when it braces. Strike when it recovers.';}
-  lamps.forEach(({o,color,intensity},i)=>{if(time<6){o.color.copy(color);o.intensity=intensity*(.15+.35*Math.abs(Math.sin(time*17+i)));}else{o.color.setHex(0xff3020);o.intensity=intensity*(.65+.2*Math.sin(time*8+i));}});
+  lamps.forEach(({o,color,intensity},i)=>{if(time<6){o.color.copy(color);o.intensity=Math.max(8,intensity)*(.15+.35*Math.abs(Math.sin(time*17+i)));}else{o.color.setHex(0xff3020);o.intensity=Math.max(8,intensity)*(.65+.2*Math.sin(time*8+i));}});
   if(time<10){camera.position.set(5-time*.2,2.4+time*.07,-169-time*.3);camera.lookAt(target);}
   else{const u=THREE.MathUtils.smoothstep(time,10,13.5);camera.position.lerpVectors(returnFrom,home,u);camera.quaternion.slerpQuaternions(returnRotation,rotation,u);}
   if(!reduced&&time>=3&&time<8)camera.position.x+=Math.sin(time*71)*.025;

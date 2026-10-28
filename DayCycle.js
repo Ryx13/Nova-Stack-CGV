@@ -294,8 +294,9 @@ function apply(c) {
   fogUniforms.uColor.value.copy(v.mist);
   fogUniforms.uOpacity.value = v.mistA;
   mistEnabled.value = v.mistA > 0.01 ? 1 : 0;
-  rain.visible = v.rain > 0.01;
-  rainUniforms.uOpacity.value = 0.35 * v.rain;
+  const rainStrength = state.levelId === 3 ? Math.max(v.rain, 0.6) : v.rain;
+  rain.visible = rainStrength > 0.01;
+  rainUniforms.uOpacity.value = 0.35 * rainStrength;
   stars.forEach((s, i) => { s.material.opacity = starBase[i] * v.stars; });
   moonVisual.material.opacity = 0.95 * v.moon;
   applyGrade(v);

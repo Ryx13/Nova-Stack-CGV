@@ -990,7 +990,7 @@ async function finishDefense(key){
  if(!lv3.route.pending&&lv3.phase==='switches'&&lv3.compound.switches.every(sw=>sw.activated)){
    startBossPhase();
    await s.narrative.show({id:'guardian-reveal',mode:'cinematic',speaker:'DR. JAMES / SIGNAL LOST',title:'Something heard us.',text:'The quarantine facility\'s containment worker is infected, and ruptured gas tanks are strapped across its back. Leave the marked circle when it braces; at range it sprays gas toward your position, so move before the burst lands. Shoot the glowing brass chest valve while it recovers. Below half health, it closes in faster.',shot:'guardian',continueLabel:'Fight the Guardian'});
-   lv3.awakening=createGuardianAwakening({camera,state,scene,boss:lv3.bossZombie,sfx});
+   lv3.awakening=createGuardianAwakening({camera,state,scene,boss:lv3.bossZombie,sfx,lights:lv3.details.lights});
  }else writeObjective();
 }
 function updateStoryInteractions(dt,pos){
