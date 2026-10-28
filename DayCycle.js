@@ -298,44 +298,23 @@ function apply(c) {
 
 /* --- Colour grade -------------------------------------------------------
    One grade over the whole picture, following the timeline: colour drained
-   (sat), a cold blue cast by night turning to warm amber by day (warm, -1
-   to 1), a touch of contrast (con) and brightness (bri). Done by the
-   compositor on the canvas, not a render pass. Chromium gets one SVG colour
-   matrix, which can tint blue without turning red to cyan (hue-rotate
-   would); elsewhere a plain CSS chain does warm only, no cold cast. */
-const GRADE_ID = 'nova-grade';
-let gradeMatrix = null, gradeKey = '';
-function gradeFilter(sat, warm, con, bri) {
-  if (!window.chrome) return `saturate(${sat}) sepia(${Math.max(0, warm) * 0.3}) contrast(${con}) brightness(${bri})`;
-  if (!gradeMatrix) {
-    const NS = 'http://www.w3.org/2000/svg';
-    const svg = document.createElementNS(NS, 'svg');
-    svg.setAttribute('width', '0'); svg.setAttribute('height', '0');
-    svg.style.position = 'absolute';
-    const filter = document.createElementNS(NS, 'filter');
-    filter.id = GRADE_ID;
-    filter.setAttribute('color-interpolation-filters', 'sRGB'); // like CSS filters, not linear light
-    gradeMatrix = document.createElementNS(NS, 'feColorMatrix');
-    gradeMatrix.setAttribute('type', 'matrix');
-    filter.appendChild(gradeMatrix); svg.appendChild(filter); document.body.appendChild(svg);
-  }
-  // Saturation toward luma, then a per-channel tint, then contrast round mid-grey
-  const L = [0.2126, 0.7152, 0.0722];
-  const tint = [1 + 0.07 * warm, 1 + 0.015 * warm, 1 - 0.09 * warm];
-  const rows = [];
-  for (let r = 0; r < 3; r++) {
-    const gain = bri * con * tint[r];
-    const row = L.map((l, c) => gain * ((1 - sat) * l + (r === c ? sat : 0)));
-    rows.push(...row.map((x) => x.toFixed(4)), 0, (bri * 0.5 * (1 - con)).toFixed(4));
-  }
-  gradeMatrix.setAttribute('values', `${rows.join(' ')} 0 0 0 1 0`);
-  return `url(#${GRADE_ID})`;
-}
+   (sat), warm amber by day (warm, 0 to 1; below 0 adds nothing, the night's
+   cold comes from its blue light and fog), a touch of contrast (con) and
+   brightness (bri). A plain CSS filter chain on the canvas, done by the
+   compositor on the GPU: no render pass. Not an SVG colour matrix: Chrome
+   can take an SVG filter on a WebGL canvas off the fast path, and that
+   lagged the game badly. Rounded to 2 places and set at most every
+   GRADE_EVERY_MS, since each change makes the browser rebuild the filter. */
+const GRADE_EVERY_MS = 500;
+let gradeKey = '', gradeAt = 0;
 function applyGrade(v) {
-  const key = `${v.sat.toFixed(3)}|${v.warm.toFixed(3)}|${v.con.toFixed(3)}|${v.bri.toFixed(3)}`;
-  if (key === gradeKey) return; // the timeline eases slowly; most frames change nothing
+  const now = performance.now();
+  if (gradeKey && now - gradeAt < GRADE_EVERY_MS) return;
+  const key = `saturate(${v.sat.toFixed(2)}) sepia(${(Math.max(0, v.warm) * 0.3).toFixed(2)}) contrast(${v.con.toFixed(2)}) brightness(${v.bri.toFixed(2)})`;
+  gradeAt = now;
+  if (key === gradeKey) return;
   gradeKey = key;
-  renderer.domElement.style.filter = gradeFilter(v.sat, v.warm, v.con, v.bri);
+  renderer.domElement.style.filter = key;
 }
 
 /** Every frame, from the game loop. */
