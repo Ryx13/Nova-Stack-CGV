@@ -9,9 +9,9 @@
             chunks of its concrete, and a wave of dust rolls out both ways
             along the street; if you're still under it, it cuts you
      1.9 s  on Easy, Dr. James on the radio: run, the animals are coming
-     2.6 s  the shaking has broken the zoo open: its infected lions are out
+     2.6 s  the shaking has broken the zoo open: its infected animals are out
             (ZooAnimals.js), coming in from the west side street
-   Once a run; a restart puts the glass back and the lions away.
+   Once a run; a restart puts the glass back and the animals away.
 ====================================================================== */
 import * as THREE from 'three';
 import { sfx, pushKillFeed, STREET_HALF_W } from './Scene.js';
@@ -89,7 +89,7 @@ export function createLevel2Quake() {
         if (t >= ANIMALS_AT) {
           animals.release();
           sfx.noise(0.9, 0.14, 140);
-          pushKillFeed('The quake broke the zoo open — lions in the street!');
+          pushKillFeed('The quake broke the zoo open — the animals are in the street!');
           phase = 'done';
         }
       }
