@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { updateLocomotion } from './Movement.mjs';
+import { updateLocomotion } from '../../Movement.js';
 const fresh=()=>({keys:{},playerStamina:100,staminaExhausted:false,currentSpeed:3.7,crouching:false});
 const tick=(s,n=1,forward=1)=>{for(let i=0;i<n;i++)updateLocomotion(s,1/60,forward);};
 let s=fresh();tick(s,100);assert.equal(s.isSprinting,false);assert.equal(s.currentSpeed,3.7);

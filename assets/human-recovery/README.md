@@ -3,7 +3,8 @@
 The two GLBs match the game’s zombie variants: `human_walker.glb` is based on
 `zombie_running_on_metel_maniac.glb` (66 bones), and `human_runner.glb` on
 `model-rigged.glb` (52 bones). They retain the source meshes, face details,
-UV layout and clothing. The editable Blender project keeps the original source
+UV layout and clothing. The editable Blender project (art/human-recovery/, kept
+out of the shipped assets) keeps the original source
 collections alongside the human-ready versions and authors a `recover` pose.
 It opens with the two human variants separated side by side at a shared
 standing scale, set to their final grounded resting poses. The source

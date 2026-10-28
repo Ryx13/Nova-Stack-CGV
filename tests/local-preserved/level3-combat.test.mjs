@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-const source=readFileSync(new URL('../Level3.js',import.meta.url),'utf8');
+const source=readFileSync(new URL('../../Level3.js',import.meta.url),'utf8');
 const body=source.match(/z\.takeDamage = function\(damage = 26, headshot = false\) \{([\s\S]*?)\n    \};/)[1];
 function enemy(health=100){
  const drops=[],state={playerHealth:health,playerMaxHealth:100,kills:0};

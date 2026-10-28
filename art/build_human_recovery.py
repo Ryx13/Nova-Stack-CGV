@@ -9,6 +9,9 @@ _options=_args.parse_args(sys.argv[sys.argv.index('--')+1:] if '--' in sys.argv 
 ROOT=str(Path(__file__).resolve().parents[1])
 SRC=_options.source_assets or str(Path(ROOT)/'assets')
 OUT = os.path.join(ROOT, 'assets', 'human-recovery')
+# The editable .blend stays with the other sources, out of the shipped assets/
+SRC_OUT = os.path.join(ROOT, 'art', 'human-recovery')
+os.makedirs(SRC_OUT, exist_ok=True)
 os.makedirs(OUT, exist_ok=True)
 MODELS = [('walker','zombie_running_on_metel_maniac.glb'),('runner','model-rigged.glb')]
 FPS = 24
@@ -242,7 +245,7 @@ for variant,filename in MODELS:
     manifest.append({'variant':variant,'source':filename,'export':os.path.basename(glb),'bones':len(armature.data.bones),'blender_actions':['recover','recover_pose'],'gltf_animation_names':['recover','recover'],'clean_skin_polygons':skin_poly_count,'clean_skin_atlases':len(skin_cache)})
 bpy.context.scene.frame_set(START)
 bpy.ops.object.select_all(action='DESELECT')
-bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT,'human_recovery_source.blend'))
+bpy.ops.wm.save_as_mainfile(filepath=os.path.join(SRC_OUT,'human_recovery_source.blend'))
 with open(os.path.join(OUT,'manifest.json'),'w') as f:
     json.dump({'assets':manifest,'skin_treatment':'Head, neck and hand polygons are selected from vertex weights and receive a baked warm human skin atlas: 85% natural skin color blended with 15% original pixel detail. Very dark neutral pixels (hair/eyes) and bright neutral eye pixels are preserved. Body/clothing pixels keep source materials. Upper arms aim using elbow joints and forearms using wrist/hand joints toward the hips and abdomen; the recover pose bends knees and side-rolls the root.'},f,indent=2)
 print('HUMAN_RECOVERY_ASSETS',manifest)

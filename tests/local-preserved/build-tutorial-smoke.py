@@ -1,7 +1,8 @@
 """Create disposable tutorial fixture with test hooks in a copy of the module."""
 from pathlib import Path
+import re
 import time
-root = Path(__file__).resolve().parent.parent
+root = Path(__file__).resolve().parents[2]  # tests/local-preserved -> repository root
 version = str(time.time_ns())
 source = (root / 'IntroTutorial.js').read_text(encoding='utf-8')
 hooks = '''active={dispose,test:{
@@ -14,5 +15,5 @@ hooks = '''active={dispose,test:{
 }}'''
 source = source.replace('active={dispose}', hooks).replace('./Narrative.js', f'./Narrative.js?v={version}').replace('./TutorialAvatar.js', f'./TutorialAvatar.js?v={version}')
 (root / 'smoke-tutorial-module.js').write_text(source, encoding='utf-8')
-(root / 'smoke-tutorial.html').write_text((root / 'index.html').read_text(encoding='utf-8').replace('src="main.js"',f'src="smoke-tutorial.mjs?v={version}"'),encoding='utf-8')
-(root / 'smoke-tutorial.mjs').write_text((root / 'tests/tutorial-smoke.mjs').read_text(encoding='utf-8').replace('./smoke-tutorial-module.js', f'./smoke-tutorial-module.js?v={version}'),encoding='utf-8')
+(root / 'smoke-tutorial.html').write_text(re.sub(r'src="main\.js(\?[^"]*)?"', f'src="smoke-tutorial.mjs?v={version}"', (root / 'index.html').read_text(encoding='utf-8')),encoding='utf-8')
+(root / 'smoke-tutorial.mjs').write_text((root / 'tests/local-preserved/tutorial-smoke.mjs').read_text(encoding='utf-8').replace('./smoke-tutorial-module.js', f'./smoke-tutorial-module.js?v={version}'),encoding='utf-8')
