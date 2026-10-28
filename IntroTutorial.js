@@ -17,7 +17,7 @@ import { updateLocomotion } from './Movement.js';
 import { createStoryAudio } from './StoryAudio.js';
 import { createNarrative } from './Narrative.js';
 import { createTutorialAvatar } from './TutorialAvatar.js';
-import { loadGLB, loadAnimations, fitClip } from './roster.js';
+import { loadGLB, fitClip } from './roster.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 
 let active = null;
@@ -69,20 +69,19 @@ export function startSafeRoomTutorial({ onComplete }) {
   // once it loads (below); this silhouette until then, or if it can't.
   const glass = box(scene, -4.7, 1.7, -2.5, .08, 3, 3.4, 0x7fc8df); glass.material.transparent = true; glass.material.opacity = .2;
   const scientist = new THREE.Group(); scientist.position.set(-5.35, 0, -2.5); scientist.add(box(scientist, 0, 1.1, 0, .62, 1.65, .45, 0xe5e9e7)); const head = new THREE.Mesh(new THREE.SphereGeometry(.32, 16, 12), new THREE.MeshStandardMaterial({ color: 0xd6a57e })); head.position.y = 2.05; scientist.add(head); scene.add(scientist);
-  // The real Dr. James, standing still with his arms at his sides: posed
-  // once on the first frame of the game's standing idle (his Mixamo rig
-  // takes the roster's clips) and never animated, stood to the height of a
-  // man and turned to face the room
-  let gone = false;
-  Promise.all([loadGLB('assets/story/dr_james.glb'), loadAnimations()]).then(([gltf, { clips, skeletonRoot }]) => {
+  // The real Dr. James, standing still, arms at his sides: Mixamo's
+  // Standing Idle (assets/story/standing_idle.glb, built by
+  // tools/build_characters.py -- pose), fitted to his rig, stood to the
+  // height of a man and turned to face the room
+  let gone = false, jamesMixer = null;
+  Promise.all([loadGLB('assets/story/dr_james.glb'), loadGLB('assets/story/standing_idle.glb')]).then(([gltf, pose]) => {
     if (gone) return;
     const model = skeletonClone(gltf.scene);
     model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
-    const idle = THREE.AnimationClip.findByName(clips, 'idle');
-    if (idle) {
-      const pose = new THREE.AnimationMixer(model);
-      pose.clipAction(fitClip(idle, skeletonRoot, model)).play();
-      pose.update(0); // and never again: no update, so the bones hold this pose (stopping it would put him back in a T-pose)
+    if (pose.animations[0]) {
+      jamesMixer = new THREE.AnimationMixer(model);
+      jamesMixer.clipAction(fitClip(pose.animations[0], pose.scene, model)).play();
+      jamesMixer.update(0);
     }
     model.updateWorldMatrix(true, true);
     const bounds = new THREE.Box3().setFromObject(model, true), height = bounds.getSize(new THREE.Vector3()).y;
@@ -192,7 +191,7 @@ export function startSafeRoomTutorial({ onComplete }) {
   addEventListener('keydown',keydown);addEventListener('keyup',keyup);addEventListener('mousemove',mousemove);addEventListener('mouseup',mouseup);addEventListener('blur',clearKeys);document.addEventListener('visibilitychange',visibility);document.addEventListener('pointerlockchange',pointerChange);canvas.addEventListener('click',lock);canvas.addEventListener('mousedown',shoot);
   function finish(){if(done)return;done=true;document.exitPointerLock();dispose();const card=document.createElement('section');card.className='dw-modal';card.innerHTML='<div class="dw-card"><div class="dw-eyebrow">FIELD GUIDE / READY</div><h2>Your delivery is not over.</h2><p>Dr. James is counting on you. Get the culture sample, find the girl with your stabilizer, and bring the city home.</p><button class="dw-button primary">Choose deployment</button></div>';document.body.append(card);card.querySelector('button').focus();card.querySelector('button').onclick=()=>{card.remove();onComplete?.();};}
   function tick(now){
-   const dt=Math.min(.05,(now-last)/1000);last=now;narrative.update(dt);elapsed+=dt;
+   const dt=Math.min(.05,(now-last)/1000);last=now;narrative.update(dt);jamesMixer?.update(dt);elapsed+=dt;
    const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
    alarm.intensity=reduced?5:5+Math.sin(elapsed*3)*1.5;lamp.intensity=26;
    camClock+=dt;if(camClock>=1/12){camClock=0;drawCam(elapsed);}
