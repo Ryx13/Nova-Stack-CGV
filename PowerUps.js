@@ -13,6 +13,8 @@ import { updateFuelHUD, MAG_SIZE } from './Actions.js';
 // distinction matters for circular imports. characters.js imports
 // spawnPickup/spawnCoin/registerKillstreak from this file the same way.
 import { playerVis } from './characters.js';
+import { spawnBlastFX, blastBlood } from './ImpactFX.js';
+import { cameraShock } from './CameraShock.js';
 
 /* ======================================================================
    PowerUps.js — SHIELD / EXPLOSIONS / COINS / PICKUPS / POWERUP DROPS
@@ -27,6 +29,58 @@ const BARREL_SCALE = 0.274; // measured height 3.209 units -> real ~0.88m oil dr
 // factor that fit the others.
 const EXPLOSION_SCALE = 0.6;
 const EXPLOSION_RADIUS = 6.5;
+const BLAST_BOSS_DAMAGE = 150; // at the centre, half at the edge: a boss is hurt, not erased
+// Looks the part: the drum's own texture tinted red, a yellow-and-black
+// hazard band round the middle, and a slow red warning glow (one shared
+// material, so one value pulses every barrel)
+const BARREL_TINT = 0xd0412c, BARREL_GLOW = 0xff2a12;
+let barrelMaterials = null, barrelBand = null, barrelGlowTime = 0;
+function hazardBand(template) {
+  const box = new THREE.Box3().setFromObject(template), size = box.getSize(new THREE.Vector3());
+  const c = document.createElement('canvas'); c.width = 256; c.height = 32;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#f2c21a'; ctx.fillRect(0, 0, 256, 32);
+  ctx.fillStyle = '#141210';
+  for (let x = -32; x < 256; x += 32) { ctx.beginPath(); ctx.moveTo(x, 32); ctx.lineTo(x + 16, 32); ctx.lineTo(x + 32, 0); ctx.lineTo(x + 16, 0); ctx.fill(); }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping; tex.repeat.x = 2;
+  // In the drum's own (unscaled) units: it's a child of the barrel mesh
+  const r = Math.max(size.x, size.z) / 2 * 1.02;
+  const geo = new THREE.CylinderGeometry(r, r, size.y * 0.13, 28, 1, true).translate(0, box.min.y + size.y * 0.6, 0);
+  return { geo, mat: new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6, metalness: 0.3, emissive: BARREL_GLOW, emissiveIntensity: 0 }) };
+}
+function dressBarrel(mesh) {
+  if (!barrelMaterials) {
+    barrelMaterials = new Map();
+    barrelBand = hazardBand(barrelTemplate);
+  }
+  mesh.traverse((o) => {
+    if (!o.isMesh) return;
+    const swap = (m) => {
+      if (!barrelMaterials.has(m)) {
+        const red = m.clone();
+        red.color = new THREE.Color(BARREL_TINT);
+        red.emissive = new THREE.Color(BARREL_GLOW);
+        red.emissiveIntensity = 0;
+        barrelMaterials.set(m, red);
+      }
+      return barrelMaterials.get(m);
+    };
+    o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material);
+  });
+  const band = new THREE.Mesh(barrelBand.geo, barrelBand.mat);
+  band.castShadow = true;
+  mesh.add(band);
+}
+/** Every frame (updateExplosions): the warning glow breathes. */
+function pulseBarrels(dt) {
+  if (!barrelMaterials) return;
+  barrelGlowTime += dt;
+  const glow = 0.08 + 0.22 * (0.5 + 0.5 * Math.sin(barrelGlowTime * 2.6));
+  for (const m of barrelMaterials.values()) m.emissiveIntensity = glow;
+  barrelBand.mat.emissiveIntensity = glow * 0.35;
+}
 let barrelTemplate = null;
 let explosionTemplate = null;
 
@@ -89,6 +143,7 @@ export class Barrel {
     this.isBarrel = true;
     this.exploded = false;
     this.mesh = barrelTemplate.clone(true);
+    dressBarrel(this.mesh);
     this.mesh.scale.setScalar(BARREL_SCALE);
     this.mesh.position.copy(pos);
     this.mesh.traverse((o) => {
@@ -114,18 +169,25 @@ export class Barrel {
     if (idx >= 0) state.explosiveBarrels.splice(idx, 1);
     if (this.collisionBody) { world.removeBody(this.collisionBody); }
     spawnExplosionEffect(pos);
+    spawnBlastFX(pos, EXPLOSION_RADIUS);
     sfx.explosion();
-    state.shake = Math.max(state.shake, 0.4);
+    // The pressure wave on the view, by distance; the plain jitter on top,
+    // scaled the same, so a blast down the street isn't felt like one beside you
+    state.shake = Math.max(state.shake, 0.4 * cameraShock(pos));
     // AoE kill: goDown() first (this is what counts the kill toward the
     // objective, same as a gunshot knockdown), then confirmedKill()
-    // immediately after to make it permanent.
+    // immediately after to make it permanent. Protected and cured infected
+    // are left alone, and a boss takes damage through its own rules
+    // (armour, weak point, reinforcements) instead of being erased.
     state.zombies.forEach((z) => {
-      if (!z.alive) return;
-      if (z.mesh.position.distanceTo(pos) < EXPLOSION_RADIUS) {
-        z.health = 0;
-        z.goDown();
-        z.confirmedKill(false);
-      }
+      if (!z.alive || z.recoveryProtected || z.state === 'cured') return;
+      const d = z.mesh.position.distanceTo(pos);
+      if (d >= EXPLOSION_RADIUS) return;
+      if (z.isBoss || z.guardian) { z.takeDamage(BLAST_BOSS_DAMAGE * (1 - 0.5 * d / EXPLOSION_RADIUS), false); return; }
+      blastBlood(z.mesh.position, pos);
+      z.health = 0;
+      z.goDown();
+      z.confirmedKill(false);
     });
     // Chain reaction: any OTHER barrel caught in the blast radius also
     // goes off, on a tiny delay so it reads as a chain rather than one
@@ -164,6 +226,7 @@ export function spawnExplosionEffect(pos) {
 }
 
 export function updateExplosions(dt) {
+  pulseBarrels(dt);
   for (let i = state.activeExplosions.length - 1; i >= 0; i--) {
     const e = state.activeExplosions[i];
     if (e.mixer) e.mixer.update(dt);
