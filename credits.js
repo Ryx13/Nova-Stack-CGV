@@ -291,6 +291,9 @@ export const TEAM_MADE = [
   'Procedural ruins: battle-damaged rooflines, blown-out corners with exposed floors, collapsed blocks, rubble mounds, shopfront ground floors',
   'Procedural street dressing (dead trees, rubble, litter, stains, overhead cables) and static-scenery merging for performance',
   'Vending machine and supply catalogue system, procedural item icons',
+  'Level 2 zoo animals (lion, cheetah, zebra, ostrich, rhino): modelled and animated in code, richer or plainer to suit the machine (ZooAnimals.js)',
+  'Street navigation for the infected and the animals round walls and down the back streets (ZombieNav.js)',
+  'Pause-menu settings: mouse sensitivity and volume, remembered on this browser (Settings.js)',
 ];
 
 export const TEAM_NAME = 'Nova Stack';

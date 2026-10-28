@@ -373,6 +373,18 @@ class Builder {
   face(u, v, out, su, sv, sn, material) {
     this.add(new THREE.BoxGeometry(sn, sv, su).translate(this.fx + this.side * out, v, this.zc + u), material);
   }
+  // Something standing out from the facade you mustn't walk into (a display
+  // case): solid, and a camera blocker, when the building is (this.solid)
+  solidFace(u, v, out, su, sv, sn) {
+    if (!this.solid) return;
+    const x = this.fx + this.side * out, z = this.zc + u;
+    addStaticBox(sn / 2, sv / 2, su / 2, x, v, z);
+    const occ = new THREE.Mesh(new THREE.BoxGeometry(sn, sv, su));
+    occ.position.set(x, v, z);
+    occ.updateMatrixWorld(true);
+    occ.userData.sceneryMerged = true;
+    state.occluders.push(occ);
+  }
   // Mirror glass and sliding doors on the facade (instanced, see above)
   mirrorFace(u, v, out, su, sv, sn) {
     mirrorPanes.push({ x: this.fx + this.side * out, y: v, z: this.zc + u, sx: sn, sy: sv, sz: su, side: this.side });
@@ -452,6 +464,9 @@ function flowerStands(b, rnd, fw) {
    Each district weighs which are drawn at random (DISTRICTS below); the
    rest are placed on purpose (FEATURES below, CityLayout featureLots). */
 const SHOPS = {
+  // A phone shop and an electronics shop for certain (Level 2's riddle runs across both windows)
+  mobile: { front: 'mirror', names: ['MOBILE'] },
+  electronics: { front: 'mirror', names: ['ELECTRONICS'] },
   restaurant: { front: 'display', fill: 'tables', names: ['DINER', 'PIZZA', 'NOODLES', 'CAFE', 'BISTRO', 'BURGERS', 'TACOS'] },
   clothing: { front: 'display', fill: 'mannequins', names: ['BOUTIQUE', 'SHOES', 'TAILOR', 'DENIM', 'HATS'] },
   garage: { front: 'garage', names: ['HARDWARE', 'AUTO PARTS', 'TIRES', 'TOOLS'] },
@@ -511,7 +526,10 @@ const DISTRICTS = {
 const FEATURES = {
   downtown: [{ side: -1, z0: 2, z1: -40, shops: ['bar', 'salon'] }],
   // Harbour Walk lands on the buildings either side: they need the height
-  harbour: [{ side: -1, covers: -86, minStoreys: 3 }, { side: 1, covers: -86, minStoreys: 3 }],
+  harbour: [{ side: -1, covers: -86, minStoreys: 3 }, { side: 1, covers: -86, minStoreys: 3 },
+    // On your left as you set off, ELECTRONICS first then MOBILE (a lot's
+    // first shop is its south end): the riddle's two windows (Level2.js placeRiddle)
+    { side: -1, z0: 20, z1: -20, shops: ['mobile', 'electronics'] }],
 };
 /** Named spots for later: luckyDog, the bar's terrace, where the lady in
     the red dress and her chihuahua will be; vets, each clinic's facade
@@ -526,6 +544,7 @@ function displayCase(b, rnd, u, W, fill, night, dark) {
   b.face(u, 0.55, 0.3, W + 0.2, 0.1, 0.6, dark);                                 // sill
   b.face(u, 3.15, 0.3, W + 0.2, 0.12, 0.6, dark);                                // head
   for (const e of [-1, 1]) b.face(u + e * (W / 2 + 0.05), 1.85, 0.3, 0.1, 2.6, 0.6, dark);
+  b.solidFace(u, 1.6, 0.3, W + 0.2, 3.2, 0.62); // it stands 0.6 m proud of the wall: solid, or you'd walk into the window
   displayPanes.push({ x: b.fx + b.side * 0.58, y: 1.85, z: b.zc + u, sx: 0.03, sy: 2.5, sz: W });
   glassPanes.push(Object.assign(displayPanes[displayPanes.length - 1], { kind: 'display', index: displayPanes.length - 1 }));
   const at = (out) => b.fx + b.side * out;
@@ -692,6 +711,7 @@ function shopfront(b, rnd, fw, night, kind, far) {
   }
   if (shop.front === 'mirror') {
     b.mirrorFace(sideU, 1.85, 0.04, sideW, 2.6, 0.08);
+    mirrorPanes[mirrorPanes.length - 1].shop = kind; // which shop's glass (Level 2 finds the mobile store's)
     b.face(doorU, DOOR_H / 2, 0.012, DOOR_W * 2 + 0.2, DOOR_H, 0.02, mat(0x0e1214)); // dark lobby behind the doors
     b.face(doorU, DOOR_H + 0.1, 0.07, DOOR_W * 2 + 0.3, 0.2, 0.14, dark);            // door head
     b.slidingDoor(doorU);
@@ -991,6 +1011,7 @@ export function buildKitBuilding(x, z, w, h, d, { face, collider = true, far = f
     z0 += fw;
     const depth = w * (0.82 + rnd() * 0.18);
     const b = new Builder(facadeX, side, zc, D, walk);
+    b.solid = collider;
     const H = buildOne(b, rnd, fw, depth, h, night, far, shops?.[n++], minStoreys);
     b.finish(group, !far);
     if (!collider) continue;

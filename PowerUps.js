@@ -276,9 +276,17 @@ export function resetPowerUps() {
     list.forEach((p) => scene.remove(p.mesh));
     list.length = 0;
   }
+  // Ended as they end on their own (updateExplosions): the light back to
+  // its pool, not out of the scene (that lost the slot for good, and the
+  // next blast's new light recompiled shaders), the animation let go
   state.activeExplosions.forEach((e) => {
+    if (e.mixer) {
+      e.mixer.stopAllAction();
+      e.mixer.uncacheRoot(e.obj);
+    }
     if (e.obj) scene.remove(e.obj);
-    if (e.light) scene.remove(e.light);
+    if (e.fallback) e.fallback.busy = false;
+    releaseEffectLight(e.light);
   });
   state.activeExplosions.length = 0;
   state.explosiveBarrels.forEach((b) => {

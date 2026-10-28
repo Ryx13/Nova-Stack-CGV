@@ -17,6 +17,8 @@ import { updateLocomotion } from './Movement.js';
 import { createStoryAudio } from './StoryAudio.js';
 import { createNarrative } from './Narrative.js';
 import { createTutorialAvatar } from './TutorialAvatar.js';
+import { loadGLB, loadAnimations, fitClip } from './roster.js';
+import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 
 let active = null;
 
@@ -63,9 +65,35 @@ export function startSafeRoomTutorial({ onComplete }) {
   // Desk and unmistakable cyan pistol pickup.
   box(scene, 0, .85, .2, 3.3, 1.5, 1.4, 0x42372e); box(scene, 0, 1.65, .2, 3.5, .15, 1.55, 0x67594b);
   const pistol = new THREE.Group(); pistol.position.set(0, 1.9, .15); pistol.add(box(pistol, 0, 0, 0, .72, .19, .28, 0xbff0ff, .55)); pistol.add(box(pistol, -.16, -.23, .02, .22, .4, .18, 0x9fcbd6, .25)); scene.add(pistol);
-  // Dr. James: procedural silhouette behind reinforced glass.
+  // Dr. James behind reinforced glass: his model (assets/story/dr_james.glb)
+  // once it loads (below); this silhouette until then, or if it can't.
   const glass = box(scene, -4.7, 1.7, -2.5, .08, 3, 3.4, 0x7fc8df); glass.material.transparent = true; glass.material.opacity = .2;
   const scientist = new THREE.Group(); scientist.position.set(-5.35, 0, -2.5); scientist.add(box(scientist, 0, 1.1, 0, .62, 1.65, .45, 0xe5e9e7)); const head = new THREE.Mesh(new THREE.SphereGeometry(.32, 16, 12), new THREE.MeshStandardMaterial({ color: 0xd6a57e })); head.position.y = 2.05; scientist.add(head); scene.add(scientist);
+  // The real Dr. James, standing still with his arms at his sides: posed
+  // once on the first frame of the game's standing idle (his Mixamo rig
+  // takes the roster's clips) and never animated, stood to the height of a
+  // man and turned to face the room
+  let gone = false;
+  Promise.all([loadGLB('assets/story/dr_james.glb'), loadAnimations()]).then(([gltf, { clips, skeletonRoot }]) => {
+    if (gone) return;
+    const model = skeletonClone(gltf.scene);
+    model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+    const idle = THREE.AnimationClip.findByName(clips, 'idle');
+    if (idle) {
+      const pose = new THREE.AnimationMixer(model);
+      pose.clipAction(fitClip(idle, skeletonRoot, model)).play();
+      pose.update(0); // and never again: no update, so the bones hold this pose (stopping it would put him back in a T-pose)
+    }
+    model.updateWorldMatrix(true, true);
+    const bounds = new THREE.Box3().setFromObject(model, true), height = bounds.getSize(new THREE.Vector3()).y;
+    const fitted = new THREE.Group();
+    fitted.scale.setScalar(1.8 / Math.max(0.1, height));
+    fitted.position.y = -bounds.min.y * fitted.scale.y;
+    fitted.rotation.y = Math.PI / 2; // facing +x, into the room
+    fitted.add(model);
+    for (const part of scientist.children) part.visible = false;
+    scientist.add(fitted);
+  }).catch(() => { /* the silhouette stays */ });
 
   const monitorCanvas = document.createElement('canvas'); monitorCanvas.width = 512; monitorCanvas.height = 128;
   const mc = monitorCanvas.getContext('2d'); mc.fillStyle = '#071112'; mc.fillRect(0,0,512,128);
@@ -190,6 +218,6 @@ export function startSafeRoomTutorial({ onComplete }) {
    ui.hint.textContent=blocked?'Transmission paused exploration':'Click to capture mouse • V changes view • H opens your field guide';paintTraining();renderer.render(scene,camera);raf=requestAnimationFrame(tick);
   }
   function resize(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);}
-  function dispose(){cancelAnimationFrame(raf);narrative.dispose();avatar.dispose();audio.dispose();removeEventListener('keydown',keydown);removeEventListener('keyup',keyup);removeEventListener('mousemove',mousemove);removeEventListener('mouseup',mouseup);removeEventListener('blur',clearKeys);removeEventListener('resize',resize);document.removeEventListener('visibilitychange',visibility);document.removeEventListener('pointerlockchange',pointerChange);canvas.removeEventListener('click',lock);canvas.removeEventListener('mousedown',shoot);const geometries=new Set(),materials=new Set(),textures=new Set();scene.traverse(o=>{if(o.geometry)geometries.add(o.geometry);for(const m of o.material?(Array.isArray(o.material)?o.material:[o.material]):[]){materials.add(m);if(m.map)textures.add(m.map);}});geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());textures.forEach(t=>t.dispose());ui.root.remove();renderer.dispose();active=null;}
+  function dispose(){gone=true;cancelAnimationFrame(raf);narrative.dispose();avatar.dispose();audio.dispose();removeEventListener('keydown',keydown);removeEventListener('keyup',keyup);removeEventListener('mousemove',mousemove);removeEventListener('mouseup',mouseup);removeEventListener('blur',clearKeys);removeEventListener('resize',resize);document.removeEventListener('visibilitychange',visibility);document.removeEventListener('pointerlockchange',pointerChange);canvas.removeEventListener('click',lock);canvas.removeEventListener('mousedown',shoot);const geometries=new Set(),materials=new Set(),textures=new Set();scene.traverse(o=>{if(o.geometry)geometries.add(o.geometry);for(const m of o.material?(Array.isArray(o.material)?o.material:[o.material]):[]){materials.add(m);if(m.map)textures.add(m.map);}});geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());textures.forEach(t=>t.dispose());ui.root.remove();renderer.dispose();active=null;}
   addEventListener('resize',resize);active={dispose};raf=requestAnimationFrame(tick);return active;
 }

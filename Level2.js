@@ -15,7 +15,7 @@
 import './Level2Config.js';  // MUST be first — sets skip flags before heavy modules
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { scene, camera, addStaticBox, pushKillFeed, dom, sfx, KILL_TARGET, STREET_HALF_W, addLight, sunlightOnly } from './Scene.js';
+import { scene, camera, addStaticBox, pushKillFeed, dom, sfx, KILL_TARGET, STREET_HALF_W, rowX, addLight, sunlightOnly } from './Scene.js';
 import { state } from './state.js';
 import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis, playerBody, spawnZombie, loadDeferredAssets, updateBlinkingLamps, updateFireLights, syncHandGun, spawnChargers, solidsMoved, pushOutOfSolids, setPlayerAction } from './characters.js';
 import { spawnCoin } from './PowerUps.js';
@@ -25,12 +25,13 @@ import { finishRun } from './account.js';
 import { createNarrative } from './Narrative.js';
 import { setGirlOutcome } from './StoryProgress.js';
 import { registerDayProgress } from './DayCycle.js';
-import { updateCityKit, resetCityKit } from './CityKit.js';
+import { updateCityKit, resetCityKit, glassPanes } from './CityKit.js';
 import { updateTown } from './CityTown.js';
 import { instantiateCharacter, loadGLB, fitClip, clipsFor, boneByName } from './roster.js';
 import { holdForIntro, playIntro, updateIntro } from './Level2Intro.js';
 import { createLevel2Quake } from './Level2Quake.js';
 import { scentTrail } from './ImpactFX.js';
+import { buildHideouts } from './Hideouts.js';
 import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
 import { buildStreetDressing } from './streetDressing.js';
 import { buildSurroundings } from './Level2Surroundings.js';
@@ -83,7 +84,7 @@ export function startLevel(mode) {
   // The chase itself: the girl NPC and her per-frame tick.
   spawnGirl();
   // Mid-route under Harbour Walk: the aftershock, the bridge's glass coming
-  // down and the zoo's lions getting out (after the merge: they move)
+  // down and the zoo's animals getting out (after the merge: they move)
   lv2Quake = createLevel2Quake();
   registerLevelTick((dt) => lv2Quake.update(dt));
   // The fly-through briefing: gameplay holds from here until it ends
@@ -411,15 +412,20 @@ function makeFallenZombie(x, z, ry) {
     it's opaque, so its light only falls in front. `catalog` is
     the machine's supplies preset — Level 2 passes its own one-product
     presets (radar / adrenaline) below. */
-/* IMPOSSIBLE: THE RADAR MOVES — off the main street, in one of these each
-   run: the side street off Harbour Square, the square's north edge, against
-   the shops on the west or the east back street. Kept out of the scenery
-   merge so a restart can carry it, collider and all, somewhere new. */
+/* IMPOSSIBLE: THE RADAR MOVES — never on the main street: one of eight
+   places across the far parts of the town each run (both sides of both
+   back streets, Harbour Square), so finding it means exploring. Kept out of
+   the scenery merge so a restart can carry it, collider and all, somewhere
+   new. */
 const RADAR_SPOTS = [
-  { x: 50, z: -104.4, ry: Math.PI },        // the side street off Harbour Square, front to the street
-  { x: 24, z: -103.6, ry: Math.PI },        // the north edge of Harbour Square
-  { x: -49.5, z: -22, ry: -Math.PI / 2 },   // the west back street, against the shops
-  { x: 61.5, z: -38, ry: Math.PI / 2 },     // the east back street, against the shops
+  { x: 24, z: -103.6, ry: Math.PI, riddle: ['THE BAND IS GONE', 'THE SQUARE STILL HUMS', 'NORTH SIDE, GREEN LIGHT'] },              // the north edge of Harbour Square
+  { x: -49.5, z: -22, ry: -Math.PI / 2, riddle: ['BEHIND THE WEST SHOPS', "A STONE'S THROW NORTH", "OF THE CHEMIST'S CROSS"] },  // the west back street, against the shops
+  { x: -49.5, z: -150, ry: -Math.PI / 2, riddle: ['OPPOSITE THE CAGES', 'WHERE THE WEST STREET', 'RUNS OUT'] },                   // the west back street's far end, across from the zoo
+  { x: -66.5, z: 12, ry: Math.PI / 2, riddle: ['WEST STREET', 'FAR KERB', 'WHERE IT BEGINS'] },                                  // the west back street, the far side, up north
+  { x: 61.5, z: -38, ry: Math.PI / 2, riddle: ['EAST BEHIND THE SHOPS', "NORTH OF THE DINER'S", 'NEON'] },                        // the east back street, against the shops
+  { x: 61.5, z: -160, ry: Math.PI / 2, riddle: ['EAST STREET', 'WHERE YOU CAN', 'SMELL THE SEA'] },                               // the east back street, down toward the water
+  { x: 78.2, z: -60, ry: -Math.PI / 2, riddle: ['EAST STREET, FAR KERB', 'BEFORE YOU REACH', 'THE BURGERS'] },                    // the east back street, the far side
+  { x: -49.5, z: -100, ry: -Math.PI / 2, riddle: ["WHERE THE LIONS' GATE", 'STANDS OPEN', 'LOOK ACROSS THE ROAD'] },              // the west back street, by the zoo gate
 ];
 let radarSpot = -1;
 function pickRadarSpot() {
@@ -432,11 +438,182 @@ function placeRadarSomewhere() {
   const at = pickRadarSpot();
   const machine = placeVendingMachine(at.x, at.z, at.ry, radarCatalog, RADAR_GLOW);
   machine.root.userData.dynamic = true; // out of the merge: it moves
+  placeRiddle();
+  paintRiddle(at.riddle);
   return machine;
 }
-// A restart: the same machine, somewhere else
+
+/* THE RIDDLE ON THE WINDOW — Impossible's one clue to the radar, where
+   nobody can miss it: spray-painted across the display window of the shop
+   right by where you start, LOOKING FOR THE RADAR? over the riddle itself.
+   It points at a landmark by the machine (RADAR_SPOTS riddle), so it's
+   worked out, not searched for; repainted whenever the machine moves (a
+   restart). That window only cracks, never shatters (ImpactFX p.painted),
+   so the clue can't be shot away. A plywood board on the pavement stands in
+   if there's no window near the start (buildRiddleBoard). */
+const RIDDLE_AT = { x: 15, z: 6, w: 4.6, h: 2.5 }; // the board's place, facing west, toward the road (clear of the crossing at z 14)
+const RIDDLE_NEAR = { z: 8, reach: 40 };  // the windows: mirror glass near here, ahead of the start
+// One surface per window it's written on (two: the electronics shop's and the
+// mobile store's, read in that order), or the one board
+const riddleSurfaces = [];
+let riddleOnGlass = false;
+function riddleSurface() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024; canvas.height = 640;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  riddleSurfaces.push({ canvas, texture });
+  return texture;
+}
+// Written straight on a pane, just proud of its street face
+function paintOnPane(pane) {
+  const map = riddleSurface();
+  pane.painted = true;
+  const out = -Math.sign(pane.x) || 1; // the street side of the glass
+  const w = Math.min(pane.sz - 0.1, 3.2), h = Math.min(pane.sy - 0.1, w * 0.62);
+  const paint = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+    new THREE.MeshStandardMaterial({ map, transparent: true, depthWrite: false, roughness: 0.6, emissive: 0xffffff, emissiveMap: map, emissiveIntensity: 0.25 }));
+  paint.position.set(pane.x + out * ((pane.sx || 0.06) / 2 + 0.02), pane.y, pane.z);
+  paint.rotation.y = out * Math.PI / 2;
+  paint.name = 'riddle-paint';
+  scene.add(paint);
+}
+// Always on mirror glass: the electronics and mobile stores' windows by the
+// start (CityKit's harbour feature lot); else the two nearest mirror windows
+// side by side there (in reading order: facing a west-side shop, down the
+// street is to your right); else the nearest display window; else the board
+function placeRiddle() {
+  if (riddleSurfaces.length) return;
+  const near = (p) => Math.abs(p.x) < rowX + 1 && Math.abs(p.z - RIDDLE_NEAR.z) < RIDDLE_NEAR.reach;
+  const byNear = (a, b) => Math.abs(a.z - RIDDLE_NEAR.z) - Math.abs(b.z - RIDDLE_NEAR.z);
+  const ours = ['electronics', 'mobile'].map((shop) => glassPanes.find((p) => p.shop === shop && near(p)));
+  let panes = ours.every(Boolean) ? ours : null;
+  if (!panes) {
+    const mirrors = glassPanes.filter((p) => p.kind === 'mirror' && near(p)).sort(byNear);
+    const first = mirrors.find((p) => p.x < 0) || mirrors[0];
+    const next = first && mirrors.find((p) => p !== first && Math.sign(p.x) === Math.sign(first.x) && Math.abs(p.z - first.z) < 14);
+    panes = first ? [first, next].filter(Boolean).sort((a, b) => (a.x < 0 ? b.z - a.z : a.z - b.z)) : null;
+  }
+  if (!panes) panes = glassPanes.filter((p) => p.kind === 'display' && near(p)).sort(byNear).slice(0, 1);
+  console.info('[riddle]', panes.length ? panes.map((p) => `${p.shop || p.kind} at x ${p.x.toFixed(1)} z ${p.z.toFixed(1)}`).join(' + ') : 'on the board');
+  if (!panes.length) { buildRiddleBoard(); return; }
+  riddleOnGlass = true;
+  panes.forEach(paintOnPane);
+  state.riddleWhere = panes[0].x < 0 ? 'left' : 'right'; // facing down the street (-z), east (+x) is on your right
+  state.riddleShop = panes === ours ? 'the windows of the ELECTRONICS and MOBILE stores' : panes[0].kind === 'mirror' ? 'the mirrored shop windows' : 'the shop window';
+}
+function buildRiddleBoard() {
+  if (riddleSurfaces.length) return;
+  const riddleTexture = riddleSurface();
+  state.riddleWhere = 'board';
+  const board = new THREE.Group();
+  board.position.set(RIDDLE_AT.x, 0, RIDDLE_AT.z);
+  board.rotation.y = -Math.PI / 2; // its face (+z) toward -x, the road
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(RIDDLE_AT.w, RIDDLE_AT.h), new THREE.MeshStandardMaterial({ map: riddleTexture, roughness: 0.95 }));
+  face.position.set(0, 0.25 + RIDDLE_AT.h / 2, 0.03);
+  const ply = new THREE.Mesh(new THREE.BoxGeometry(RIDDLE_AT.w, RIDDLE_AT.h, 0.05), new THREE.MeshStandardMaterial({ color: 0x8a6a44, roughness: 1 }));
+  ply.position.set(0, 0.25 + RIDDLE_AT.h / 2, 0);
+  board.add(ply, face);
+  for (const e of [-1, 1]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, RIDDLE_AT.h + 0.4, 0.1), new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 1 }));
+    post.position.set(e * (RIDDLE_AT.w / 2 - 0.15), (RIDDLE_AT.h + 0.4) / 2, -0.08);
+    board.add(post);
+  }
+  board.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  board.userData.dynamic = true; // repainted: kept out of the merge
+  scene.add(board);
+  addStaticBox(0.1, (RIDDLE_AT.h + 0.4) / 2, RIDDLE_AT.w / 2, RIDDLE_AT.x, (RIDDLE_AT.h + 0.4) / 2, RIDDLE_AT.z);
+}
+// Weathered plywood, the lines sprayed on in lime and white with drips, a
+// little radar dish in the corner and the survivor's tag
+/* Written in blood, by hand, not typed: each letter in a scrawling hand at
+   its own slant, size and height, laid on thick with a finger (a dark edge
+   so it reads on the glass, the wet red over it, a sheen), runs dripping
+   off the letters with a bead at the bottom, spatter round it, and the
+   handprint where the writer leaned on the glass. */
+const HAND = '"Segoe Script", "Brush Script MT", "Lucida Handwriting", "Comic Sans MS", cursive';
+function bloodLine(g, text, cx, cy, size, maxW) {
+  g.font = `bold ${size}px ${HAND}`;
+  const widths = [...text].map((ch) => g.measureText(ch).width);
+  const total = widths.reduce((a, b) => a + b, 0), k = Math.min(1, maxW / total);
+  let x = cx - (total * k) / 2;
+  const bottoms = [];
+  [...text].forEach((ch, i) => {
+    const w = widths[i] * k;
+    if (ch !== ' ') {
+      g.save();
+      g.translate(x + w / 2, cy + (Math.random() - 0.5) * size * 0.14);
+      g.rotate((Math.random() - 0.5) * 0.22);
+      g.scale(k * (0.92 + Math.random() * 0.2), 0.92 + Math.random() * 0.2);
+      g.lineJoin = 'round';
+      g.lineWidth = size * 0.16; g.strokeStyle = 'rgba(40,3,3,.9)'; g.strokeText(ch, 0, 0);   // the dark edge
+      g.fillStyle = '#9e1210'; g.fillText(ch, 0, 0);                                          // the blood
+      g.lineWidth = size * 0.05; g.strokeStyle = 'rgba(150,14,12,.9)'; g.strokeText(ch, 0, 0); // laid on unevenly
+      g.fillStyle = 'rgba(255,150,140,.12)'; g.fillText(ch, -size * 0.03, -size * 0.04);      // the wet sheen
+      g.restore();
+      if (Math.random() < 0.45) bottoms.push(x + w * (0.3 + Math.random() * 0.4));
+    }
+    x += w;
+  });
+  // Runs off the bottoms of the letters, a bead at each end
+  for (const bx of bottoms) {
+    const len = size * (0.3 + Math.random() * 1.1), w0 = 3 + Math.random() * 5;
+    g.fillStyle = '#7e0d0b';
+    g.beginPath(); g.moveTo(bx - w0 / 2, cy + size * 0.28); g.lineTo(bx + w0 / 2, cy + size * 0.28);
+    g.lineTo(bx + w0 * 0.25, cy + size * 0.28 + len); g.lineTo(bx - w0 * 0.25, cy + size * 0.28 + len); g.fill();
+    g.beginPath(); g.arc(bx, cy + size * 0.28 + len, w0 * 0.6, 0, Math.PI * 2); g.fill();
+  }
+}
+function bloodSpatter(g, W, H) {
+  for (let i = 0; i < 70; i++) {
+    const x = Math.random() * W, y = Math.random() * H, r = Math.random() < 0.85 ? 1 + Math.random() * 3 : 4 + Math.random() * 7;
+    g.fillStyle = `rgba(${110 + Math.random() * 50},8,8,${0.5 + Math.random() * 0.45})`;
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+}
+// The writer's hand, flat on the glass
+function bloodHandprint(g, x, y, s) {
+  g.save(); g.translate(x, y); g.rotate(-0.3); g.fillStyle = 'rgba(120,10,9,.75)';
+  g.beginPath(); g.ellipse(0, 0, s * 0.42, s * 0.5, 0, 0, Math.PI * 2); g.fill();          // the palm
+  [[-0.32, -0.62, 0.1, 0.3, -0.25], [-0.12, -0.82, 0.1, 0.34, -0.08], [0.1, -0.86, 0.1, 0.35, 0.05], [0.3, -0.72, 0.09, 0.3, 0.2], [0.5, -0.1, 0.1, 0.26, 0.9]]
+    .forEach(([fx, fy, rw, rh, rot]) => { g.beginPath(); g.ellipse(fx * s, fy * s, rw * s, rh * s, rot, 0, Math.PI * 2); g.fill(); });
+  g.restore();
+}
+// Across two windows: the question and the first line on the first, the rest
+// on the second, a smear trailing off the first toward it
+function paintRiddle(lines) {
+  if (!riddleSurfaces.length || !lines) return;
+  const two = riddleSurfaces.length === 2;
+  riddleSurfaces.forEach(({ canvas, texture }, k) => {
+    const g = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
+    if (riddleOnGlass) g.clearRect(0, 0, W, H); // straight on the glass: you see through between the strokes
+    else {
+      g.fillStyle = '#9a7a52'; g.fillRect(0, 0, W, H);
+      for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(60,40,20,${0.05 + Math.random() * 0.08})`; g.fillRect(0, Math.random() * H, W, 2 + Math.random() * 6); } // grain
+    }
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    bloodSpatter(g, W, H);
+    if (!two) {
+      bloodLine(g, 'LOOKING FOR THE RADAR?', W / 2, 70, 60, W - 80); // what it's for, first
+      lines.forEach((line, i) => bloodLine(g, line, W / 2, 205 + i * 135, 84, W - 90));
+      bloodHandprint(g, W - 120, H - 110, 120);
+    } else if (k === 0) {
+      bloodLine(g, 'LOOKING FOR', W / 2, 110, 92, W - 90);
+      bloodLine(g, 'THE RADAR?', W / 2, 250, 92, W - 90);
+      bloodLine(g, lines[0], W / 2, 440, 84, W - 90);
+      g.fillStyle = 'rgba(120,10,9,.8)'; // the finger dragged on toward the next window
+      g.beginPath(); g.moveTo(W - 200, 548); g.quadraticCurveTo(W - 90, 560, W, 532); g.lineTo(W, 552); g.quadraticCurveTo(W - 90, 580, W - 200, 562); g.fill();
+    } else {
+      lines.slice(1).forEach((line, i, rest) => bloodLine(g, line, W / 2, H / 2 + (i - (rest.length - 1) / 2) * 170 - 30, 90, W - 90));
+      bloodHandprint(g, W - 130, H - 110, 120);
+    }
+    texture.needsUpdate = true;
+  });
+}
+// A restart: the same machine, somewhere else, and the riddle repainted for it
 function moveRadar(machine) {
   const at = pickRadarSpot();
+  paintRiddle(at.riddle);
   machine.root.position.set(at.x, 0, at.z);
   machine.root.rotation.y = at.ry;
   machine.root.updateMatrixWorld(true);
@@ -744,7 +921,9 @@ function buildLevel2Scene() {
 
   placeCoinClusters();
 
-  return { machines, escapePoint: port.escapePoint, boat: port.boat };
+  // The three walk-in buildings out in the back streets (Hideouts.js)
+  const hideouts = buildHideouts();
+  return { machines, escapePoint: port.escapePoint, boat: port.boat, hideouts };
 }
 
 // Persistent coin clusters along the route — the machine economy's
@@ -815,8 +994,9 @@ const GIRL_WAYPOINTS = [
 let girl = null; // { group, mixer, wpIndex, mats, glint }
 
 /* IMPOSSIBLE: SHE HIDES — instead of running from the start, she's gone to
-   ground somewhere near the start of the street, one of HIDE_SPOTS picked
-   each run, still and listening, and she can't be caught there. Only once
+   ground inside one of the walk-in buildings in the far parts of the town
+   (Hideouts.js; HIDE_SPOTS only if they're missing), picked each run, still
+   and listening, and she can't be caught there. Only once
    you have the radar (which shows where she is) and come within SCENT_M of
    her does your scent reach her (scentTrail): she turns, frozen with fear
    for a moment, then bolts out along her spot's way out (out) onto her
@@ -836,9 +1016,21 @@ const HIDE_SPOTS = [
   { at: [12.6, 12], face: Math.PI / 2, out: [[2, 8]], join: 1 },
 ];
 const SCENT_M = 20, SCENT_TRAVEL_S = 1.0, FEAR_S = 0.9;
+// Impossible: inside one of the walk-in buildings, a different one each
+// run, deep in its back room; her way out is its side door
+let hideoutIndex = -1;
+function pickHideSpot() {
+  const hideouts = lv2Scene?.hideouts || [];
+  if (!hideouts.length) return HIDE_SPOTS[Math.floor(Math.random() * HIDE_SPOTS.length)];
+  let i = Math.floor(Math.random() * hideouts.length);
+  if (i === hideoutIndex && hideouts.length > 1) i = (i + 1) % hideouts.length; // somewhere new
+  hideoutIndex = i;
+  const h = hideouts[i];
+  return { at: [h.girl.x, h.girl.z], face: h.girl.face, out: h.out, join: h.join, building: h.name };
+}
 function hideGirl() {
   if (!girl) return;
-  const spot = HIDE_SPOTS[Math.floor(Math.random() * HIDE_SPOTS.length)];
+  const spot = pickHideSpot();
   girl.hiding = { spot, sensed: false, t: 0 };
   girl.path = null;
   const g = girl.group;
@@ -1584,7 +1776,7 @@ function updateMission(dt) {
     // Found her without the radar: she's wedged in out of reach
     dom.prompt.classList.remove('hidden');
     dom.prompt.querySelector('b').textContent = '!';
-    dom.promptText.textContent = "She's hiding out of reach. Get the radar";
+    dom.promptText.textContent = "She won't come out. Find the radar";
   } else if (!girl?.hiding && distToGirl < CATCH_RANGE * 1.6) {
     dom.prompt.classList.remove('hidden');
     dom.prompt.querySelector('b').textContent = 'E';
@@ -1627,7 +1819,7 @@ function updateMission(dt) {
 let lv2Quake = null;
 function resetLevel2() {
   resetCityKit(); // a restart is a new play: new random rays across the mirrors
-  lv2Quake?.reset(); // the bridge's glass back, the lions away, the quake to come
+  lv2Quake?.reset(); // the bridge's glass back, the animals away, the quake to come
   if (catchStory) { catchStory.dispose(); catchStory = null; state.narrativeBlocked = false; }
   escort = null;
   state.compassOverride = null;
