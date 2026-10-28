@@ -157,7 +157,7 @@ export function createStaticLampCache(renderer, scene, { bake = true, gridStatic
     for (const material of materials) install(material, fields.get(material.userData.staticLampGrid?'static-grid':material.userData.staticLampHeight));
     stats.gridSurfaces=[...materials].filter(m=>m.userData.staticLampGrid).length;
     stats.surfaces = materials.size; stats.bakeMs = performance.now() - start;
-    console.info('[static lamps]', { ...stats });
+    if (document.body.classList.contains('debug')) console.info('[static lamps]', { ...stats }); // debug mode only (?debug)
   }
   function install(material, field) {
     const previous = material.onBeforeCompile, key = material.customProgramCacheKey.bind(material);

@@ -1288,7 +1288,10 @@ export function bootLevel(levelConfig = {}) {
   loadObstacles();
   loadTrashCans();
   markStaticSince(scene, sceneryStart);
-  if (state.levelId !== 2) console.info('[scenery]', mergeStaticScenery(scene));
+  if (state.levelId !== 2) {
+    const merged = mergeStaticScenery(scene);
+    if (document.body.classList.contains('debug')) console.info('[scenery]', merged); // load stats, debug mode only (?debug)
+  }
   if (state.levelId !== 2) streetAtmosphere = createStreetAtmosphere(scene);
   if (!state.skipCar) loadCars();
   loadMainCharacter();

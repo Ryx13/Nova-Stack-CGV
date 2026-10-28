@@ -93,7 +93,8 @@ export function startLevel(mode) {
   buildIndustrialDistrict(); // the works over the walls, merged with the compound below
   const compound = buildLevel3Scene();
   for(const object of [compound.towerShell,compound.mast,compound.dish,...compound.switches.map(s=>s.shell)]) object.userData.staticScenery=true;
-  console.info('[compound scenery]',mergeStaticScenery(scene));
+  const merged=mergeStaticScenery(scene);
+  if(document.body.classList.contains('debug'))console.info('[compound scenery]',merged); // debug mode only (?debug)
   lv3 = {
     compound,
     phase: 'switches', // 'switches' -> 'boss' -> 'dispersion' -> 'done'

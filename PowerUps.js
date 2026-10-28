@@ -446,7 +446,6 @@ export function activateShield(seconds) {
     const height = THREE.MathUtils.clamp(rawHeight, 1.4, 2.2);
     const radius = height * 1.4; // was 1.24 — a little bigger, per feedback
     const centerY = height * 0.5;
-    console.log('[shield] state.playerCurrentHeight:', state.playerCurrentHeight, '-> clamped height:', height, '-> radius:', radius, '-> centerY:', centerY);
     state.shieldRadius = radius; // exposed so zombies can treat the shield
                                   // as a real physical barrier, not just a
                                   // damage-immunity flag — see characters.js

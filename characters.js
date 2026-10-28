@@ -2868,7 +2868,6 @@ function measureAnkleToSole(rigObj, boneL, boneR) {
   // this file, validate it's within a plausible human range first.
   const raw = lowY - box.min.y;
   if (raw < 0.01 || raw > 0.35) {
-    console.log('[measureAnkleToSole] rejected implausible value', raw.toFixed(3), '— using default', ANKLE_TO_SOLE);
     return ANKLE_TO_SOLE;
   }
   // Small safety margin: accounts for a real gait shifting the foot's
@@ -2939,7 +2938,6 @@ function loadZombieTemplate(path, opts = {}) {
     const footBoneL = findBoneLike(obj, 'LeftFoot') || findBoneLike(obj, 'L_Ankle') || findBoneLike(obj, 'Left_Ankle') || null;
     const footBoneR = findBoneLike(obj, 'RightFoot') || findBoneLike(obj, 'R_Ankle') || findBoneLike(obj, 'Right_Ankle') || null;
     const templateAnkleToSole = measureAnkleToSole(obj, footBoneL, footBoneR);
-    console.log('[zombie template]', path, 'template-measured ankleToSole:', templateAnkleToSole.toFixed(3));
     zombieTemplates.push({ scene: obj, animations: gltf.animations || [], footOffset, runs: !!opts.runs, path, ankleToSole: templateAnkleToSole });
     state.loadFlags.zombie = true;
     markLoaded('zombie');

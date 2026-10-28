@@ -64,7 +64,7 @@ export function startLevel(mode) {
   // Base world + this level's dressing are all fixed scenery now: merge it
   // (~1,500 meshes into a few hundred chunked ones — see mergeStatic.js)
   const mergeStats = mergeStaticScenery(scene);
-  console.log(`[mergeStatic] ${mergeStats.meshesBefore} meshes -> ${mergeStats.meshesAfter}`);
+  if (document.body.classList.contains('debug')) console.info(`[mergeStatic] ${mergeStats.meshesBefore} meshes -> ${mergeStats.meshesAfter}`); // debug mode only (?debug)
   // Trees, rubble, litter, stains, cables — instanced, so added after the merge
   buildStreetDressing();
   // Scrubland, mountains and the open sea around it all (custom haze shader)
