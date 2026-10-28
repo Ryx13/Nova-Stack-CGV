@@ -88,15 +88,15 @@ const NIGHT = [
   // light from where it hangs in the sky (el/az), with no shadows. The
   // streetlights light the street, and a faint blue fill (with the stars'
   // share, STARLIGHT) keeps silhouettes readable.
-  // Level 1: a true streetlit night — near-black blue overhead, the city's
+  // Level 1: a true streetlit night — dark blue overhead, the city's
   // glow only a faint warm smear low on the horizon, stars and the moon
   // clear, the street carried by its lamps, beams and lit windows. Every
-  // value here is a per-frame uniform, so the darker night adds no work.
-  { c: 0, top: 0x0c1420, hor: 0x2a2f38, bot: 0x1c1a19, glow: 0x9fb4d8, gs: 0.08,
-    fog: 0x1a212e, fogD: 0.0105, sunCol: 0xb4c6ea, sun: 0.42, el: 24, az: 15, disc: 0,
-    hemiSky: 0x39496a, hemiGnd: 0x0f1114, hemi: 0.26, ambCol: 0x232c3c, amb: 0.16, exp: 0.8,
-    mist: 0x2a3140, mistA: 0.34, rain: 0, stars: 1, moon: 1,
-    sat: 0.62, warm: -0.55, con: 1.14, bri: 0.94 },
+  // value here is a per-frame uniform, so the night adds no work.
+  { c: 0, top: 0x111b2c, hor: 0x323a4a, bot: 0x201e1d, glow: 0x9fb4d8, gs: 0.08,
+    fog: 0x202a3a, fogD: 0.0095, sunCol: 0xb4c6ea, sun: 0.5, el: 24, az: 15, disc: 0,
+    hemiSky: 0x41557c, hemiGnd: 0x0f1114, hemi: 0.32, ambCol: 0x2a3648, amb: 0.2, exp: 0.9,
+    mist: 0x313a4c, mistA: 0.3, rain: 0, stars: 1, moon: 1,
+    sat: 0.62, warm: -0.55, con: 1.14, bri: 0.97 },
   { c: 1 },
   // Level 2, leaving downtown: the grid is dead, a cool moonlit night, the
   // moon over the sea ahead (the port is south, toward -z)
