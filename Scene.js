@@ -178,7 +178,8 @@ export const renderer = new THREE.WebGLRenderer({ canvas: dom.canvas, antialias:
 // Capped at 1.5 (MAX_PIXEL_RATIO); RenderScale.js steps it down further if frames run slow
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// Low profile: plain PCF, a quarter of the soft filter's lookups on every lit pixel
+renderer.shadowMap.type = gfx.low ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.92;
@@ -320,7 +321,7 @@ scene.add(hemiLight);
 const sun = new THREE.DirectionalLight(0xffc48a, 1.15);
 sun.position.set(-80, 42, 30);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(gfx.low ? 1024 : 2048, gfx.low ? 1024 : 2048); // as SUN_SHADOW_MAP below
 sun.shadow.camera.left = -120; sun.shadow.camera.right = 120;
 sun.shadow.camera.top = 120; sun.shadow.camera.bottom = -120;
 sun.shadow.camera.near = 1; sun.shadow.camera.far = 320;
@@ -655,7 +656,7 @@ export function applyTimeOfDay(mode) {
    - SMOKE: a few billboard stacks far beyond the street, drifting.
 --------------------------------------------------------------------- */
 const SUN_SHADOW_HALF = 45;      // metres covered either side of the focus point
-const SUN_SHADOW_MAP = 2048;
+const SUN_SHADOW_MAP = gfx.low ? 1024 : 2048; // low profile: a quarter of the shadow pixels
 const SUN_DISTANCE_FROM_FOCUS = 220;
 let clearDay = null;             // { sunDir, smoke[], time } once built
 

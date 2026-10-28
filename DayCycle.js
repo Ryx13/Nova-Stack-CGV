@@ -30,6 +30,7 @@
 import * as THREE from 'three';
 import { scene, renderer, sky, stars, starUniforms, rain, lighting, setSunDirection } from './Scene.js';
 import { state } from './state.js';
+import { gfx } from './GraphicsProfile.js';
 import { rainUniforms, fogUniforms } from './shaders.js';
 import { mistEnabled } from './HeightMist.js';
 
@@ -217,6 +218,9 @@ let progressSource = null;
 export function registerDayProgress(fn) { progressSource = fn; }
 
 let frames = null, latched = 0, shown = 0, envTimer = 0, envScene = null;
+// s between sky re-lights (day) and night-sea captures; each re-renders the
+// sky into a reflection map, a regular spike on a weak GPU, so low waits longer
+const SKY_REFRESH = gfx.low ? 15 : 4;
 const starBase = stars.map((s) => s.material.opacity);
 const _dir = new THREE.Vector3();
 const rad = THREE.MathUtils.degToRad;
@@ -330,7 +334,7 @@ export function updateDayCycle(dt) {
   apply(state.levelId - 1 + shown);
   // Re-light sky-lit levels from the current sky every few seconds
   if (envScene && (envTimer -= dt) <= 0) {
-    envTimer = 4;
+    envTimer = SKY_REFRESH;
     const pmrem = new THREE.PMREMGenerator(renderer);
     const previous = scene.environment;
     scene.environment = pmrem.fromScene(envScene, 0.04, 1, 1000).texture;
@@ -350,7 +354,7 @@ export function updateDayCycle(dt) {
 const nightSeas = [];
 let nightEnvScene = null, nightEnv = null, nightEnvTimer = 0;
 function captureNightSky() {
-  nightEnvTimer = 4;
+  nightEnvTimer = SKY_REFRESH;
   if (!nightEnvScene) {
     nightEnvScene = new THREE.Scene();
     nightEnvScene.add(new THREE.Mesh(sky.geometry, sky.material));

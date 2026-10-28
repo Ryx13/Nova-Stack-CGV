@@ -39,6 +39,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { scene, renderer, lighting, addStaticBox, rowX, STREET_HALF_W } from './Scene.js';
 import { state } from './state.js';
+import { gfx } from './GraphicsProfile.js';
 import { SIDEWALK, layout } from './CityLayout.js';
 
 const STOREY = 3.2;
@@ -177,7 +178,9 @@ function verticalSignTexture(name) {
    last capture. All the glass is one instanced mesh, built on the first
    update. */
 const PROBE_EVERY = 0.3, PROBE_REACH = 45; // s between captures; only near a mirror
-let mirrorMaterial = null, probe = null, probeTimer = 0;
+// Low profile (GraphicsProfile.js): one capture per mirror, kept, a face a
+// frame: each capture draws the whole scene six times over
+let mirrorMaterial = null, probe = null, probeTimer = 0, probeMirror = null;
 /* A ray of sunshine across the glass: now and then a thin diagonal band of
    light travels across every pane at once, as if the sun had just caught
    it, tinted the sun's colour (a pale glint at night). It runs in each
@@ -236,7 +239,7 @@ function updateGlint(dt) {
   glintUniforms.uGlint.value = glint.at;
 }
 /** A level restart: a fresh pair of random rays for the new run. */
-export function resetCityKit() { planGlints(); glint.at = -9; }
+export function resetCityKit() { planGlints(); glint.at = -9; probeMirror = null; }
 // Put the probe in front of the mirror nearest the player; false if none is near
 function placeProbe(playerPos) {
   let best = null, bestD = PROBE_REACH;
@@ -245,6 +248,8 @@ function placeProbe(playerPos) {
     if (d < bestD) { bestD = d; best = m; }
   }
   if (!best) return false;
+  if (gfx.low && best === probeMirror) return false; // already captured: keep it
+  probeMirror = best;
   probe.position.set(best.x + best.side * 3, 1.7, best.z);
   probe.updateMatrixWorld();
   return true;
@@ -316,7 +321,7 @@ export function updateCityKit(dt, playerPos, { spreadFaces = false } = {}) {
   else if (playerPos && (probeTimer -= dt) <= 0) {
     probeTimer = PROBE_EVERY;
     if (placeProbe(playerPos)) {
-      if (spreadFaces) { renderProbe(0); probeFace = 1; } else renderProbe();
+      if (spreadFaces || gfx.low) { renderProbe(0); probeFace = 1; } else renderProbe();
     }
   }
   updateGlint(dt);
