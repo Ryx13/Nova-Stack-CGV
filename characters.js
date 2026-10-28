@@ -3070,6 +3070,11 @@ export class Zombie {
       mats.forEach((m) => { if (m) m.side = THREE.DoubleSide; });
     });
     scene.add(this.mesh);
+    // Level of detail (updateZombies): pose every animEvery frames, from a
+    // random first frame so throttled infected don't all pose on the same one
+    this.animEvery = 1;
+    this.animSkip = 1 + Math.floor(Math.random() * 4);
+    this.animAcc = 0;
     this.health = 50 + Math.floor(Math.random() * 20);
     this.maxHealth = this.health;
     this.state = 'idle';
@@ -3268,6 +3273,13 @@ export class Zombie {
     }
   }
   playWalk(dt, rate, timeScale) {
+    // Far or off-screen: skip this frame's pose, and catch up with the
+    // saved time on the next one that runs, so the gait keeps its pace
+    this.animAcc += dt;
+    if (--this.animSkip > 0) return;
+    this.animSkip = this.animEvery;
+    dt = this.animAcc;
+    this.animAcc = 0;
     if (this.rigged && this.hasAnim) {
       this.mixer.timeScale = THREE.MathUtils.lerp(this.mixer.timeScale, timeScale, dt * 3);
       this.mixer.update(dt);
@@ -3290,6 +3302,12 @@ export class Zombie {
     this.limbs.legR.rotation.x = -swing;
     this.limbs.armL.rotation.x = -swing * 0.8 + 0.3;
     this.limbs.armR.rotation.x = swing * 0.8 + 0.3;
+  }
+  // Shadow casting on or off for the whole body; only walks it on a change
+  setShadow(on) {
+    if (this.shadowOn === on) return;
+    this.shadowOn = on;
+    this.mesh.traverse((o) => { if (o.isMesh && o !== this.hitbox) o.castShadow = on; });
   }
   remove() {
     scene.remove(this.mesh);
@@ -3347,7 +3365,33 @@ function crowdCanMove(x,z,nx,nz){
 // passes and object allocations every frame, worst exactly when the
 // player is being chased by a full pack). Building the snapshot once
 // here and handing the same array to every zombie makes it O(n).
+/* ZOMBIE LEVEL OF DETAIL — from the camera, every frame. Posing a skinned
+   rig (mixer + foot clamp) is the big per-infected cost and a shadow draws
+   the body a second time; neither shows at a distance. Near infected pose
+   every frame and cast shadows; further out they pose every 2nd, then 4th
+   frame; off screen every 6th (still moving, so turning round never finds
+   a frozen one). Shadows only within ZOMBIE_SHADOW_M. AI runs every frame
+   regardless: only the look is thinned out. */
+const ZOMBIE_LOD_NEAR = 22, ZOMBIE_LOD_MID = 40, ZOMBIE_SHADOW_M = 28, ZOMBIE_ALWAYS_M = 8;
+const _lodFrustum = new THREE.Frustum(), _lodMatrix = new THREE.Matrix4(), _lodSphere = new THREE.Sphere();
+function updateZombieLOD() {
+  _lodFrustum.setFromProjectionMatrix(_lodMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+  for (const z of state.zombies) {
+    if (!z.alive || !(z instanceof Zombie)) continue;
+    if (z.isBoss) { z.animEvery = 1; z.setShadow(true); continue; } // always in full
+    const d = z.mesh.position.distanceTo(camera.position);
+    const sc = Math.max(1, z.mesh.scale.y);
+    _lodSphere.center.copy(z.mesh.position).y += 1 * sc;
+    _lodSphere.radius = 1.4 * sc;
+    const onScreen = _lodFrustum.intersectsSphere(_lodSphere);
+    z.animEvery = d < ZOMBIE_ALWAYS_M ? 1 : !onScreen ? 6 : d < ZOMBIE_LOD_NEAR ? 1 : d < ZOMBIE_LOD_MID ? 2 : 4;
+    if (z.animSkip > z.animEvery) z.animSkip = z.animEvery; // coming closer: no waiting out a long skip
+    z.setShadow(d < ZOMBIE_SHADOW_M + (z.shadowOn === false ? 0 : 3)); // 3 m of give: no flicker on the line
+  }
+}
+
 export function updateZombies(dt, playerPos) {
+  updateZombieLOD();
   const coordinated=state.levelId===3&&!state.isDead&&!state.paused&&!state.narrativeBlocked;
   if(coordinated)enemyCrowd.prepare(state.zombies,playerPos,dt,{shieldRadius:state.shieldActive?(state.shieldRadius||0):0,inVehicle:state.inVehicle});
   _zombieNeighborSnapshot.length = 0;

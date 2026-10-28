@@ -171,7 +171,7 @@ function readout() {
     `Pixels ${_size.x}×${_size.y} @${rs.ratio.toFixed(2)} = ${(_size.x * _size.y / 1e6).toFixed(1)} MP   (cap ${rs.top.toFixed(2)}, screen ${rs.device.toFixed(2)}${rs.ratio < rs.top ? ', auto-lowered' : ''})`,
     `Lights point ${c.point} · spot ${c.spot} · dir ${c.dir}   shadowed ${c.shadowLights} (${c.shadowPasses} passes, ${k(c.casters)} casters)`,
     `Meshes ${k(c.meshes)} · instanced ${c.instanced} (${k(c.instances)}) · skinned ${c.skinned}`,
-    `Infected alive ${alive.length} · near ${near}`,
+    `Infected alive ${alive.length} · near ${near}   pose every frame ${alive.filter((z) => (z.animEvery || 1) === 1).length} · thinned ${alive.filter((z) => z.animEvery > 1).length} · shadows ${alive.filter((z) => z.shadowOn !== false).length}`,
     `Memory geo ${mem.geometries} · tex ${mem.textures}${heap ? ` · heap ${Math.round(heap / 1048576)} MB` : ''}`,
     `→ ${verdict}`,
   ].join('\n');
