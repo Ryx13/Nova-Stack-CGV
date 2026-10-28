@@ -24,6 +24,25 @@
 - **Rebuild** (Blender 5.2):
   `& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b -P tools\build_characters.py`
 
+- **City citizens (the infected)** — `Citizens.js`. Each level's zombies
+  are drawn from its own people (downtown office workers and police, harbour
+  dock workers, quarantine nurses and soldiers), on the same Mixamo skeleton,
+  made to look infected in-game (`zombify`: drained, sick-green, grime and
+  dried blood), so a normal citizen model needs no repainting. To add one:
+  download the Mixamo character (FBX Binary, *With Skin*, T-pose) to
+  `art/citizens/<id>_rigged.fbx`, with `<id>` from `CITIZENS` in
+  `Citizens.js`, rebuild, and credit it in `credits.js`. Their own clips
+  (FBX Binary, *Without Skin*, on any Mixamo character) go in
+  `art/zombie_animations/`: `zombie_walk.fbx` is the one they walk with;
+  without it they use the roster's walk. A level skips citizens not added yet.
+  They come from somewhere, never out of thin air: out of a main-street
+  doorway, in from a side street, out of a park, or along the street where
+  you can't see them appear (`spawnPlaces` in `characters.js`). The raw
+  Mixamo downloads stay local (`.gitignore`); the game ships the builds.
+- **Dr. James** — the story's scientist, a Mixamo body built like the
+  citizens but never infected: `art/story/dr_james_rigged.fbx` ->
+  `assets/story/dr_james.glb`, ready to be placed in the story.
+
 ## New in this pass (sound & music)
 - **Three licensed soundtracks** (`Music.js`, files in `assets/music/`):
   Levels 1–2 share Iwan 'qubodup' Gabovitch's *Dark Ambience Loop*; Level 3

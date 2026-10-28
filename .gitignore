@@ -8,3 +8,9 @@ _nocache_test_server.js
 
 # Throwaway browser fixtures written by tests/local-preserved/build-*.py
 /smoke-*
+
+# Mixamo source downloads for the citizens and story characters: 5-65 MB
+# each. The game ships the lightened builds in assets/citizens/ and
+# assets/story/; keep these locally to rebuild (tools/build_characters.py).
+art/citizens/*.fbx
+art/story/*.fbx

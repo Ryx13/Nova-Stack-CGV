@@ -152,6 +152,20 @@ export const CREDITS = [
         source: 'https://ludo.ai',
         licence: 'AI-generated assets — used in line with Ludo.ai\'s terms of service',
       },
+      {
+        name: 'Dr. James',
+        what: 'The scientist at the heart of the story (Mixamo Ch16). Lightened for the browser; assets/story/dr_james.glb.',
+        author: 'Adobe Mixamo',
+        source: 'https://www.mixamo.com',
+        licence: 'Royalty-free under the Adobe/Mixamo terms of use (no attribution required, credited anyway)',
+      },
+      {
+        name: 'City citizens (the infected)',
+        what: 'The people of the city as zombies, made infected in-game: office worker (Mixamo Ch33), resident (Ch12), young woman (Girl), jogger (Remy), construction worker (Ch17), hazmat responder (Ch11) and street performer (Peasant Girl). Lightened for the browser; assets/citizens/.',
+        author: 'Adobe Mixamo',
+        source: 'https://www.mixamo.com',
+        licence: 'Royalty-free under the Adobe/Mixamo terms of use (no attribution required, credited anyway)',
+      },
     ],
   },
   {
@@ -160,6 +174,13 @@ export const CREDITS = [
       {
         name: 'Mixamo animation clips',
         what: 'Every character clip in assets/characters/animations.glb (movement, shooting, dying, the select-screen dance and listening idle), and the Level 2 runner\'s Injured Run.',
+        author: 'Adobe Mixamo',
+        source: 'https://www.mixamo.com',
+        licence: 'Royalty-free under the Adobe/Mixamo terms of use (no attribution required, credited anyway)',
+      },
+      {
+        name: 'Mixamo zombie animations',
+        what: 'The citizens\' clips in assets/citizens/zombie_animations.glb: Zombie Walk, Zombie Running, Zombie Idle, Zombie Attack, Zombie Crawl, Zombie Biting (and mirrored), Zombie Neck Bite, Zombie Stand Up and Zombie Turn.',
         author: 'Adobe Mixamo',
         source: 'https://www.mixamo.com',
         licence: 'Royalty-free under the Adobe/Mixamo terms of use (no attribution required, credited anyway)',

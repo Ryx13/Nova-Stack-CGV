@@ -7,18 +7,35 @@ Build the game's character assets from the Mixamo sources in art/.
       every clip on one shared Mixamo skeleton, each named after its file
       (walk.fbx -> "walk"). All characters share the skeleton, so the game
       loads this once and plays any clip on any character.
+  art/citizens/<id>_rigged.fbx      ->  assets/citizens/<id>.glb
+      the city's people, infected in-game (Citizens.js); same skeleton
+  art/zombie_animations/<clip>.fbx  ->  assets/citizens/zombie_animations.glb
+      the citizens' own clips (zombie_walk, ...), kept apart so the
+      player's start-up download doesn't grow
+  art/story/<name>_rigged.fbx       ->  assets/story/<name>.glb
+      the story's people (Dr. James), lightened like the citizens but
+      never infected
 
 Run from the repo root (PowerShell):
   & "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b -P tools\build_characters.py
+Citizens and their clips only, leaving the player's files as they are:
+  & "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b -P tools\build_characters.py -- citizens
 """
 import glob
 import os
+import re
+import sys
 import bpy
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_CHARS = os.path.join(ROOT, "art", "characters")
 SRC_ANIMS = os.path.join(ROOT, "art", "animations")
 OUT = os.path.join(ROOT, "assets", "characters")
+SRC_CITIZENS = os.path.join(ROOT, "art", "citizens")
+SRC_ZOMBIE_ANIMS = os.path.join(ROOT, "art", "zombie_animations")
+OUT_CITIZENS = os.path.join(ROOT, "assets", "citizens")
+SRC_STORY = os.path.join(ROOT, "art", "story")
+OUT_STORY = os.path.join(ROOT, "assets", "story")
 
 
 def reset():
@@ -28,10 +45,57 @@ def reset():
 def import_fbx(path):
     before = set(bpy.data.objects)
     bpy.ops.import_scene.fbx(filepath=path)
-    return [o for o in bpy.data.objects if o not in before]
+    new = [o for o in bpy.data.objects if o not in before]
+    # Mixamo numbers the namespace when one session downloads several
+    # characters (mixamorig1:, mixamorig7:); every clip is keyed to plain
+    # mixamorig:, so rename to that (Blender carries the skin weights along)
+    for ob in new:
+        if ob.type == "ARMATURE":
+            for bone in ob.data.bones:
+                bone.name = re.sub(r"^mixamorig\d+:", "mixamorig:", bone.name)
+    return new
 
 
-def build_character(path):
+# Citizens are drawn many at a time, so each is cut down to a game budget:
+# Mixamo's downloads run 35-58k triangles with 4096 textures
+CITIZEN_TRIS = 12000
+CITIZEN_TEXTURE = 1024
+
+
+def lighten(name):
+    """Decimate a citizen to about CITIZEN_TRIS triangles and shrink its
+    textures to CITIZEN_TEXTURE. Collapse decimation keeps the skin weights;
+    meshes with shape keys (faces) are left whole, as Blender can't apply a
+    modifier to them."""
+    meshes = [o for o in bpy.data.objects if o.type == "MESH"]
+    tris = {}
+    for m in meshes:
+        m.data.calc_loop_triangles()
+        tris[m] = len(m.data.loop_triangles)
+    total = sum(tris.values())
+    if total > CITIZEN_TRIS:
+        ratio = CITIZEN_TRIS / total
+        for m in meshes:
+            if m.data.shape_keys or tris[m] < 400:
+                continue
+            mod = m.modifiers.new("decimate", "DECIMATE")
+            mod.ratio = ratio
+            with bpy.context.temp_override(object=m, active_object=m):
+                bpy.ops.object.modifier_move_to_index(modifier=mod.name, index=0)  # before the Armature modifier
+                bpy.ops.object.modifier_apply(modifier=mod.name)
+    after = 0
+    for m in meshes:
+        m.data.calc_loop_triangles()
+        after += len(m.data.loop_triangles)
+    for img in bpy.data.images:
+        w, h = img.size
+        if max(w, h) > CITIZEN_TEXTURE:
+            k = CITIZEN_TEXTURE / max(w, h)
+            img.scale(max(1, int(w * k)), max(1, int(h * k)))
+    print(f"[citizen] {name}: {total} -> {after} triangles")
+
+
+def build_character(path, out=OUT, citizen=False):
     reset()
     import_fbx(path)
     # The rigged download carries a one-frame T-pose take; the clips live in
@@ -42,19 +106,23 @@ def build_character(path):
     for act in list(bpy.data.actions):
         bpy.data.actions.remove(act)
     name = os.path.basename(path).replace("_rigged.fbx", "")
+    if citizen:
+        lighten(name)
     bpy.ops.export_scene.gltf(
-        filepath=os.path.join(OUT, f"{name}.glb"),
+        filepath=os.path.join(out, f"{name}.glb"),
         export_format="GLB",
         export_animations=False,
-        export_image_format="JPEG",
-        export_image_quality=85,
+        # Citizens: WebP, which keeps transparency (hair, lashes) at a
+        # fraction of PNG's size; three.js reads it (EXT_texture_webp)
+        export_image_format="WEBP" if citizen else "JPEG",
+        export_image_quality=80 if citizen else 85,
     )
     print(f"[char] {name}")
 
 
 # Clips the game moves the player through itself. Mixamo's In Place box is
 # easy to miss, so these get their travel removed here regardless
-IN_PLACE = {"walk", "run", "walk_back", "strafe_left", "strafe_right", "jump"}
+IN_PLACE = {"walk", "run", "walk_back", "strafe_left", "strafe_right", "jump", "zombie_walk", "zombie_run", "zombie_crawl"}
 
 
 def action_fcurves(act):
@@ -84,7 +152,7 @@ def strip_travel(act):
         fc.update()
 
 
-def build_animations(paths):
+def build_animations(paths, out=OUT, name="animations.glb"):
     reset()
     base = None
     for path in paths:
@@ -118,7 +186,7 @@ def build_animations(paths):
         bpy.data.objects.remove(ob, do_unlink=True)
 
     bpy.ops.export_scene.gltf(
-        filepath=os.path.join(OUT, "animations.glb"),
+        filepath=os.path.join(out, name),
         export_format="GLB",
         export_animation_mode="NLA_TRACKS",
         export_force_sampling=True,
@@ -126,7 +194,26 @@ def build_animations(paths):
     )
 
 
-os.makedirs(OUT, exist_ok=True)
-for p in sorted(glob.glob(os.path.join(SRC_CHARS, "*_rigged.fbx"))):
-    build_character(p)
-build_animations(sorted(glob.glob(os.path.join(SRC_ANIMS, "*.fbx"))))
+ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+if "citizens" not in ARGS:
+    os.makedirs(OUT, exist_ok=True)
+    for p in sorted(glob.glob(os.path.join(SRC_CHARS, "*_rigged.fbx"))):
+        build_character(p)
+    build_animations(sorted(glob.glob(os.path.join(SRC_ANIMS, "*.fbx"))))
+
+# The city's citizens and their zombie clips, when any have been added
+citizens = sorted(glob.glob(os.path.join(SRC_CITIZENS, "*_rigged.fbx")))
+zombie_clips = sorted(glob.glob(os.path.join(SRC_ZOMBIE_ANIMS, "*.fbx")))
+if citizens or zombie_clips:
+    os.makedirs(OUT_CITIZENS, exist_ok=True)
+for p in citizens:
+    build_character(p, OUT_CITIZENS, citizen=True)
+if zombie_clips:
+    build_animations(zombie_clips, OUT_CITIZENS, "zombie_animations.glb")
+
+# The story's people: the same browser budget, their own folder
+story = sorted(glob.glob(os.path.join(SRC_STORY, "*_rigged.fbx")))
+if story:
+    os.makedirs(OUT_STORY, exist_ok=True)
+for p in story:
+    build_character(p, OUT_STORY, citizen=True)
