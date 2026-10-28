@@ -198,23 +198,43 @@ function updateGlint(dt) {
 }
 /** A level restart: a fresh pair of random rays for the new run. */
 export function resetCityKit() { planGlints(); glint.at = -9; }
-// Capture the scene from in front of the mirror nearest the player
-function captureReflections(playerPos) {
+// Put the probe in front of the mirror nearest the player; false if none is near
+function placeProbe(playerPos) {
   let best = null, bestD = PROBE_REACH;
   for (const m of [...mirrorPanes, ...slidingDoors]) {
     const d = Math.hypot(playerPos.x - m.x, playerPos.z - m.z);
     if (d < bestD) { bestD = d; best = m; }
   }
-  if (!best) return;
+  if (!best) return false;
   probe.position.set(best.x + best.side * 3, 1.7, best.z);
   probe.updateMatrixWorld();
+  return true;
+}
+// Render the scene into the probe: all six faces, or just `face` (0-5)
+function renderProbe(face) {
   doorMesh.visible = false; // the glass mustn't reflect itself
   const autoShadows = renderer.shadowMap.autoUpdate;
   renderer.shadowMap.autoUpdate = false; // reuse this frame's shadow maps
-  probe.update(renderer, scene);
+  if (face === undefined) probe.update(renderer, scene);
+  else {
+    // One face of what CubeCamera.update does for all six
+    if (probe.coordinateSystem !== renderer.coordinateSystem) { probe.coordinateSystem = renderer.coordinateSystem; probe.updateCoordinateSystem(); }
+    const target = probe.renderTarget, prev = [renderer.getRenderTarget(), renderer.getActiveCubeFace(), renderer.getActiveMipmapLevel()];
+    const xr = renderer.xr.enabled, mips = target.texture.generateMipmaps;
+    renderer.xr.enabled = false;
+    target.texture.generateMipmaps = face === 5; // mipmaps once the whole cube is in
+    renderer.setRenderTarget(target, face);
+    renderer.render(scene, probe.children[face]);
+    target.texture.generateMipmaps = mips;
+    renderer.setRenderTarget(...prev);
+    renderer.xr.enabled = xr;
+    // The glass switches to the new reflection only once all six are fresh
+    if (face === 5) target.texture.needsPMREMUpdate = true;
+  }
   renderer.shadowMap.autoUpdate = autoShadows;
   doorMesh.visible = true;
 }
+let probeFace = -1; // spread captures: the next face to render, -1 between captures
 const mirrorPanes = [];   // static mirror glass: { x, y, z, sx, sy, sz }
 const displayPanes = [];  // see-through display windows, same shape
 const slidingDoors = [];  // { x, y, z, alongZ: frontage axis, open }
@@ -245,10 +265,18 @@ function buildMirrorMesh() {
   scene.add(panes);
 }
 /** Every frame (a level's tick): reflections, and doors opening for the player. */
-export function updateCityKit(dt, playerPos) {
+/** spreadFaces: capture one cube face a frame (six frames a capture) instead
+    of all six in one frame, so the cost never lands as a single spike. */
+export function updateCityKit(dt, playerPos, { spreadFaces = false } = {}) {
   if (!mirrorPanes.length && !slidingDoors.length && !displayPanes.length) return;
   if (!doorMesh) buildMirrorMesh();
-  if (playerPos && (probeTimer -= dt) <= 0) { probeTimer = PROBE_EVERY; captureReflections(playerPos); }
+  if (probeFace >= 0) { renderProbe(probeFace); probeFace = probeFace < 5 ? probeFace + 1 : -1; }
+  else if (playerPos && (probeTimer -= dt) <= 0) {
+    probeTimer = PROBE_EVERY;
+    if (placeProbe(playerPos)) {
+      if (spreadFaces) { renderProbe(0); probeFace = 1; } else renderProbe();
+    }
+  }
   updateGlint(dt);
   let moved = false;
   slidingDoors.forEach((d, i) => {

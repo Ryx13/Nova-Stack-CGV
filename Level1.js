@@ -66,8 +66,9 @@ registerDayProgress(() => {
 export function startLevel(mode) {
   bootLevel({ ...LEVEL_CONFIG, mode });
   registerLevelTick(buildLevel1Surroundings()); // the annex and the mountains behind the start
-  // Mirror-glass glint, and the sliding doors opening as you walk up
-  registerLevelTick((dt) => { updateCityKit(dt, playerVis.group?.position); updateTown(dt); });
+  // Mirror reflections, the ray of sunshine, the sliding doors. Reflections are
+  // captured a cube face per frame, so downtown's many draw calls never land in one
+  registerLevelTick((dt) => { updateCityKit(dt, playerVis.group?.position, { spreadFaces: true }); updateTown(dt); });
   registerLevelReset(resetCityKit); // a restart is a new play: new random rays
   // The fly-through briefing: gameplay holds from here until it ends
   startLevel1Intro();
