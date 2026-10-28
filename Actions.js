@@ -497,8 +497,9 @@ export function updateLowHealthFX(dt) {
    that climbs as health falls — 99.99% at zero health. At 99.99% the player
    is overrun: they stop answering the controls and fall (the 'die'
    clip), the zombies near them close in, crouch over the body and feed
-   (faked with posture: no eating clip exists for either zombie rig), the
-   camera pulls back to watch, and the death screen follows.
+   (faked with posture: no eating clip exists for either zombie rig; off
+   for now, see FEEDING_ENABLED), the camera pulls back to watch, and the
+   death screen follows.
 
    state.dying ({ t, eaters }) is the stretch between: not dead (so the
    world, the zombies and the player's own animation keep running) but
@@ -508,6 +509,10 @@ export function updateLowHealthFX(dt) {
 const INFECTION_FATAL = 99.99;      // the reading at zero health — overrun only when it's all but total
 const DYING_SECONDS = 4.2;          // fall + feeding before the death screen
 const EAT_RADIUS = 12;              // zombies this close come to feed
+// Pinned: the crouch-and-hunch feeding read wrong, so it's off until it's
+// replaced. Off, no zombie is sent to feed: they all keep closing in as
+// usual while the camera pulls back. true brings the feeding back as it was.
+const FEEDING_ENABLED = false;
 const monitor = { el: null, ctx: null, pct: null, samples: null, beat: -1, bite: 0, shown: false, value: 0 };
 
 function buildInfectionMonitor() {
@@ -620,7 +625,7 @@ function startDying() {
   if (playerVis.shootAction) playerVis.shootAction.stop();
   // The nearest zombies get places round the body, spread evenly
   const body = playerVis.group.position;
-  const near = state.zombies
+  const near = !FEEDING_ENABLED ? [] : state.zombies
     .filter((z) => z.alive && z.state !== 'downed' && z.mesh.position.distanceTo(body) < EAT_RADIUS)
     .sort((a, b) => a.mesh.position.distanceTo(body) - b.mesh.position.distanceTo(body))
     .slice(0, 5);
