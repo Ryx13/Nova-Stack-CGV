@@ -7,6 +7,7 @@ import { createStreetAtmosphere } from './StreetAtmosphere.js';
 import { updateLocomotion } from './Movement.js';
 import { RayCandidates } from './RayCandidates.js';
 import { addContactShading } from './ContactShading.js';
+import { placeBloodSplat, spawnBloodSpray, crackGlassAlong, updateImpactFX, clearImpactFX } from './ImpactFX.js';
 import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
 import { retryLevel, setRestartHandler } from './account.js';
 import {levelWeapon,levelWeaponIds,nextWeapon} from './WeaponSlots.js';
@@ -29,7 +30,7 @@ import {
 // finished loading), never at either file's own top level — the same
 // deferred pattern documented in PowerUps.js and Scene.js.
 import {
-  playerVis, playerBody, playerHeight, bloodTex,
+  playerVis, playerBody, playerHeight,
   carVis, chassisBody, vehicle, carSpawn, CAR_MAX_FUEL,
   FRONT_WHEELS, REAR_WHEELS, MAX_STEER, MAX_ENGINE_FORCE, MAX_BRAKE_FORCE, HANDBRAKE_FORCE,
   viewmodelGun, knifeThirdPerson, knifeViewModel,
@@ -174,19 +175,9 @@ export function spawnHitSpark(pos) {
   }
 }
 
+// Pooled in ImpactFX.js: no new mesh per hit; the oldest splat is reused
 export function spawnBlood(pos) {
-  const decal = new THREE.Mesh(
-    new THREE.CircleGeometry(0.35 + Math.random() * 0.25, 10),
-    new THREE.MeshBasicMaterial({ map: bloodTex, transparent: true, depthWrite: false, opacity: 0.85 })
-  );
-  decal.rotation.x = -Math.PI / 2;
-  decal.position.set(pos.x, 0.04, pos.z);
-  scene.add(decal);
-  setTimeout(() => {
-    scene.remove(decal);
-    decal.geometry.dispose();
-    decal.material.dispose();
-  }, 20000);
+  placeBloodSplat(pos);
 }
 
 function activeGunMesh() {
@@ -363,6 +354,7 @@ export function tryShoot() {
     ? hits[0].point
     : raycaster.ray.origin.clone().addScaledVector(raycaster.ray.direction, 70);
   spawnTracer(muzzlePos, tracerEnd);
+  crackGlassAlong(raycaster.ray, hits.length ? hits[0].distance : 70);
   if (hits.length) {
     const owner = hits[0].object.userData.owner;
     if (owner && owner.isBarrel) {
@@ -370,6 +362,8 @@ export function tryShoot() {
       showHitmarker();
     } else if (owner) {
   const headshot = hits[0].point.y > owner.mesh.position.y + 1.42 * Math.max(1, owner.mesh.scale.y);
+  // The Guardian is armour plate: sparks, not blood
+  if (!owner.guardian) spawnBloodSpray(hits[0].point, raycaster.ray.direction, headshot, owner.mesh.position.y);
   owner.takeDamage(headshot ? GUN_DAMAGE * 1.85 : GUN_DAMAGE, headshot, !!hits[0].object.userData.guardianWeakPoint);
 
       showHitmarker();
@@ -1332,6 +1326,7 @@ export function restartLevel() {
   state.activeSparks.length = 0;
   state.activeTracers.forEach((tr) => { scene.remove(tr); tr.geometry.dispose(); tr.material.dispose(); });
   state.activeTracers.length = 0;
+  clearImpactFX();
   stepAccumulator = 0;
   clock.getDelta(); // don't let the time spent on the end screen land in one frame
 
@@ -1435,6 +1430,7 @@ function startAnimationLoop() {
       updateShield(dt);
       state.spawnTimer -= dt;
       if (state.spawnTimer <= 0) { state.spawnTimer = ZOMBIE_SPAWN_INTERVAL / state.zombieCountMul; spawnZombie(); }
+      updateImpactFX(dt);
       for (let i = state.activeSparks.length - 1; i >= 0; i--) {
         const s = state.activeSparks[i];
         s.userData.vel.y -= 9 * dt;

@@ -276,6 +276,8 @@ function renderProbe(face) {
 let probeFace = -1; // spread captures: the next face to render, -1 between captures
 const mirrorPanes = [];   // static mirror glass: { x, y, z, sx, sy, sz }
 const displayPanes = [];  // see-through display windows, same shape
+// Every unbroken pane a bullet can crack (ImpactFX.js), same shape
+export const glassPanes = [];
 const slidingDoors = [];  // { x, y, z, alongZ: frontage axis, open }
 const DOOR_W = 0.9, DOOR_H = 2.4, DOOR_REACH = 3.5;
 let doorMesh = null;
@@ -347,6 +349,12 @@ class Builder {
   // Mirror glass and sliding doors on the facade (instanced, see above)
   mirrorFace(u, v, out, su, sv, sn) {
     mirrorPanes.push({ x: this.fx + this.side * out, y: v, z: this.zc + u, sx: sn, sy: sv, sz: su, side: this.side });
+    glassPanes.push(mirrorPanes[mirrorPanes.length - 1]);
+  }
+  // Window glass: a facade box, listed for bullets unless already smashed
+  glass(u, v, out, su, sv, sn, material) {
+    this.face(u, v, out, su, sv, sn, material);
+    if (material !== mat(BROKEN, { roughness: 1 })) glassPanes.push({ x: this.fx + this.side * out, y: v, z: this.zc + u, sx: sn, sy: sv, sz: su });
   }
   slidingDoor(u) {
     slidingDoors.push({ x: this.fx + this.side * 0.06, y: DOOR_H / 2, z: this.zc + u, open: 0, side: this.side });
@@ -375,7 +383,7 @@ const pick = (rnd, list) => list[Math.floor(rnd() * list.length) % list.length];
 function windowAt(b, u, v, ww, wh, look) {
   b.face(u, v, 0.06, ww + 0.24, wh + 0.24, 0.12, look.trim);
   if (look.shutters) for (const e of [-1, 1]) b.face(u + e * (ww / 2 + 0.36), v, 0.08, 0.5, wh + 0.1, 0.05, look.shutters);
-  b.face(u, v, 0.03, ww, wh, 0.06, look.glass());
+  b.glass(u, v, 0.03, ww, wh, 0.06, look.glass());
   if (look.far) return; // past the edge of the town: frame and glass only
   b.face(u, v - wh / 2 - 0.16, 0.13, ww + 0.4, 0.12, 0.26, look.trim);
   if (look.lintel) b.face(u, v + wh / 2 + 0.2, 0.08, ww + 0.34, 0.22, 0.16, look.lintel);
@@ -491,6 +499,7 @@ function displayCase(b, rnd, u, W, fill, night, dark) {
   b.face(u, 3.15, 0.3, W + 0.2, 0.12, 0.6, dark);                                // head
   for (const e of [-1, 1]) b.face(u + e * (W / 2 + 0.05), 1.85, 0.3, 0.1, 2.6, 0.6, dark);
   displayPanes.push({ x: b.fx + b.side * 0.58, y: 1.85, z: b.zc + u, sx: 0.03, sy: 2.5, sz: W });
+  glassPanes.push(displayPanes[displayPanes.length - 1]);
   const at = (out) => b.fx + b.side * out;
   if (fill === 'mannequins') {
     const n = Math.max(1, Math.floor(W / 1.1));
@@ -807,7 +816,7 @@ function buildOne(b, rnd, fw, depth, lotH, night, far, shopKind, minStoreys = 0)
     // High strip windows under the eaves of each tall storey
     for (let s = 0; s < storeys; s++) {
       const v = GROUND + s * storeyH + 2.7;
-      b.face(0, v, 0.03, fw - 1.2, 1.1, 0.06, glass());
+      b.glass(0, v, 0.03, fw - 1.2, 1.1, 0.06, glass());
       for (let m = -fw / 2 + 1.2; m < fw / 2 - 0.8; m += 1.2) b.face(m, v, 0.07, 0.08, 1.1, 0.08, trim);
     }
   } else if (type === 'shed') {
@@ -818,7 +827,7 @@ function buildOne(b, rnd, fw, depth, lotH, night, far, shopKind, minStoreys = 0)
     // Ribbon windows: a glass band per storey between deep spandrels, mullions on top
     for (let s = 0; s < storeys; s++) {
       const v = GROUND + s * STOREY + 1.8;
-      b.face(0, v, 0.03, fw - 1.0, 1.0, 0.06, glass());
+      b.glass(0, v, 0.03, fw - 1.0, 1.0, 0.06, glass());
       for (let m = -fw / 2 + 1.5; m < fw / 2 - 1; m += 1.5) b.face(m, v, 0.07, 0.1, 1.0, 0.08, trim);
       b.face(0, GROUND + s * STOREY + 0.35, 0.05, fw - 0.6, 0.12, 0.1, trim);
     }
