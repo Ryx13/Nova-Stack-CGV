@@ -1521,6 +1521,8 @@ export function loadDecorCar(url, x, z, ry, targetLength) {
     wrap.rotation.y = ry;
     scene.add(wrap);
     wrap.traverse((o) => { if (o.isMesh) state.occluders.push(o); });
+    // Its see-through parts are the windows: bullets crack them (ImpactFX.js)
+    wrap.traverse((o) => { if (o.isMesh && o.material?.transparent && o.material.opacity < 0.95) (state.glassMeshes ||= []).push(o); });
     const finalSize = box2.getSize(new THREE.Vector3());
     addStaticBox(finalSize.x / 2, finalSize.y / 2, finalSize.z / 2, x, finalSize.y / 2, z, ry);
   }, undefined, () => { /* if it fails to load, the spot is just empty — no crash */ });

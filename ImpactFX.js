@@ -8,7 +8,9 @@ import { RayCandidates } from './RayCandidates.js';
    IMPACT FX — what a bullet leaves behind: a wet spray of blood out of
    the infected it hits, a splat on the ground under them, and a crack
    (plus a few falling shards) in any window glass it passes through; the
-   third crack in a pane shatters it.
+   third crack in a pane shatters it. Other glass (wrecked cars, vending
+   machine fronts, the glass bridge) registers its meshes in
+   state.glassMeshes where it's built, and cracks wherever it's hit.
    Every effect is a fixed pool of instanced meshes: a burst of fire never
    creates meshes, materials or shader variants mid-fight, each pool is
    one draw call, and a full pool reuses its oldest instance.
@@ -237,6 +239,11 @@ function crackPane(p, point, dir) {
   const at = glassCracks.place(_m4.compose(_p, _q, _s.set(size, size, 1)));
   crackOwner[at] = p;
   (p.cracks ||= []).push(at);
+  crackBurst(point, dir);
+}
+
+// The shards a crack knocks out, carried on by the bullet, and the tinkle
+function crackBurst(point, dir) {
   for (let i = 0; i < 7; i++) {
     _v.copy(dir).multiplyScalar(0.8 + Math.random() * 1.8);
     _v.x += (Math.random() - 0.5) * 1.2;
@@ -245,6 +252,19 @@ function crackPane(p, point, dir) {
     glassShards.emit(point, _v, 0.9 + Math.random() * 0.4, 0.02 + Math.random() * 0.03, 0.02);
   }
   sfx.noise(0.12, 0.05, 3400);
+}
+
+// A crack on any other glass: flat on the surface where it was hit,
+// facing the shooter. Curved glass is close enough to flat at this size.
+function crackSurface(point, normal, dir) {
+  _n.copy(normal);
+  if (_n.dot(dir) > 0) _n.negate();
+  _p.copy(point).addScaledVector(_n, 0.006);
+  _q.setFromUnitVectors(FACING, _n);
+  _q.premultiply(_spin.setFromAxisAngle(_n, Math.random() * Math.PI * 2));
+  const size = 0.38 + Math.random() * 0.2;
+  crackOwner[glassCracks.place(_m4.compose(_p, _q, _s.set(size, size, 1)))] = null;
+  crackBurst(point, dir);
 }
 
 // The whole pane goes: its cracks with it, a burst of shards falling out
@@ -280,11 +300,23 @@ const _box = new THREE.Box3(), _hit = new THREE.Vector3();
 const wallRay = new THREE.Raycaster();
 const wallCandidates = new RayCandidates();
 const paneHits = [];
-/** Cracks the window glass a shot's ray passes through before maxDist, up
-    to two panes (a display window's front and back). The first wall stops
-    the bullet: the glass sits just proud of its building's blocker box. */
+const glassRay = new THREE.Raycaster(), liveGlass = [];
+// Registered glass still in the scene and shown (a level swapped out, a
+// wreck stripped for Level 2's burnt look, are skipped)
+function liveGlassMeshes() {
+  liveGlass.length = 0;
+  for (const m of state.glassMeshes || []) {
+    let o = m, shown = true;
+    while (o.parent) { if (!o.visible) shown = false; o = o.parent; }
+    if (shown && m.visible && o === scene) liveGlass.push(m);
+  }
+  return liveGlass;
+}
+/** Cracks the glass a shot's ray passes through before maxDist, up to two
+    pieces (a display window's front and back, a car's windscreen and rear
+    window). The first wall stops the bullet: window glass sits just proud
+    of its building's blocker box. */
 export function crackGlassAlong(ray, maxDist) {
-  if (!glassPanes.length) return;
   paneHits.length = 0;
   for (const p of glassPanes) {
     _box.min.set(p.x - p.sx / 2, p.y - p.sy / 2, p.z - p.sz / 2);
@@ -293,13 +325,31 @@ export function crackGlassAlong(ray, maxDist) {
     const d = ray.origin.distanceTo(_hit);
     if (d <= maxDist) paneHits.push({ p, d, point: _hit.clone() });
   }
+  // Glass meshes: the surface itself, so curved and car glass crack where hit
+  const meshes = liveGlassMeshes();
+  if (meshes.length) {
+    glassRay.ray.copy(ray);
+    glassRay.far = maxDist;
+    let last = null;
+    for (const h of glassRay.intersectObjects(meshes, false)) {
+      // A pane's back face a few cm behind its front is the same hole
+      if (last && last.object === h.object && h.distance - last.distance < 0.15) continue;
+      last = h;
+      const normal = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : ray.direction.clone().negate();
+      paneHits.push({ d: h.distance, point: h.point.clone(), normal });
+    }
+  }
   if (!paneHits.length) return;
   wallRay.ray.copy(ray);
   wallRay.far = maxDist;
   const wall = wallRay.intersectObjects(wallCandidates.query(state.occluders, wallRay.ray, maxDist), false)[0];
   const limit = wall ? wall.distance + 0.12 : maxDist;
   paneHits.sort((a, b) => a.d - b.d);
-  for (const h of paneHits.slice(0, 2)) if (h.d <= limit) crackPane(h.p, h.point, ray.direction);
+  for (const h of paneHits.slice(0, 2)) {
+    if (h.d > limit) break;
+    if (h.p) crackPane(h.p, h.point, ray.direction);
+    else crackSurface(h.point, h.normal, ray.direction);
+  }
 }
 
 /** Every frame from the main loop. */

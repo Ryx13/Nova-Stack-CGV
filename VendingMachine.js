@@ -83,6 +83,7 @@
 
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { state } from './state.js';
 
 /* ----------------------------------------------------------------------
    Catalog structure + card renderer — absorbed from the former
@@ -399,6 +400,7 @@ export class VendingMachine {
 
 
     const pane = this._box(0.66, 1.42, 0.006, -0.105, 1.25, 0.262, glass);
+    (state.glassMeshes ||= []).push(pane); // bullets crack it (ImpactFX.js)
     pane.castShadow = false;
     pane.receiveShadow = false;
 

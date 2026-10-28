@@ -66,6 +66,10 @@ function buildAnnex(night) {
   for (const y of [4.2, 9.2]) {
     const band = new THREE.Mesh(new THREE.BoxGeometry(ANNEX.w - 6, 1.6, 0.2), glass);
     band.position.set(0, y, FRONT_Z - 0.05);
+    // Kept out of the scenery merge (it would fold the glass into one mesh
+    // with no way back to it), so bullets can crack it (ImpactFX.js)
+    band.userData.dynamic = true;
+    (state.glassMeshes ||= []).push(band);
     g.add(band);
   }
   // The blast door you came out of, still open: dark inside, amber lights

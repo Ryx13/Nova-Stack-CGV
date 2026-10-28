@@ -44,6 +44,7 @@ class Batch {
       const mesh = new THREE.Mesh(mergeGeometries(geos), material);
       mesh.castShadow = shadows && !material.transparent;
       mesh.receiveShadow = true;
+      if (material.userData.glass) (state.glassMeshes ||= []).push(mesh); // bullets crack it (ImpactFX.js)
       parent.add(mesh);
     }
   }
@@ -562,6 +563,7 @@ function buildBridge(B) {
   const parts = new Batch();
   const steel = new THREE.MeshStandardMaterial({ color: 0xd8dde0, roughness: 0.35, metalness: 0.6, emissive: 0x8fd0ff, emissiveIntensity: night ? 0.25 : 0 });
   const glass = new THREE.MeshStandardMaterial({ color: 0x9fd0e8, transparent: true, opacity: 0.28, roughness: 0.05, metalness: 0.3, side: THREE.DoubleSide, depthWrite: false, emissive: 0x3a7a9a, emissiveIntensity: night ? 0.35 : 0 });
+  glass.userData.glass = true;
   const deck = flat(0x5a6068), glow = flat(0x5fd8ff, { emissive: 0x5fd8ff, emissiveIntensity: night ? 2.4 : 0.4 });
   const warm = flat(0xfff0c8, { emissive: 0xffe0a0, emissiveIntensity: night ? 1.8 : 0.3 });
   const towerW = 3, half = rowX - towerW, r = B.width / 2, N = 16;
