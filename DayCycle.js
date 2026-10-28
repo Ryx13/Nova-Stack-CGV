@@ -88,19 +88,19 @@ const NIGHT = [
   // light from where it hangs in the sky (el/az), with no shadows. The
   // streetlights light the street, and a faint blue fill (with the stars'
   // share, STARLIGHT) keeps silhouettes readable.
-  // Level 1: a true streetlit night — dark blue overhead, the city's
-  // glow only a faint warm smear low on the horizon, stars and the moon
-  // clear, the street carried by its lamps, beams and lit windows. Every
-  // value here is a per-frame uniform, so the night adds no work.
-  { c: 0, top: 0x111b2c, hor: 0x323a4a, bot: 0x201e1d, glow: 0x9fb4d8, gs: 0.08,
-    fog: 0x202a3a, fogD: 0.0095, sunCol: 0xb4c6ea, sun: 0.5, el: 24, az: 15, disc: 0,
-    hemiSky: 0x41557c, hemiGnd: 0x0f1114, hemi: 0.32, ambCol: 0x2a3648, amb: 0.2, exp: 0.9,
-    mist: 0x313a4c, mistA: 0.3, rain: 0, stars: 1, moon: 1,
-    sat: 0.62, warm: -0.55, con: 1.14, bri: 0.97 },
+  // Level 1: a bright moonlit night — dark blue overhead, the moon hung low
+  // over the street's far end so it sits in the normal view and its light is
+  // strong enough to read every silhouette, the city's glow only a faint
+  // warm smear on the horizon. Per-frame uniforms: none of it adds work.
+  { c: 0, top: 0x16233a, hor: 0x3a4456, bot: 0x241f1e, glow: 0x9fb4d8, gs: 0.12,
+    fog: 0x2a3547, fogD: 0.0085, sunCol: 0xc2d4f5, sun: 1.3, el: 25, az: 12, disc: 0,
+    hemiSky: 0x4a5f8c, hemiGnd: 0x14161a, hemi: 0.4, ambCol: 0x2f3c52, amb: 0.28, exp: 0.95,
+    mist: 0x38425a, mistA: 0.26, rain: 0, stars: 1, moon: 1,
+    sat: 0.64, warm: -0.55, con: 1.12, bri: 1.0 },
   { c: 1 },
   // Level 2, leaving downtown: the grid is dead, a cool moonlit night, the
   // moon over the sea ahead (the port is south, toward -z)
-  { c: 1.25, sat: 0.66, warm: -0.75, top: 0x2a354b, hor: 0x4b5a71, bot: 0x6a7992, glow: 0x9fb4d8, gs: 0.12, sun: 0.5,
+  { c: 1.25, sat: 0.66, warm: -0.75, top: 0x2a354b, hor: 0x4b5a71, bot: 0x6a7992, glow: 0x9fb4d8, gs: 0.12, sun: 0.5, el: 24,
     fog: 0x1f2736, fogD: 0.0085, hemiSky: 0x5d6f92, hemiGnd: 0x15171c, hemi: 0.32,
     ambCol: 0x1f2635, amb: 0.2, mist: 0x52607a, mistA: 0.35, stars: 1, moon: 0.95 },
   { c: 2 },
@@ -193,7 +193,24 @@ function skyMaterial() {
 }
 
 // Long thin streaks out from a bright core: the dazzle of looking at the sun
-let glare = null;
+let glare = null, moonHalo = null;
+/* The moon's soft halo. The disc itself already exists (moonVisual, a sprite
+   in the sky); the halo is what makes it read as a moon rather than a dot —
+   one additive quad, the only object this change adds to the scene. */
+function moonHaloTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(226,236,255,0.55)');
+  grad.addColorStop(0.45, 'rgba(180,198,234,0.18)');
+  grad.addColorStop(1, 'rgba(120,140,190,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
 function starburstTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
@@ -242,9 +259,9 @@ export function startDayCycle() {
   // Sun shadows by day only: at night there's no main light to cast them
   // (the finale's sunrise does without; Level 3 is the heaviest level)
   sun.castShadow = state.timeOfDay === 'day';
-  moonVisual.position.set(
-    Math.sin(rad(15)) * Math.cos(rad(24)), Math.sin(rad(24)), -Math.cos(rad(15)) * Math.cos(rad(24))).multiplyScalar(400);
-  moonVisual.scale.set(52, 52, 1);
+  // The disc follows the timeline's el/az every frame (apply), so it always
+  // sits where the moonlight comes from; only the size is fixed here.
+  moonVisual.scale.set(64, 64, 1);
   sunVisual.scale.set(60, 60, 1);
   // Buildings hide the sun (its glow used to show through them)
   sunVisual.material.depthTest = true;
@@ -257,6 +274,15 @@ export function startDayCycle() {
     glare.scale.set(190, 190, 1);
     glare.renderOrder = -1;
     sky.add(glare);
+  }
+  // A soft halo round the moon (one additive quad, opacity driven per frame)
+  if (!moonHalo) {
+    moonHalo = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: moonHaloTexture(), transparent: true, depthWrite: false, fog: false, blending: THREE.AdditiveBlending,
+    }));
+    moonHalo.scale.set(150, 150, 1);
+    moonHalo.renderOrder = -1;
+    sky.add(moonHalo);
   }
   stars.forEach((s) => { s.visible = true; });
   moonVisual.visible = sunVisual.visible = true;
@@ -279,6 +305,13 @@ function apply(c) {
   _dir.set(Math.sin(rad(v.az)) * Math.cos(rad(v.el)), Math.sin(rad(v.el)), -Math.cos(rad(v.az)) * Math.cos(rad(v.el))).normalize();
   skyUniforms.uSunDir.value.copy(_dir);
   setSunDirection(_dir);
+  // The moon disc and its halo stay on the moonlight's direction
+  moonVisual.position.copy(_dir).multiplyScalar(400);
+  if (moonHalo) {
+    moonHalo.position.copy(moonVisual.position);
+    moonHalo.material.opacity = 0.45 * v.moon;
+    moonHalo.visible = v.moon > 0.02; // skipped entirely by day
+  }
   sun.color.copy(v.sunCol);
   sun.intensity = v.sun;
   sunVisual.material.color.copy(v.sunCol);
@@ -302,6 +335,7 @@ function apply(c) {
   rainUniforms.uOpacity.value = 0.35 * rainStrength;
   stars.forEach((s, i) => { s.material.opacity = starBase[i] * v.stars; });
   moonVisual.material.opacity = 0.95 * v.moon;
+  moonVisual.visible = v.moon > 0.02;
   applyGrade(v);
 }
 
