@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { state } from './state.js';
 
 // Level-owned props: all interaction radii stay inside the existing AI corridor.
 export function buildCompoundDetails(scene, defs, label) {
@@ -27,7 +28,8 @@ export function buildCompoundDetails(scene, defs, label) {
   const lights = defs.map((s,i) => {
     box(s.pos.x,1.1,s.pos.z-1.5,.8,2.2,.45);
     const screen = box(s.pos.x,1.7,s.pos.z-1.24,.65,.45,.03,new THREE.MeshBasicMaterial({color:0x65c7cc}));
-    const light = new THREE.PointLight(0xff3322,2,10,2); light.position.set(s.pos.x,4,s.pos.z); scene.add(light);
+    // Lit at night only: by day the switches keep just their beacons (Level3.js)
+    const light = new THREE.PointLight(0xff3322,2,10,2); light.position.set(s.pos.x,4,s.pos.z); if (state.timeOfDay !== 'day') scene.add(light);
     floodFixtures.push(box(s.pos.x,4,s.pos.z,.8,.3,.4,new THREE.MeshBasicMaterial({color:0xffba88})));
     return light;
   });

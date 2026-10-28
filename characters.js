@@ -1565,7 +1565,7 @@ export function makeStreetlight(x, z) {
   // A level can also keep only a few lamps powered (state.liveStreetlights,
   // Level 2's dead grid): every post not on that list stands dark.
   const live = state.liveStreetlights?.find((l) => l.side === Math.sign(x) && l.z === z);
-  const lampOn = !(state.timeOfDay === 'day' && (state.clearDay || state.warmDay)) && (!state.liveStreetlights || !!live);
+  const lampOn = !(state.timeOfDay === 'day' && (state.clearDay || state.warmDay || state.dayLampsOff)) && (!state.liveStreetlights || !!live);
   const blink = !!live?.blink;
   const lamp = new THREE.Mesh(
     new THREE.SphereGeometry(0.18, 8, 8),

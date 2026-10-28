@@ -29,3 +29,6 @@ state.quarantineFacility = true;
 // Over the compound walls: the headland's works (Level3Industry.js), in
 // place of the stock skyline boxes
 state.industrialDistrict = true;
+// By day the street lamps are off (characters.js makeStreetlight): the only
+// lights left are the three switch beacons and the tower console's
+state.dayLampsOff = true;
