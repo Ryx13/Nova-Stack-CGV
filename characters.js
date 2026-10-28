@@ -3019,18 +3019,6 @@ export class Zombie {
         ? template.ankleToSole
         : measureAnkleToSole(rigInstance, this.footBoneL, this.footBoneR); // fallback, shouldn't be needed
       this.runs = !!(template && template.runs);
-      // Temporary diagnostic — please open the browser console and paste
-      // back what this prints for the zombie that's sinking. Static file
-      // analysis (checked bind-pose bone positions, bounding boxes, and
-      // animation channels by hand) didn't turn up an obvious cause, so
-      // the next step is seeing the ACTUAL runtime numbers rather than
-      // guessing at another margin value.
-      console.log('[zombie spawn]', template.path,
-        'footBoneL:', this.footBoneL ? this.footBoneL.name : 'NOT FOUND',
-        'footBoneR:', this.footBoneR ? this.footBoneR.name : 'NOT FOUND',
-        'footOffset:', template.footOffset.toFixed(3),
-        'ankleToSole (used):', this.ankleToSole.toFixed(3),
-        'rigInstance.position.y:', rigInstance.position.y.toFixed(3));
       if (template.animations.length) {
         this.hasAnim = true;
         this.mixer = new THREE.AnimationMixer(rigInstance);
