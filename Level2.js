@@ -17,7 +17,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { scene, camera, addStaticBox, pushKillFeed, dom, sfx, KILL_TARGET, STREET_HALF_W, addLight, sunlightOnly } from './Scene.js';
 import { state } from './state.js';
-import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis, playerBody, spawnZombie, loadDeferredAssets, updateBlinkingLamps, updateFireLights, syncHandGun, spawnChargers } from './characters.js';
+import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis, playerBody, spawnZombie, loadDeferredAssets, updateBlinkingLamps, updateFireLights, syncHandGun, spawnChargers, solidsMoved, pushOutOfSolids, setPlayerAction } from './characters.js';
 import { spawnCoin } from './PowerUps.js';
 import { bootLevel, registerLevelTick, registerLevelReset, levelKeyHooks } from './Actions.js';
 import { VendingMachine, makeIcon } from './VendingMachine.js';
@@ -29,6 +29,8 @@ import { updateCityKit, resetCityKit } from './CityKit.js';
 import { updateTown } from './CityTown.js';
 import { instantiateCharacter, loadGLB, fitClip, clipsFor, boneByName } from './roster.js';
 import { holdForIntro, playIntro, updateIntro } from './Level2Intro.js';
+import { createLevel2Quake } from './Level2Quake.js';
+import { scentTrail } from './ImpactFX.js';
 import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
 import { buildStreetDressing } from './streetDressing.js';
 import { buildSurroundings } from './Level2Surroundings.js';
@@ -80,6 +82,10 @@ export function startLevel(mode) {
   lv2HUD = buildLevel2HUD(sceneHandles.escapePoint);
   // The chase itself: the girl NPC and her per-frame tick.
   spawnGirl();
+  // Mid-route under Harbour Walk: the aftershock, the bridge's glass coming
+  // down and the zoo's lions getting out (after the merge: they move)
+  lv2Quake = createLevel2Quake();
+  registerLevelTick((dt) => lv2Quake.update(dt));
   // The fly-through briefing: gameplay holds from here until it ends
   holdForIntro();
   registerLevelTick(tickIntro);
@@ -405,6 +411,44 @@ function makeFallenZombie(x, z, ry) {
     it's opaque, so its light only falls in front. `catalog` is
     the machine's supplies preset — Level 2 passes its own one-product
     presets (radar / adrenaline) below. */
+/* IMPOSSIBLE: THE RADAR MOVES — off the main street, in one of these each
+   run: the side street off Harbour Square, the square's north edge, against
+   the shops on the west or the east back street. Kept out of the scenery
+   merge so a restart can carry it, collider and all, somewhere new. */
+const RADAR_SPOTS = [
+  { x: 50, z: -104.4, ry: Math.PI },        // the side street off Harbour Square, front to the street
+  { x: 24, z: -103.6, ry: Math.PI },        // the north edge of Harbour Square
+  { x: -49.5, z: -22, ry: -Math.PI / 2 },   // the west back street, against the shops
+  { x: 61.5, z: -38, ry: Math.PI / 2 },     // the east back street, against the shops
+];
+let radarSpot = -1;
+function pickRadarSpot() {
+  let i = Math.floor(Math.random() * RADAR_SPOTS.length);
+  if (i === radarSpot) i = (i + 1) % RADAR_SPOTS.length; // somewhere new
+  radarSpot = i;
+  return RADAR_SPOTS[i];
+}
+function placeRadarSomewhere() {
+  const at = pickRadarSpot();
+  const machine = placeVendingMachine(at.x, at.z, at.ry, radarCatalog, RADAR_GLOW);
+  machine.root.userData.dynamic = true; // out of the merge: it moves
+  return machine;
+}
+// A restart: the same machine, somewhere else
+function moveRadar(machine) {
+  const at = pickRadarSpot();
+  machine.root.position.set(at.x, 0, at.z);
+  machine.root.rotation.y = at.ry;
+  machine.root.updateMatrixWorld(true);
+  if (machine.body) {
+    machine.body.position.set(at.x, VendingMachine.HEIGHT / 2, at.z);
+    machine.body.quaternion.setFromEuler(0, at.ry, 0);
+    machine.body.aabbNeedsUpdate = true;
+  }
+  if (machine.obstacle) { machine.obstacle.x = at.x; machine.obstacle.z = at.z; }
+  solidsMoved();
+}
+
 function placeVendingMachine(x, z, ry, catalog, glow = RADAR_GLOW) {
   const machine = new VendingMachine({
     scene,
@@ -417,10 +461,11 @@ function placeVendingMachine(x, z, ry, catalog, glow = RADAR_GLOW) {
     soldOutShelves: true, // one-product machines: the other shelves read looted
     frontLight: !sunlightOnly(),
   });
-  addStaticBox(
+  machine.body = addStaticBox(
     VendingMachine.WIDTH / 2, VendingMachine.HEIGHT / 2, VendingMachine.DEPTH / 2,
     x, VendingMachine.HEIGHT / 2, z, ry
   );
+  machine.obstacle = state.obstacles[state.obstacles.length - 1]; // the infected's avoidance circle for it
   // No ground marker: the light the cabinet throws on the pavement (at
   // night) and the buy prompt in range are what mark the spot
   return machine;
@@ -689,7 +734,11 @@ function buildLevel2Scene() {
     // lime beacon is visible from spawn. Adrenaline is off the main road,
     // at the back of the west side lot (z -55), facing out toward the
     // street so its pink glow shows down the opening.
-    radar: placeVendingMachine(-13.4, 10, Math.PI / 2, radarCatalog, RADAR_GLOW),
+    // Impossible: never on the main street, and never in the same place
+    // twice running (RADAR_SPOTS, moved again on a restart)
+    radar: state.difficulty === 'impossible'
+      ? placeRadarSomewhere()
+      : placeVendingMachine(-13.4, 10, Math.PI / 2, radarCatalog, RADAR_GLOW),
     adrenaline: placeVendingMachine(-39.5, -53, Math.PI / 2, adrenalineCatalog, ADRENALINE_GLOW),
   };
 
@@ -723,6 +772,10 @@ function placeCoinClusters() {
 const GIRL_CHARACTER = 'detention';
 const GIRL_RUN_GLB = 'assets/Injured Run.glb';
 const GIRL_SPEED = 3.7;          // = player walk speed — the locked design
+// Past the middle of her route (Harbour Walk, the bridge) she's tiring:
+// half speed, her run slowed to match
+const GIRL_MIDWAY_Z = -86, GIRL_TIRED = 0.5;
+const GIRL_EASY = 0.8; // Easy (Difficulty.js): a little slower throughout, so she can be caught
 const GIRL_TARGET_HEIGHT = 1.65;
 const GIRL_RIG_YAW_OFFSET = 0;   // flip to Math.PI if she runs backwards
 // Within this range of the player the "Girl spotted" beat fires
@@ -760,6 +813,73 @@ const GIRL_WAYPOINTS = [
 ];
 
 let girl = null; // { group, mixer, wpIndex, mats, glint }
+
+/* IMPOSSIBLE: SHE HIDES — instead of running from the start, she's gone to
+   ground somewhere near the start of the street, one of HIDE_SPOTS picked
+   each run, still and listening, and she can't be caught there. Only once
+   you have the radar (which shows where she is) and come within SCENT_M of
+   her does your scent reach her (scentTrail): she turns, frozen with fear
+   for a moment, then bolts out along her spot's way out (out) onto her
+   route at waypoint `join`, and the chase is on. Easy keeps the open chase. */
+const HIDE_SPOTS = [
+  // Against a shopfront on the west side, near the start, her back to the street
+  { at: [-12.6, -14], face: -Math.PI / 2, out: [[-3, -18]], join: 1 },
+  // Crouched behind the street blockage on the east sidewalk
+  { at: [11.8, -61], face: Math.PI / 2, out: [[7.5, -62]], join: 4 },
+  // At the back of the west pocket lot, beside the adrenaline machine
+  { at: [-37, -57.5], face: -Math.PI / 2, out: [[-16, -55], [-4, -58]], join: 4 },
+  // Against a shopfront on the east side, just past the start
+  { at: [12.6, -30], face: Math.PI / 2, out: [[3, -33]], join: 2 },
+  // In a doorway on the west side, further down
+  { at: [-12.6, -45], face: -Math.PI / 2, out: [[-2, -47]], join: 2 },
+  // Behind you at the start, against the east shops
+  { at: [12.6, 12], face: Math.PI / 2, out: [[2, 8]], join: 1 },
+];
+const SCENT_M = 20, SCENT_TRAVEL_S = 1.0, FEAR_S = 0.9;
+function hideGirl() {
+  if (!girl) return;
+  const spot = HIDE_SPOTS[Math.floor(Math.random() * HIDE_SPOTS.length)];
+  girl.hiding = { spot, sensed: false, t: 0 };
+  girl.path = null;
+  const g = girl.group;
+  g.position.set(spot.at[0], 0, spot.at[1]);
+  g.rotation.set(0, spot.face + GIRL_RIG_YAW_OFFSET, 0);
+  if (girl.run) girl.run.stop();
+  const pose = girl.listen || girl.idle;
+  if (pose) { if (girl.idle && pose !== girl.idle) girl.idle.stop(); pose.reset().play(); }
+}
+// Hidden: nothing until the radar's on and you're close; then the scent,
+// the fear, and she runs
+function updateHiding(dt) {
+  const h = girl.hiding, g = girl.group, p = playerVis?.group.position;
+  if (!p) return;
+  if (!h.sensed) {
+    if (state.hasRadarUpgrade && p.distanceTo(g.position) < SCENT_M) {
+      h.sensed = true;
+      scentTrail(p, g.position);
+      pushKillFeed('She has caught your scent…');
+    }
+    return;
+  }
+  h.t += dt;
+  if (h.t >= SCENT_TRAVEL_S && !h.afraid) {
+    // It reached her: she turns to face you, frozen
+    h.afraid = true;
+    g.rotation.y = Math.atan2(p.x - g.position.x, p.z - g.position.z) + GIRL_RIG_YAW_OFFSET;
+    if (girl.listen) girl.listen.stop();
+    if (girl.idle) girl.idle.reset().play();
+  }
+  if (h.afraid) g.position.y = Math.abs(Math.sin(h.t * 14)) * 0.05; // trembling
+  if (h.t >= SCENT_TRAVEL_S + FEAR_S) {
+    // And she bolts: out of her hiding place, onto her route to the port
+    g.position.y = 0;
+    girl.path = h.spot.out.map(([x, z]) => ({ x, y: 0, z }));
+    girl.wpIndex = h.spot.join;
+    girl.hiding = null;
+    if (girl.run) { girl.run.reset().play(); if (girl.idle) girl.idle.crossFadeTo(girl.run, 0.25, false); }
+    pushKillFeed("She's seen you — she's running for the port!");
+  }
+}
 let girlSpotted = false;
 let girlAnnounced = false; // "head start" beat — fired on the first live frame
 
@@ -791,12 +911,13 @@ function spawnGirl() {
     group.rotation.y = Math.atan2(next.x - wp.x, next.z - wp.z) + GIRL_RIG_YAW_OFFSET;
     scene.add(group);
     // Standing idle through the intro; updateGirl crossfades to the run
-    const idleClip = (await clipsFor(obj)).idle;
-    const idle = idleClip ? mixer.clipAction(idleClip) : null;
+    const roster = await clipsFor(obj);
+    const idle = roster.idle ? mixer.clipAction(roster.idle) : null;
     if (idle) { idle.play(); runAction.stop(); }
     attachAntidote(obj);
-    girl = { group, mixer, wpIndex: 1, idle, run: runAction };
+    girl = { group, mixer, wpIndex: 1, idle, run: runAction, listen: roster.listen ? mixer.clipAction(roster.listen) : null };
     state.girlPos = group.position; // live reference — see section header
+    if (state.difficulty === 'impossible') hideGirl();
     // "Head start" announcement moved to updateGirl's first LIVE frame —
     // pushed here it would fire behind the loading overlay and fade
     // before anyone can read it.
@@ -812,6 +933,7 @@ function spawnGirl() {
     scene.add(group);
     girl = { group, mixer: null, wpIndex: 1 };
     state.girlPos = group.position;
+    if (state.difficulty === 'impossible') hideGirl();
   });
 }
 
@@ -868,10 +990,11 @@ let introStarted = false;
 const AMBUSH_SPEED = [9.5, 11];   // m/s; the player sprints at 8.4
 function spawnStartAmbush() {
   const p = playerBody.position;  // the spawn, facing -z toward her
-  spawnChargers([
+  const spots = [
     [p.x - 3, p.z - 6.5], [p.x + 3, p.z - 5.5],                    // very close
     [p.x - 6.5, p.z - 14], [p.x, p.z - 16.5], [p.x + 5.5, p.z - 15], // close
-  ], AMBUSH_SPEED);
+  ];
+  spawnChargers(spots.slice(0, Math.ceil(spots.length * state.zombieCountMul)), AMBUSH_SPEED); // Easy: three
 }
 
 function tickIntro(dt) {
@@ -909,27 +1032,38 @@ function updateGirl(dt) {
   // the announce beat, the escalation clock — runs behind the overlay.
   // Without this she burns her head start while the progress bar is up.
   if (!state.readyShown) return;
+  if (girl && escort) { updateEscort(dt); return; } // caught: she's with you
   if (!girl || state.paused || state.girlCaught) return;
   if (state.cinematic) { if (girl.mixer) girl.mixer.update(dt); return; } // idling through the intro
   if (!girlAnnounced) {
     girlAnnounced = true;
-    // Off the intro's idle and away
-    if (girl.idle && girl.run) { girl.run.reset().play(); girl.idle.crossFadeTo(girl.run, 0.3, false); }
-    pushKillFeed('She has a head start — move!');
+    if (girl.hiding) pushKillFeed("She's gone to ground near here. The radar will find her.");
+    else {
+      // Off the intro's idle and away
+      if (girl.idle && girl.run) { girl.run.reset().play(); girl.idle.crossFadeTo(girl.run, 0.3, false); }
+      pushKillFeed('She has a head start — move!');
+    }
   }
+  if (girl.hiding) { if (!state.isDead) updateHiding(dt); if (girl.mixer) girl.mixer.update(dt); return; }
   // After the lose trigger the cinematic (mission phase) owns her; while
   // the player is dead for any other reason she simply holds position.
   if (state.isDead && !state.portReached) return;
   const g = girl.group;
   if (!state.portReached) {
-    const wp = GIRL_WAYPOINTS[girl.wpIndex];
+    // Out of a hiding place first (Impossible), then the route
+    const wp = girl.path?.length ? girl.path[0] : GIRL_WAYPOINTS[girl.wpIndex];
     const dx = wp.x - g.position.x, dz = wp.z - g.position.z;
     const dist = Math.hypot(dx, dz);
-    const step = GIRL_SPEED * dt;
+    const pace = g.position.z < GIRL_MIDWAY_Z ? GIRL_TIRED : 1;
+    if (girl.run) girl.run.timeScale = pace;
+    const step = GIRL_SPEED * pace * (state.difficulty === 'easy' ? GIRL_EASY : 1) * dt;
     if (dist <= step) {
       g.position.set(wp.x, wp.y, wp.z);
-      girl.wpIndex++;
-      if (girl.wpIndex >= GIRL_WAYPOINTS.length) state.portReached = true;
+      if (girl.path?.length) girl.path.shift();
+      else {
+        girl.wpIndex++;
+        if (girl.wpIndex >= GIRL_WAYPOINTS.length) state.portReached = true;
+      }
     } else {
       g.position.x += (dx / dist) * step;
       g.position.z += (dz / dist) * step;
@@ -1068,7 +1202,7 @@ function handleKeyE() {
   if (state.isDead || state.paused || state.girlCaught) return;
   if (!playerVis) return;
   // Catch: occupy her position + press E — the locked win condition.
-  if (state.girlPos && playerVis.group.position.distanceTo(state.girlPos) < CATCH_RANGE) {
+  if (state.girlPos && !girl?.hiding && playerVis.group.position.distanceTo(state.girlPos) < CATCH_RANGE) {
     catchGirl();
     return;
   }
@@ -1209,9 +1343,10 @@ function chaseSeconds() {
   return ((performance.now() - missionStartTime) / 1000).toFixed(1);
 }
 
-/** WIN — the player occupied her position and pressed E (handleKeyE).
+/** CAUGHT — the player occupied her position and pressed E (handleKeyE).
     She stops and turns to face you, pleads to keep the stabilizer, and
-    Dr. James has you bring her back to the safe room; then the screen. */
+    Dr. James has you take her boat and her with it: the escort (ESCORT
+    below) to the pier, and only there the win. */
 let catchStory = null;
 async function catchGirl() {
   state.girlCaught = true;
@@ -1228,7 +1363,10 @@ async function catchGirl() {
     g.rotation.y = Math.atan2(p.x - g.position.x, p.z - g.position.z) + GIRL_RIG_YAW_OFFSET;
     if (girl.idle && girl.run) { girl.run.stop(); girl.idle.reset().play(); girl.mixer?.update(0.01); }
   }
-  catchStory = createNarrative({ onBlock: (value) => { state.narrativeBlocked = value; state.keys = {}; } });
+  catchStory = createNarrative({
+    onBlock: (value) => { state.narrativeBlocked = value; state.keys = {}; },
+    onRelease: () => { if (!state.paused) dom.canvas.requestPointerLock()?.catch?.(() => {}); },
+  });
   await catchStory.show({ id: 'girl-plea', mode: 'cinematic', speaker: 'THE GIRL', title: "Please don't take it.",
     text: "It's the only thing keeping me me. Every time a dose wears off, I can feel it coming back. If you take it, I turn.",
     continueLabel: 'Call Dr. James' });
@@ -1237,37 +1375,106 @@ async function catchGirl() {
     continueLabel: 'Take her boat' });
   if (!catchStory) return; // the level restarted mid-scene
   catchStory.dispose(); catchStory = null;
-  if (girl) scene.remove(girl.group); // she goes back with you
-  lv2WinStats.textContent =
-    `Infected eliminated: ${state.kills} · Coins: ${state.coins} · Stabilizer recovered in ${seconds} s`;
-  lv2Win.classList.remove('hidden');
-  finishRun('win', lv2Win);
+  // Back into the street, with her: to the boat
+  state.isDead = false;
+  escort = { caughtIn: seconds };
+  state.compassOverride = { pos: lv2EscapePoint, label: 'BOAT' };
+  setObjectives(`<div class="lv2-obj secondary"><span class="lv2-obj-icon box"></span>Caught her: the stabilizer is safe.</div>
+    <div class="lv2-obj"><span class="lv2-obj-icon active">◆</span>Get her to her boat at the pier.</div>`);
+  pushKillFeed('Get her to her boat at the pier');
+}
+
+// The objectives panel's text; null puts back what the level started with
+let objectivesAtStart = null;
+function setObjectives(html) {
+  const panel = document.getElementById('lv2-objectives');
+  if (!panel) return;
+  objectivesAtStart ??= panel.innerHTML;
+  panel.innerHTML = html ?? objectivesAtStart;
+}
+
+/* ESCORT — after the catch, she comes with you: running to keep up a step
+   behind, standing by you when you stop, solid against the street, and
+   brought up if she's left badly behind. The infected leave her be, as
+   ever. Reach the pier edge with her close and she's aboard: the win, and
+   on to the tower (Level 3). */
+const ESCORT_GAP = 1.8;      // m behind you she settles
+const ESCORT_SPEED = 7.5;    // m/s at most: she keeps up with a run
+const ESCORT_LOST = 25;      // m: further than this and she's caught up to you
+const BOARD_M = 5, BOARD_WITH_M = 8; // you at the pier edge, her this close
+let escort = null;           // { caughtIn } while she's with you
+function updateEscort(dt) {
+  const g = girl.group, p = playerVis.group.position;
+  if (girl.mixer) girl.mixer.update(dt);
+  if (state.isDead || state.paused || state.narrativeBlocked) return;
+  const dx = p.x - g.position.x, dz = p.z - g.position.z, dist = Math.hypot(dx, dz);
+  if (dist > ESCORT_LOST) {
+    // Left far behind (stuck on a corner, or you drove off): she catches up
+    g.position.set(p.x - (dx / dist) * ESCORT_GAP, g.position.y, p.z - (dz / dist) * ESCORT_GAP);
+  } else if (dist > ESCORT_GAP) {
+    const step = Math.min(dist - ESCORT_GAP, Math.min(ESCORT_SPEED, dist * 2.2) * dt);
+    g.position.x += (dx / dist) * step;
+    g.position.z += (dz / dist) * step;
+    pushOutOfSolids(g.position, 0.35);
+  }
+  g.rotation.y = Math.atan2(dx, dz) + GIRL_RIG_YAW_OFFSET;
+  // Running while she has ground to make up, standing beside you otherwise
+  const moving = dist > ESCORT_GAP + 0.3;
+  if (girl.run && girl.idle) {
+    if (moving && !girl.run.isRunning()) { girl.run.reset().play(); girl.idle.crossFadeTo(girl.run, 0.2, false); }
+    else if (!moving && girl.run.isRunning() && girl.run.getEffectiveWeight() > 0.5) { girl.idle.reset().play(); girl.run.crossFadeTo(girl.idle, 0.3, false); }
+  }
+  // At the pier edge with her: aboard
+  if (p.distanceTo(lv2EscapePoint) < BOARD_M && dist < BOARD_WITH_M) boardBoat();
+}
+// You both climb aboard and the boat takes you out (the departure, below);
+// the level is done only once it's away
+function boardBoat() {
+  const seconds = escort.caughtIn;
+  escort = null;
+  state.compassOverride = null;
+  startDeparture({ win: true, seconds });
 }
 
 /** LOSE trigger — she made her boat. Hands the next ~4.5 s to the
     cinematic: the camera swings to a quay vantage, she vaults the rail
     into the boat, and it opens up and runs for the open sea; then the
     lose screen. */
-function startLoseCinematic() {
+function startLoseCinematic() { startDeparture({ win: false }); }
+
+/* DEPARTURE — the boat leaving the pier. Lost: she reached it alone and
+   is gone with the stabilizer. Won (win: true): you brought her, and you
+   both climb in, her to her seat, you beside her at the stern
+   (PLAYER_SEAT), and it takes you out across the bay; only once it's away
+   is the level done. Same camera, same boat, either way. */
+const PLAYER_SEAT = new THREE.Vector3(0.75, 0, 0.6); // from her seat, in the boat
+function startDeparture({ win, seconds = 0 }) {
   state.isDead = true;             // freeze gameplay incl. the stock camera
   state.adrenalineActive = false;
   sfx.setEngine(0, false);
   document.exitPointerLock();
   dom.prompt.classList.add('hidden');
-  pushKillFeed('She reached her boat —');
+  pushKillFeed(win ? 'Aboard —' : 'She reached her boat —');
   const boat = lv2Scene.boat;
   boat.departing = true;
   loseCinematic = {
+    win, seconds,
     phase: 'board',
     t: 0,
     // Over the yard's clear mid-lane (|x| < 4), above the container stacks
     camGoal: new THREE.Vector3(2.5, 5.5, -199),
     lookAt: boat.group.position.clone().setY(1),
     from: state.girlPos.clone(),
+    playerFrom: win ? playerVis.group.position.clone() : null,
     speed: 0,
   };
   // Off the run and into a stance for the ride
   if (girl && girl.idle && girl.run) { girl.idle.reset().play(); girl.run.crossFadeTo(girl.idle, 0.3, false); }
+  if (win) {
+    state.firstPerson = false; // you're in the shot, not behind the eyes
+    playerVis.group.visible = true;
+    setPlayerAction('idle');
+  }
 }
 
 /** The cinematic itself — this tick owns the camera while the gameplay
@@ -1296,7 +1503,24 @@ function updateLoseCinematic(dt) {
         g.rotation.set(0, Math.PI + GIRL_RIG_YAW_OFFSET, 0); // facing the bow
       }
     }
-    if (k >= 1) { c.phase = 'depart'; c.t = 0; sfx.burst('sawtooth', 90, 1.4, 0.18); pushKillFeed('— and she\'s away.'); }
+    if (c.win) {
+      // You after her, over the rail to the stern beside her
+      const seat = boat.seat.clone().add(PLAYER_SEAT), to = boat.group.localToWorld(seat.clone());
+      const pv = playerVis.group;
+      pv.position.lerpVectors(c.playerFrom, to, k);
+      pv.position.y += Math.sin(Math.PI * k) * 1.2;
+      pv.rotation.y = Math.atan2(to.x - c.playerFrom.x, to.z - c.playerFrom.z);
+      if (k >= 1) {
+        boat.group.attach(pv);
+        pv.position.copy(seat);
+        pv.rotation.set(0, Math.PI, 0); // facing the bow with her
+      }
+    }
+    if (k >= 1) {
+      c.phase = 'depart'; c.t = 0;
+      sfx.burst('sawtooth', 90, 1.4, 0.18);
+      pushKillFeed(c.win ? '— and you\'re away, across the bay to the tower.' : '— and she\'s away.');
+    }
     return;
   }
 
@@ -1316,6 +1540,16 @@ function updateLoseCinematic(dt) {
   boat.wake.scale.y = 0.6 + Math.min(1.4, c.speed / 12);
   boat.wake.position.z = BOAT_LENGTH / 2 + 8 * boat.wake.scale.y;
   if (girl && girl.mixer) girl.mixer.update(dt);
+  if (c.t >= 3.6 && c.win) {
+    // Away with her: the level is done
+    loseCinematic = null;
+    state.girlPos = null;
+    lv2WinStats.textContent =
+      `Infected eliminated: ${state.kills} · Coins: ${state.coins} · Stabilizer recovered in ${c.seconds} s · Out by boat`;
+    lv2Win.classList.remove('hidden');
+    finishRun('win', lv2Win);
+    return;
+  }
   if (c.t >= 3.6) {
     state.girlPos = null;
     loseCinematic = null;
@@ -1346,7 +1580,12 @@ function updateMission(dt) {
 
   // Catch prompt — a near-approach cue before grab range itself.
   const distToGirl = playerVis.group.position.distanceTo(state.girlPos);
-  if (distToGirl < CATCH_RANGE * 1.6) {
+  if (girl?.hiding && distToGirl < 4 && !state.hasRadarUpgrade) {
+    // Found her without the radar: she's wedged in out of reach
+    dom.prompt.classList.remove('hidden');
+    dom.prompt.querySelector('b').textContent = '!';
+    dom.promptText.textContent = "She's hiding out of reach. Get the radar";
+  } else if (!girl?.hiding && distToGirl < CATCH_RANGE * 1.6) {
     dom.prompt.classList.remove('hidden');
     dom.prompt.querySelector('b').textContent = 'E';
     dom.promptText.textContent = distToGirl <= CATCH_RANGE ? 'Stop her' : 'Get closer…';
@@ -1375,7 +1614,7 @@ function updateMission(dt) {
   escalationTimer -= dt;
   if (escalationTimer <= 0) {
     const progress = THREE.MathUtils.clamp(1 - girlDist / GIRL_ROUTE_LENGTH, 0, 1);
-    escalationTimer = ESCALATE_START - (ESCALATE_START - ESCALATE_MIN) * progress;
+    escalationTimer = (ESCALATE_START - (ESCALATE_START - ESCALATE_MIN) * progress) / state.zombieCountMul; // Easy: half as often
     spawnZombie();
   }
 }
@@ -1385,9 +1624,15 @@ function updateMission(dt) {
     restocked, the route's coins back, and the chase clock re-armed. The
     briefing doesn't replay, so the start ambush that follows it is
     sprung straight away. */
+let lv2Quake = null;
 function resetLevel2() {
   resetCityKit(); // a restart is a new play: new random rays across the mirrors
+  lv2Quake?.reset(); // the bridge's glass back, the lions away, the quake to come
   if (catchStory) { catchStory.dispose(); catchStory = null; state.narrativeBlocked = false; }
+  escort = null;
+  state.compassOverride = null;
+  if (objectivesAtStart) setObjectives(null);
+  if (playerVis && playerVis.group.parent !== scene) scene.attach(playerVis.group); // back off the boat
   loseCinematic = null;
   missionStartTime = 0;
   escalationTimer = ESCALATE_START;
@@ -1411,11 +1656,15 @@ function resetLevel2() {
     g.position.set(wp.x, wp.y, wp.z);
     g.rotation.set(0, Math.atan2(next.x - wp.x, next.z - wp.z) + GIRL_RIG_YAW_OFFSET, 0);
     girl.wpIndex = 1;
+    girl.path = null;
+    girl.hiding = null;
     if (girl.idle && girl.run) { girl.run.stop(); girl.idle.reset().play(); }
     state.girlPos = g.position;
+    if (state.difficulty === 'impossible') hideGirl(); // and gone to ground again, somewhere new
   }
 
   for (const def of lv2Machines) def.machine.restock();
+  if (state.difficulty === 'impossible' && lv2Scene?.machines.radar) moveRadar(lv2Scene.machines.radar);
   placeCoinClusters();
   lv2HUD.setGirlDistance(null);
   lv2HUD.setItemCount('radar', 0);
@@ -1524,8 +1773,8 @@ function buildLevel2HUD(portTarget) {
   const objectives = document.createElement('div');
   objectives.id = 'lv2-objectives';
   objectives.innerHTML = `
-    <div class="lv2-obj"><span class="lv2-obj-icon active">◆</span>Catch the girl before she reaches the port.</div>
-    <div class="lv2-obj secondary"><span class="lv2-obj-icon box"></span>Reach the port before her.</div>`;
+    <div class="lv2-obj"><span class="lv2-obj-icon active">◆</span>${state.difficulty === 'impossible' ? 'Find the girl (the radar will), then catch her' : 'Catch the girl'} before she reaches the port.</div>
+    <div class="lv2-obj secondary"><span class="lv2-obj-icon box"></span>Then take her to her boat at the pier.</div>`;
   hud.appendChild(objectives);
 
   // Distances — port readout always live; girl row hidden until the

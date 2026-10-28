@@ -4,7 +4,7 @@
    Fills the district's plan (CityLayout.js layout()): kit buildings
    (CityKit.js) on lots facing every street, its parks, street trees in the
    tree pits CityGround.js laid, and lamp posts along the back streets.
-   Downtown adds the city zoo; the harbour adds the waterfront (boardwalk,
+   The harbour adds the city zoo and the waterfront (boardwalk,
    beaches, the lighthouse), sand blown onto its streets, and Harbour Walk,
    the lit glass bridge over the main street.
 
@@ -18,6 +18,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { scene, addStaticBox, addLight, rowX, STREET_HALF_W } from './Scene.js';
+const addWorldBox = addStaticBox, worldScene = scene; // buildZoo shadows both names with its shifted versions
 import { state } from './state.js';
 import { makeStreetlight } from './characters.js';
 import { buildKitBuilding, FEATURE_SPOTS, MAIN_LOTS } from './CityKit.js';
@@ -73,7 +74,9 @@ function buildRows(rnd, L) {
 
 /* --- Trees ---------------------------------------------------------------- */
 const TRUNK = flat(0x6a4a32), LEAVES = [flat(0x4f7a3a), flat(0x5f8a40), flat(0x3f6a34)];
-function tree(batch, rnd, x, z, scale = 1) {
+// boxDz: drawn in a group moved that far north (the zoo), so the trunk's
+// collider goes there too
+function tree(batch, rnd, x, z, scale = 1, boxDz = 0) {
   const h = (2.2 + rnd() * 0.8) * scale;
   batch.add(TRUNK, new THREE.CylinderGeometry(0.12 * scale, 0.18 * scale, h, 6).translate(x, h / 2, z));
   for (let i = 0; i < 3; i++) {
@@ -81,7 +84,7 @@ function tree(batch, rnd, x, z, scale = 1) {
     batch.add(LEAVES[(i + Math.floor(rnd() * 3)) % 3], new THREE.IcosahedronGeometry(r, 0)
       .rotateY(rnd() * 3).translate(x + (rnd() - 0.5) * 0.9 * scale, h + 0.3 * scale + i * 0.55 * scale, z + (rnd() - 0.5) * 0.9 * scale));
   }
-  if (inReach(x, x, z, z)) addStaticBox(0.22 * scale, h / 2, 0.22 * scale, x, h / 2, z);
+  if (inReach(x, x, z + boxDz, z + boxDz)) addStaticBox(0.22 * scale, h / 2, 0.22 * scale, x, h / 2, z + boxDz);
 }
 function plantStreetTrees(batch, rnd) {
   for (const pit of treePits) if (rnd() < (pit.far ? 0.45 : 0.7)) tree(batch, rnd, pit.x, pit.z, 0.9 + rnd() * 0.25);
@@ -204,8 +207,14 @@ function zooSign(text, bg = '#2f5a3a', fg = '#f4e9d6', w = 512, h = 128) {
   tex.colorSpace = THREE.SRGBColorSpace;
   return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 });
 }
-function buildZoo(batch, rnd, zoo) {
+// Built as laid out (z -95..-200), in its own group moved zoo.shiftZ north,
+// its colliders moved with it
+function buildZoo(rnd, zoo) {
   const { x0, x1, z0, z1, gateZ, gateW } = zoo;
+  const dz = zoo.shiftZ || 0, batch = new Batch(), zooGroup = new THREE.Group();
+  zooGroup.position.z = dz;
+  const addStaticBox = (hx, hy, hz, x, y, z, ry) => addWorldBox(hx, hy, hz, x, y, z + dz, ry);
+  const scene = zooGroup; // signs and the aviary net go in the group too
   const iron = flat(0x2a3a2e), stone = flat(0xb0a68e), sand = flat(0xc9b48a), grass = flat(0x6a8f42), rock = flat(0x8a8478);
   const water = flat(0x4a9ac8, { roughness: 0.15, emissive: 0x0a2a40, emissiveIntensity: 1 }), wood = flat(0x7a5a3a), path = flat(0xd8c8a4);
   // Ground: grass, with a sand path from the gate through the middle
@@ -302,7 +311,9 @@ function buildZoo(batch, rnd, zoo) {
     batch.add(flat(c), new THREE.SphereGeometry(0.3, 8, 6).scale(1, 1.2, 1).translate(-73 + dx, hy, -134 + dz));
   }
   // Trees and benches along the path
-  for (let i = 0; i < 10; i++) tree(batch, rnd, -76 - i * 5.2, gateZ + (i % 2 ? 4 : -4), 1 + rnd() * 0.3);
+  for (let i = 0; i < 10; i++) tree(batch, rnd, -76 - i * 5.2, gateZ + (i % 2 ? 4 : -4), 1 + rnd() * 0.3, dz);
+  batch.finish(true, zooGroup);
+  worldScene.add(zooGroup);
 }
 
 /* --- Things that move (Level ticks call updateTown) --------------------------- */
@@ -635,7 +646,7 @@ export function buildTown() {
   buildRows(rnd, L);
   const greenery = new Batch();
   for (const park of L.parks) buildPark(greenery, rnd, park);
-  if (L.zoo) buildZoo(greenery, rnd, L.zoo);
+  if (L.zoo) buildZoo(rnd, L.zoo);
   if (L.promenade) buildWaterfront(greenery, rnd, L.promenade);
   if (L.lighthouse) buildLighthouse(greenery, rnd, L.lighthouse);
   if (L.sandFrom !== undefined) buildSandDrifts(rnd, L);

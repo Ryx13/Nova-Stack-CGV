@@ -14,9 +14,7 @@
 
      Both back streets, the blocks between them and the main street, and
      the park are in reach; the outer streets and everything north of the
-     spawn are the town carrying on past the edge. The city zoo fills the
-     west outer block, its gate on the west back street. Two vet clinics,
-     one by the zoo, one by the park.
+     spawn are the town carrying on past the edge. Two vet clinics.
 
    harbour (Level 2)
 
@@ -28,7 +26,10 @@
      you near it. Harbour Square, a park with a bandstand, takes the open
      lot on the east side of the main street (its wrecks and coin nest
      stay); Gull Park sits at the south end of the west block. A lit glass
-     bridge, Harbour Walk, crosses the main street mid-route.
+     bridge, Harbour Walk, crosses the main street mid-route. The city zoo
+     fills the west outer block, its gate on the west back street: the
+     quake that brings the bridge down mid-level (Level2Quake.js) lets its
+     animals out.
 
    All roads run the full length of their district, so a later
    difficulty setting can open or close any of them.
@@ -39,7 +40,9 @@ export const SIDEWALK = 3;
 export const BOUNDS = { x: 78, zN: 40, zS: -210 };
 
 /* --- downtown (Level 1) --------------------------------------------------- */
-const DT_ZOO = { x0: -130, x1: -67, z0: -95, z1: -200, gateZ: -140, gateW: 8 };
+// The zoo as it's laid out (CityTown.js buildZoo); a district places it
+// shiftZ metres north of that
+const ZOO = { x0: -130, x1: -67, z0: -95, z1: -200, gateZ: -140, gateW: 8 };
 const DT_PARK = { x0: 36, x1: 61, z0: -42, z1: -96, kind: 'fountain' };
 const DOWNTOWN = {
   // The main street's own surface: sidewalk run, junctions where the
@@ -63,8 +66,7 @@ const DOWNTOWN = {
   backStreets: [
     { x: -58, halfW: 6, z0: 150, z1: -232 },
     { x: 70, halfW: 6, z0: 150, z1: -232 },
-    { x: -98, halfW: 5, z0: 150, z1: -93, far: true },   // stops at the zoo...
-    { x: -98, halfW: 5, z0: -202, z1: -232, far: true },  // ...and carries on past it
+    { x: -98, halfW: 5, z0: 150, z1: -232, far: true },
     { x: 110, halfW: 5, z0: 150, z1: -232, far: true },
   ],
   // East-west links: a road from x0 to x1 at z. `main` skips the main
@@ -85,18 +87,16 @@ const DOWNTOWN = {
     { z: -175, x0: 34, x1: 61, halfW: 4 },
   ],
   parks: [DT_PARK],
-  zoo: DT_ZOO,
   keepClear: [
     { x0: -42, x1: -20, z0: -44, z1: -66 },   // west pocket lot
     { x0: 28, x1: 64, z0: -99, z1: -137, opens: true }, // depot yard, open onto the east street
     { x0: -60, x1: 60, z0: 92, z1: 52 },      // the annex and its tanks
     DT_PARK,
-    { x0: DT_ZOO.x0 - 2, x1: DT_ZOO.x1 + 3, z0: DT_ZOO.z0, z1: DT_ZOO.z1 },
   ],
   // Lots with a particular shop on them: the first lot on that row whose
   // frontage covers z gets these shops, in order along its buildings
   featureLots: [
-    { row: 'w-outer', z: -82, shops: ['vet'] },   // by the zoo gate
+    { row: 'w-outer', z: -82, shops: ['vet'] },
     { row: 'e-inner', z: -27, shops: ['vet'] },   // by the park
   ],
   // Rows of lots: facade x, facing (+1 / -1 along x, toward the street),
@@ -125,6 +125,7 @@ const HB_SQUARE = {
   avoid: [[20, -128], [34, -150], [24, -158], [38, -132], [27, -143], [6, -126]],
   openSide: -1, // the main street side has no hedge
 };
+const HB_ZOO_SHIFT = 45;
 const HB_GULL = { x0: -49, x1: -35, z0: -160, z1: -184, kind: 'fountain', name: 'Gull Park', palms: true };
 const HB_PROMENADE = [{ x0: -80, x1: -45, beach: 'west' }, { x0: 45, x1: 80, beach: 'east' }]; // either side of the quay
 const HARBOUR = {
@@ -158,6 +159,9 @@ const HARBOUR = {
   // The boardwalk from the quay line to z1, then the beach down into the sea
   promenade: { strips: HB_PROMENADE, z0: QUAY_Z, z1: -192, beachTo: -213 },
   lighthouse: { x: -86, z: -218 },
+  // North enough to clear the quay: the gate at z -95, the lions' broken
+  // fence onto the west street near the bridge
+  zoo: { ...ZOO, shiftZ: HB_ZOO_SHIFT },
   sandFrom: -120, // where sand drifts start on the streets
   // The glass bridge across the main street: centre z, deck height at its
   // ends and how much higher its middle arches
@@ -165,6 +169,7 @@ const HARBOUR = {
   keepClear: [
     { x0: -42, x1: -20, z0: -44, z1: -66 },   // west pocket lot
     HB_SQUARE, HB_GULL,
+    { x0: ZOO.x0 - 2, x1: ZOO.x1 + 3, z0: ZOO.z0 + HB_ZOO_SHIFT, z1: ZOO.z1 + HB_ZOO_SHIFT },
     ...HB_PROMENADE.map((p) => ({ x0: Math.min(p.x0, p.x1) - 40, x1: Math.max(p.x0, p.x1) + 40, z0: QUAY_Z + 1, z1: -240 })),
   ],
   featureLots: [],
