@@ -15,11 +15,16 @@ Build the game's character assets from the Mixamo sources in art/.
   art/story/<name>_rigged.fbx       ->  assets/story/<name>.glb
       the story's people (Dr. James), lightened like the citizens but
       never infected
+  art/animations/Standing Idle.fbx  ->  assets/story/standing_idle.glb
+      Dr. James's pose in the safe room, its own small file (left out of
+      the players' animations.glb)
 
 Run from the repo root (PowerShell):
   & "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b -P tools\build_characters.py
 Citizens and their clips only, leaving the player's files as they are:
   & "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b -P tools\build_characters.py -- citizens
+Dr. James's standing pose only:
+  & "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b -P tools\build_characters.py -- pose
 """
 import glob
 import os
@@ -36,6 +41,7 @@ SRC_ZOMBIE_ANIMS = os.path.join(ROOT, "art", "zombie_animations")
 OUT_CITIZENS = os.path.join(ROOT, "assets", "citizens")
 SRC_STORY = os.path.join(ROOT, "art", "story")
 OUT_STORY = os.path.join(ROOT, "assets", "story")
+STORY_POSE = os.path.join(SRC_ANIMS, "Standing Idle.fbx")
 
 
 def reset():
@@ -195,11 +201,15 @@ def build_animations(paths, out=OUT, name="animations.glb"):
 
 
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+if "pose" in ARGS:
+    os.makedirs(OUT_STORY, exist_ok=True)
+    build_animations([STORY_POSE], OUT_STORY, "standing_idle.glb")
+    sys.exit(0)
 if "citizens" not in ARGS:
     os.makedirs(OUT, exist_ok=True)
     for p in sorted(glob.glob(os.path.join(SRC_CHARS, "*_rigged.fbx"))):
         build_character(p)
-    build_animations(sorted(glob.glob(os.path.join(SRC_ANIMS, "*.fbx"))))
+    build_animations(sorted(p for p in glob.glob(os.path.join(SRC_ANIMS, "*.fbx")) if p != STORY_POSE))
 
 # The city's citizens and their zombie clips, when any have been added
 citizens = sorted(glob.glob(os.path.join(SRC_CITIZENS, "*_rigged.fbx")))

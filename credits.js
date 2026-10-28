@@ -173,7 +173,7 @@ export const CREDITS = [
     items: [
       {
         name: 'Mixamo animation clips',
-        what: 'Every character clip in assets/characters/animations.glb (movement, shooting, dying, the select-screen dance and listening idle), and the Level 2 runner\'s Injured Run.',
+        what: 'Every character clip in assets/characters/animations.glb (movement, shooting, dying, the select-screen dance and listening idle), the Level 2 runner\'s Injured Run, and Dr. James\'s Standing Idle in the safe room (assets/story/standing_idle.glb).',
         author: 'Adobe Mixamo',
         source: 'https://www.mixamo.com',
         licence: 'Royalty-free under the Adobe/Mixamo terms of use (no attribution required, credited anyway)',
