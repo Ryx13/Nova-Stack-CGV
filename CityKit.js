@@ -287,6 +287,9 @@ const displayPanes = [];  // see-through display windows, same shape
 // kind: 'window' (merged into its building), 'mirror' or 'display' (index:
 // its instance in the display-glass mesh, which a shatter can hide)
 export const glassPanes = [];
+// Every street door, { x, z, side } (side: the way the facade faces), for
+// the infected who come out of the buildings (characters.js spawnZombie)
+export const doorways = [];
 let displayMesh = null;
 const _hide = new THREE.Matrix4().makeScale(0, 0, 0);
 /** A shattered display window: its glass is gone. */
@@ -382,6 +385,7 @@ class Builder {
   }
   slidingDoor(u) {
     slidingDoors.push({ x: this.fx + this.side * 0.06, y: DOOR_H / 2, z: this.zc + u, open: 0, side: this.side });
+    doorways.push({ x: this.fx, z: this.zc + u, side: this.side });
   }
   // A box anywhere: centre (x, y, z), sizes along world axes
   box(x, y, z, sx, sy, sz, material) {
@@ -570,7 +574,7 @@ function garageFront(b, rnd, fw, dark) {
   for (let v = H - 0.11; v > bottom + 0.05; v -= 0.22) b.face(0, v, 0.08, W, 0.18, 0.05, slats[k++ & 1]);
   b.face(0, bottom + 0.06, 0.1, W, 0.1, 0.08, dark);                              // bottom rail
 }
-function door(b, u) { b.face(u, 1.2, 0.03, 1.2, 2.4, 0.06, mat(0x1c1a18)); }
+function door(b, u) { b.face(u, 1.2, 0.03, 1.2, 2.4, 0.06, mat(0x1c1a18)); doorways.push({ x: b.fx, z: b.zc + u, side: b.side }); }
 
 // The vet: a bench, a water bowl and a sign out front
 function vetExtras(b, rnd, fw) {

@@ -3,7 +3,7 @@ import {EnemyCrowd} from './EnemyCrowd.js';
 import { buildKitBuilding } from './CityKit.js';
 import { buildCityGround } from './CityGround.js';
 import { buildTown } from './CityTown.js';
-import { mainLotOpen } from './CityLayout.js';
+import { mainLotOpen, SIDEWALK as SIDEWALK_W, layout } from './CityLayout.js';
 import { CircleGrid } from './SpatialGrid.js';
 import { asphaltRoughness } from './ContactShading.js';
 import { streetlightBeamMaterial } from './survivor.js';
@@ -21,6 +21,9 @@ import {
 } from './Scene.js';
 import { spawnPickup, spawnCoin, registerKillstreak } from './PowerUps.js';
 import { damagePlayer, spawnHitSpark, spawnBlood } from './Actions.js';
+import { spawnRunOverSplash, placeBloodSplat } from './ImpactFX.js';
+import { loadCitizenTemplates, ORIGINAL_WEIGHT, CRAWLER_CHANCE, GAITS } from './Citizens.js';
+import { doorways } from './CityKit.js';
 import { createFireMaterial, createToxicMaterial } from './shaders.js';
 import { getSelectedCharacter, instantiateCharacter, clipsFor, boneByName } from './roster.js';
 
@@ -1920,7 +1923,13 @@ function buildDepotYard() {
    CORPSES (decorative)
 --------------------------------------------------------------------- */
 let corpseTemplate = null;
+// Off: the scatter is the zombie model frozen in its T-pose, tipped onto its
+// back and lifted by bounds that don't match the body, so some float tilted
+// with an arm in the air. true brings them back as they were; real lying
+// poses would be the fix.
+const CORPSE_SCATTER_ENABLED = false;
 function loadCorpses() {
+  if (!CORPSE_SCATTER_ENABLED) return;
   new GLTFLoader().load('assets/zombie_running_on_metel_maniac.glb', (gltf) => {
     const obj = gltf.scene;
     const box = new THREE.Box3().setFromObject(obj);
@@ -2945,20 +2954,90 @@ function loadZombieTemplate(path, opts = {}) {
     markLoaded('zombie');
     if (!zombieTemplateResolved) {
       zombieTemplateResolved = true;
-      for (let i = 0, n = Math.round(6 * state.zombieCountMul); i < n; i++) spawnZombie();
+      openingCrowdWhenReady();
     }
   }, undefined, () => {
     state.loadFlags.zombie = true;
     markLoaded('zombie');
     if (!zombieTemplateResolved) {
       zombieTemplateResolved = true;
-      for (let i = 0, n = Math.round(6 * state.zombieCountMul); i < n; i++) spawnZombie();
+      openingCrowdWhenReady();
     }
   });
 }
 
+// A citizen (Citizens.js) joins the spawn pool: sized and grounded the way
+// the player's Mixamo body is. Facing as the other zombies' rigs do: the
+// player's group faces the other way, so its 180-degree offset turns a
+// citizen round to walk backwards
+const CITIZEN_SPEED = 0.5; // Level 2 only: of the original zombies' speed
+const CITIZEN_REACH = 1.1;  // m: they're right on you before they attack
+const EMERGE_SPEED = 1.3, EMERGE_IN = 0.9; // m/s out of a doorway, from this far inside
+function addCitizenTemplate({ id, scene: obj, clips, weight, from, runs }) {
+  obj.updateMatrixWorld(true); // a fresh body's Armature scale isn't in its matrices yet
+  const size = new THREE.Box3().setFromObject(obj).getSize(new THREE.Vector3());
+  obj.scale.setScalar(THREE.MathUtils.clamp(ZOMBIE_TARGET_HEIGHT / Math.max(size.y, 0.2), 0.05, 2.8));
+  obj.updateMatrixWorld(true);
+  const footOffset = -new THREE.Box3().setFromObject(obj).min.y;
+  obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  const ankleToSole = measureAnkleToSole(obj, findBoneLike(obj, 'LeftFoot'), findBoneLike(obj, 'RightFoot'));
+  zombieTemplates.push({ scene: obj, animations: [clips.walk], clips, footOffset, runs, path: `citizen:${id}`, ankleToSole,
+    citizen: true, yawOffset: state.ZOMBIE_RIG_YAW_OFFSET, weight, from });
+  placeFeedingGroups();
+}
+
+// Templates by weight: a level's citizens by their mix, the two original
+// models at ORIGINAL_WEIGHT each, so they're a small share once citizens are in
+function pickZombieTemplate() {
+  let total = 0;
+  for (const t of zombieTemplates) total += t.weight ?? ORIGINAL_WEIGHT;
+  let r = Math.random() * total;
+  for (const t of zombieTemplates) if ((r -= t.weight ?? ORIGINAL_WEIGHT) <= 0) return t;
+  return zombieTemplates[zombieTemplates.length - 1] || null;
+}
+
+/* FEEDING GROUPS — a couple of infected crouched over a kill on the
+   sidewalk, eating, left where the outbreak caught them. They pay no
+   attention until you come within FEED_WAKE_M or one of them is killed,
+   then the whole group turns on you. Levels 1 and 2 (Level 3's infected
+   are placed by its own script). Placed once citizens with the eating
+   clips are in, and again after a restart. */
+const FEEDING_SPOTS = {
+  1: [[-11.2, -38], [11.2, -92], [-11.2, -146], [11.2, -188]],
+  2: [[11.2, -46], [-11.2, -104], [11.2, -162]],
+};
+const FEED_WAKE_M = 10;
+let feedingPlaced = false;
+function placeFeedingGroups() {
+  const spots = FEEDING_SPOTS[state.levelId];
+  if (feedingPlaced || !spots) return;
+  const eaters = zombieTemplates.filter((t) => t.citizen && t.clips.bite);
+  if (!eaters.length) return;
+  feedingPlaced = true;
+  for (const [x, z] of spots) {
+    const group = { woken: false }, centre = new THREE.Vector3(x, 0, z);
+    placeBloodSplat(centre);
+    placeBloodSplat(new THREE.Vector3(x + (Math.random() - 0.5) * 0.9, 0, z + (Math.random() - 0.5) * 0.9));
+    const start = Math.random() * Math.PI * 2;
+    for (let i = 0; i < 2; i++) {
+      const a = start + i * Math.PI * (0.8 + Math.random() * 0.4);
+      const zom = new Zombie(new THREE.Vector3(x + Math.sin(a) * 0.85, 0, z + Math.cos(a) * 0.85),
+        { template: eaters[Math.floor(Math.random() * eaters.length)] });
+      zom.state = 'feeding';
+      zom.feedGroup = group;
+      zom.biteClip = i === 0 ? 'bite' : 'biteMirror';
+      zom.mesh.rotation.y = Math.atan2(x - zom.mesh.position.x, z - zom.mesh.position.z); // over the kill
+      state.zombies.push(zom);
+      state.spawnedTotal++;
+    }
+  }
+}
+
 export function loadZombies() {
   loadZombieTemplate('assets/zombie_running_on_metel_maniac.glb');
+  // This level's citizens, in the background: zombies spawned once one has
+  // arrived start including it (templates are drawn at construction)
+  if (!state.lightBoot) citizensLoading = loadCitizenTemplates(state.levelId, addCitizenTemplate);
   // model-rigged.glb is the fast "runner" variant — `runs: true` makes the
   // Zombie constructor below prefer a run-named clip (at full animation
   // speed, not the shambling 0.4x timeScale) and move noticeably faster.
@@ -2981,6 +3060,7 @@ export function loadZombies() {
 export function loadDeferredAssets() {
   if (!state.lightBoot) return;
   loadZombieTemplate('assets/model-rigged.glb', { runs: true });
+  citizensLoading = loadCitizenTemplates(state.levelId, addCitizenTemplate);
   loadPistolModel();
   loadCorpses();
   pendingWreckModels.splice(0).forEach(showWreckModel);
@@ -2990,18 +3070,22 @@ export class Zombie {
   // opts.template: a specific loaded template (see zombieTemplateFor)
   constructor(pos, opts = {}) {
     this.mesh = new THREE.Group();
-    const template = opts.template
-      || (zombieTemplates.length ? zombieTemplates[Math.floor(Math.random() * zombieTemplates.length)] : null);
+    const template = opts.template || pickZombieTemplate();
     this.rigged = !!template;
     this.hasAnim = false;
     if (this.rigged) {
       const rigInstance = skeletonClone(template.scene);
       rigInstance.position.y = template.footOffset;
-      rigInstance.rotation.y = state.ZOMBIE_RIG_YAW_OFFSET;
+      rigInstance.rotation.y = template.yawOffset ?? state.ZOMBIE_RIG_YAW_OFFSET;
+      this.citizen = !!template.citizen;
+      this.clipSpeed = template.clipSpeed || 1;
       this.mesh.add(rigInstance);
       this.rigObj = rigInstance;
       this.footBoneL = findBoneLike(rigInstance, 'LeftFoot') || findBoneLike(rigInstance, 'L_Ankle') || findBoneLike(rigInstance, 'Left_Ankle') || null;
       this.footBoneR = findBoneLike(rigInstance, 'RightFoot') || findBoneLike(rigInstance, 'R_Ankle') || findBoneLike(rigInstance, 'Right_Ankle') || null;
+      // Where the body really is, for collision (resolveZombieSolids): the
+      // runner's walk carries its pelvis well forward of the group origin
+      this.hipBone = findBoneLike(rigInstance, 'Hips') || findBoneLike(rigInstance, 'Pelvis') || null;
       // model-rigged.glb (the one whose feet were sinking) names its foot
       // bones 'L_Ankle'/'R_Ankle' — a completely different convention from
       // zombie_running_on_metel_maniac.glb's Mixamo-style
@@ -3034,7 +3118,21 @@ export class Zombie {
         this.action.play();
         // A level can speed runners up (state.runnerSpeedMul): the run
         // clip speeds up with them so their feet keep pace with the ground
-        this.mixer.timeScale = template.runs ? 1.15 * (state.runnerSpeedMul || 1) : 0.4;
+        this.mixer.timeScale = (template.runs ? 1.15 * (state.runnerSpeedMul || 1) : 0.4) * this.clipSpeed;
+        // Citizens play a clip per state (citizenAnim), from walk
+        if (template.clips) {
+          this.clips = template.clips;
+          this.actions = { walk: this.action };
+          this.anim = 'walk';
+          this.mixer.timeScale = 1;
+          // How this one moves, and its own pace through the clip, so no two
+          // walk in step (joggers always run)
+          const gaits = GAITS.filter((g) => this.clips[g.clip]);
+          let r = Math.random() * gaits.reduce((n, g) => n + g.weight, 0);
+          this.gait = template.runs ? GAITS.find((g) => g.id === 'run') : gaits.find((g) => (r -= g.weight) <= 0) || gaits[0];
+          this.gaitRate = 0.85 + Math.random() * 0.3;
+          this.action.time = Math.random() * this.action.getClip().duration;
+        }
       }
     } else {
       const built = buildZombieMesh();
@@ -3057,6 +3155,8 @@ export class Zombie {
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       mats.forEach((m) => { if (m) m.side = THREE.DoubleSide; });
     });
+    // Citizens vary a little in height, so two of one kind aren't twins
+    if (template?.citizen) this.mesh.scale.setScalar(0.94 + Math.random() * 0.12);
     scene.add(this.mesh);
     // Level of detail (updateZombies): pose every animEvery frames, from a
     // random first frame so throttled infected don't all pose on the same one
@@ -3072,6 +3172,10 @@ export class Zombie {
     this.speed = (template && template.runs)
       ? (4.4 + Math.random() * 1.8) * (state.runnerSpeedMul || 1)
       : 2.6 + Math.random() * 1.6;
+    // Level 2's citizens shamble at half the original zombies' pace (joggers
+    // too): the chase is about the girl. Elsewhere they keep full speed.
+    if (template?.citizen && state.levelId === 2) this.speed *= CITIZEN_SPEED;
+    if (this.gait && !template.runs) this.speed *= this.gait.speed; // a drag is slow, a stride brisk
     this.attackCooldown = 0;
     this.deathTimer = 0;
     this.idleDir = Math.random() * Math.PI * 2;
@@ -3079,6 +3183,47 @@ export class Zombie {
     this.wobble = Math.random() * 10;
     this.groanTimer = 2 + Math.random() * 6;
     this.alive = true;
+    // Some street citizens have lost the use of their legs
+    if (this.clips?.crawl && template.from === 'street' && !template.runs && Math.random() < CRAWLER_CHANCE) this.makeCrawler();
+  }
+  // Drags itself along: slow, low, and hit low (the shot capsule, the
+  // hitbox and the headshot line all come down with it)
+  makeCrawler() {
+    this.crawler = true;
+    this.speed *= 0.4;
+    this.bodyHeight = 0.75;
+    this.headY = 0.45;
+    this.hitbox.scale.y = 0.42;
+    this.hitbox.position.y = 0.35;
+    this.setAnim('crawl', 0);
+  }
+  // Cross-fades a citizen to one of its clips (one-shots hold their last frame)
+  setAnim(key, fade = 0.3) {
+    if (this.anim === key || !this.clips?.[key]) return;
+    let next = this.actions[key];
+    if (!next) {
+      next = this.actions[key] = this.mixer.clipAction(this.clips[key]);
+      if (key === 'standUp' || key === 'turn') { next.setLoop(THREE.LoopOnce); next.clampWhenFinished = true; }
+    }
+    next.reset().setEffectiveWeight(1).fadeIn(fade).play();
+    if (next.loop !== THREE.LoopOnce) next.time = Math.random() * this.clips[key].duration; // out of step with the rest
+    this.actions[this.anim]?.fadeOut(fade);
+    this.anim = key;
+  }
+  // Which clip a citizen plays now, and how fast
+  citizenAnim() {
+    if (this.standingUp > 0) return ['standUp', 1];
+    if (this.crawler) return ['crawl', THREE.MathUtils.clamp(this.speed / 1.1, 0.7, 1.4)];
+    if (this.state === 'feeding') return [this.biteClip || 'bite', 1];
+    if (this.state === 'attack') return ['attack', 1.15];
+    const g = this.gait?.clip || 'walk', k = this.gaitRate || 1;
+    if (this.state === 'chase') {
+      if (g === 'run') return ['run', k];
+      if (g === 'drag') return ['drag', THREE.MathUtils.clamp(this.speed / 2.2, 0.5, 1.1) * k];
+      return [g, THREE.MathUtils.clamp(this.speed / 1.4, 0.7, 1.5) * k];
+    }
+    if (this.loiter && this.clips.idle) return ['idle', k];
+    return [g === 'run' ? 'walk' : g, (g === 'drag' ? 0.5 : 0.7) * k]; // wandering
   }
   takeDamage(dmg, headshot) {
     if (!this.alive) return;
@@ -3102,11 +3247,14 @@ export class Zombie {
     this.mesh.rotation.x = 0;
     this.mesh.position.y = 0;
     this.idleTimer = 0;
+    // A citizen gets up off the ground rather than snapping upright
+    if (this.clips?.standUp && !this.crawler) this.standingUp = this.clips.standUp.duration;
     sfx.groan();
     pushKillFeed('An infected is back up — watch your six');
   }
   confirmedKill(headshot) {
     if (!this.alive) return;
+    if (this.feedGroup) this.feedGroup.woken = true; // the rest of its group looks up
     this.alive = false;
     this.state = 'dead';
     if (!this.countedKill) {
@@ -3139,6 +3287,24 @@ export class Zombie {
       if (this.downedTimer <= 0) this.reanimate();
       return;
     }
+    if (this.standingUp > 0) { this.standingUp -= dt; this.playWalk(dt, 1, 1); return; } // getting back up
+    if (this.emerge) {
+      // Walking out of the building through its door, into the street
+      this.emerge.t -= dt;
+      this.mesh.position.x += this.emerge.dir * EMERGE_SPEED * dt;
+      this.mesh.rotation.y = Math.atan2(this.emerge.dir, 0);
+      this.state = 'chase';
+      this.playWalk(dt, 4, 0.5);
+      if (this.emerge.t <= 0) this.emerge = null;
+      return;
+    }
+    if (this.state === 'feeding') {
+      // Eating, until you come close or one of the group goes down
+      if (this.feedGroup?.woken || this.mesh.position.distanceTo(playerPos) < FEED_WAKE_M) {
+        if (this.feedGroup) this.feedGroup.woken = true;
+        this.state = 'chase';
+      } else { this.playWalk(dt, 1, 1); return; }
+    }
     this.wobble += dt;
     this.groanTimer -= dt;
     if (this.groanTimer <= 0) {
@@ -3152,8 +3318,9 @@ export class Zombie {
     // surface is", not the normal 1.55 melee range — a zombie should
     // never even reach attack range while the shield is holding it off,
     // since it can't physically get close enough to swing.
-    const attackRange = state.shieldActive ? Math.max(1.55, (state.shieldRadius || 0) + 0.4) : 1.55;
-    if (dist < 26) {
+    // Citizens close right in before they go for you
+    const attackRange = state.shieldActive ? Math.max(1.55, (state.shieldRadius || 0) + 0.4) : (this.citizen ? CITIZEN_REACH : 1.55);
+    if (dist < 26 || this.hunting) {
       this.state = (dist < attackRange && !state.shieldActive && (!this.crowd || this.crowd.mayAttack)) ? 'attack' : 'chase';
     } else if (this.state !== 'idle') {
       this.state = 'idle';
@@ -3180,7 +3347,7 @@ export class Zombie {
       }
       avoidObstacles(this.mesh.position, move, others);
       const PLAYER_RADIUS = 0.32;
-      const ZOMBIE_RADIUS = 0.65;
+      const ZOMBIE_RADIUS = this.citizen ? 0.42 : 0.65;
       // While the shield is up, nothing should be able to close to less
       // than the shield's own radius (plus a little for the zombie's own
       // body, so it stops at the surface rather than clipping into it) —
@@ -3237,28 +3404,21 @@ export class Zombie {
       }
     } else {
       this.idleTimer -= dt;
-      if (this.idleTimer <= 0) { this.idleDir = Math.random() * Math.PI * 2; this.idleTimer = 2 + Math.random() * 3; }
-      const move = new THREE.Vector3(Math.sin(this.idleDir), 0, Math.cos(this.idleDir));
-      avoidObstacles(this.mesh.position, move, others);
-      this.mesh.position.x += move.x * 0.4 * dt;
-      this.mesh.position.z += move.z * 0.4 * dt;
-      this.mesh.position.x = clampZombieX(this.mesh.position.x, this.mesh.position.z);
-      this.mesh.rotation.y = lerpAngle(this.mesh.rotation.y, this.idleDir, dt * 2);
+      if (this.idleTimer <= 0) {
+        this.idleDir = Math.random() * Math.PI * 2; this.idleTimer = 2 + Math.random() * 3;
+        this.loiter = !!this.clips?.idle && !this.crawler && Math.random() < 0.5; // citizens stop and stand a while
+      }
+      if (!this.loiter) {
+        const move = new THREE.Vector3(Math.sin(this.idleDir), 0, Math.cos(this.idleDir));
+        avoidObstacles(this.mesh.position, move, others);
+        this.mesh.position.x += move.x * 0.4 * dt;
+        this.mesh.position.z += move.z * 0.4 * dt;
+        this.mesh.position.x = clampZombieX(this.mesh.position.x, this.mesh.position.z);
+        this.mesh.rotation.y = lerpAngle(this.mesh.rotation.y, this.idleDir, dt * 2);
+      }
       this.playWalk(dt, 2, 0.35);
     }
-    if (state.inVehicle) {
-      const carPos = carVis.group.position;
-      const d2 = carPos.distanceTo(this.mesh.position);
-      if (d2 < 2.15) {
-        const speed = chassisBody.velocity.length();
-        if (speed > 3.8) {
-          this.takeDamage(40 + speed * 12, false);
-          const push = new THREE.Vector3().subVectors(this.mesh.position, carPos).normalize().multiplyScalar(0.8 + speed * 0.12);
-          this.mesh.position.add(push);
-          if (!this.alive) pushKillFeed('Run over');
-        }
-      }
-    }
+    // Being run over is decided in resolveZombieSolids, against the car's outline
   }
   playWalk(dt, rate, timeScale) {
     // Far or off-screen: skip this frame's pose, and catch up with the
@@ -3268,8 +3428,20 @@ export class Zombie {
     this.animSkip = this.animEvery;
     dt = this.animAcc;
     this.animAcc = 0;
+    if (this.clips) {
+      const [key, rate] = this.citizenAnim();
+      this.setAnim(key);
+      this.mixer.timeScale = THREE.MathUtils.lerp(this.mixer.timeScale, rate, Math.min(1, dt * 4));
+      this.mixer.update(dt);
+      // Feet on the ground for upright clips only: crawling, eating and
+      // getting up rest on hands and knees, and the clip holds the height
+      if (key === 'walk' || key === 'run' || key === 'idle' || key === 'attack' || key === 'drag' || key === 'stride') {
+        groundClampRig(this.rigObj, this.footBoneL, this.footBoneR, dt, this.runs ? 22 : 10, this.ankleToSole);
+      }
+      return;
+    }
     if (this.rigged && this.hasAnim) {
-      this.mixer.timeScale = THREE.MathUtils.lerp(this.mixer.timeScale, timeScale, dt * 3);
+      this.mixer.timeScale = THREE.MathUtils.lerp(this.mixer.timeScale, timeScale * (this.clipSpeed || 1), dt * 3);
       this.mixer.update(dt);
     } else if (!this.rigged) {
       this.animateWalk(dt, rate);
@@ -3378,6 +3550,121 @@ function updateZombieLOD() {
   }
 }
 
+/* ZOMBIES ARE SOLID — after every infected has moved, each is pushed out
+   of any collision box it overlaps: the same boxes the player's physics
+   body hits (buildings, cover, parked wrecks), read from the physics world
+   with their real rotation, plus the car as a moving box. Out along the
+   shallowest side, so an infected pressed against a wall slides along it
+   rather than sticking. Steering (avoidObstacles) still does the planning;
+   this only makes sure nothing ends up inside a solid. */
+const ZOMBIE_BODY_R = 0.35; // m: the body, not the crowd spacing
+const CAR_HALF_X = 0.97, CAR_HALF_Z = 2.4; // the chassis box (buildCarPhysics)
+const zombieSolids = [], zombieSolidGrid = new CircleGrid(8, 0);
+let zombieSolidCount = -1;
+const _solidZero = new CANNON.Vec3(), _solidV = new CANNON.Vec3(), _solidF = new CANNON.Vec3();
+const _fwdZ = new CANNON.Vec3(0, 0, 1);
+// A box's world centre and yaw (from where its local +z points)
+function solidBox(body, offset, hx, hz, out = {}) {
+  body.quaternion.vmult(offset, _solidV);
+  body.quaternion.vmult(_fwdZ, _solidF);
+  const yaw = Math.atan2(_solidF.x, _solidF.z);
+  out.x = body.position.x + _solidV.x; out.z = body.position.z + _solidV.z;
+  out.c = Math.cos(yaw); out.s = Math.sin(yaw); out.hx = hx; out.hz = hz;
+  out.r = Math.hypot(hx, hz) + ZOMBIE_BODY_R * 3; // grid reach, roomy for big infected
+  return out;
+}
+function refreshZombieSolids() {
+  if (zombieSolidCount === world.bodies.length) return;
+  zombieSolidCount = world.bodies.length;
+  zombieSolids.length = 0;
+  for (const body of world.bodies) {
+    if (body.mass !== 0 || body.collisionResponse === false) continue;
+    body.updateAABB();
+    const a = body.aabb.lowerBound, b = body.aabb.upperBound;
+    // Kerbs underfoot and anything overhead don't stop a walker (as the crowd)
+    if (b.y < 0.35 || a.y > 1.8 || !Number.isFinite(a.x + b.x + a.z + b.z)) continue;
+    body.shapes.forEach((shape, i) => {
+      if (shape.type !== CANNON.Shape.types.BOX) return;
+      zombieSolids.push(solidBox(body, body.shapeOffsets[i] || _solidZero, shape.halfExtents.x, shape.halfExtents.z));
+    });
+  }
+  zombieSolidGrid.rebuild(zombieSolids);
+}
+// Whether a body of radius r at pos touches box b (plus reach)
+function touchesBox(pos, b, r) {
+  const dx = pos.x - b.x, dz = pos.z - b.z;
+  const lx = b.c * dx - b.s * dz, lz = b.s * dx + b.c * dz;
+  return Math.hypot(Math.max(0, Math.abs(lx) - b.hx), Math.max(0, Math.abs(lz) - b.hz)) < r;
+}
+// Push pos (x, z) out of box b to radius r; the box's own frame turns with it
+function pushOutOfBox(pos, b, r) {
+  const dx = pos.x - b.x, dz = pos.z - b.z;
+  const lx = b.c * dx - b.s * dz, lz = b.s * dx + b.c * dz;
+  if (Math.abs(lx) >= b.hx + r || Math.abs(lz) >= b.hz + r) return;
+  const qx = THREE.MathUtils.clamp(lx, -b.hx, b.hx), qz = THREE.MathUtils.clamp(lz, -b.hz, b.hz);
+  let ox = lx - qx, oz = lz - qz;
+  const d = Math.hypot(ox, oz);
+  if (d >= r) return; // near a corner but clear of it
+  if (d > 1e-6) { ox *= (r - d) / d; oz *= (r - d) / d; } // just outside: out to r
+  else {
+    // Inside: out through the nearest side
+    const px = b.hx - Math.abs(lx), pz = b.hz - Math.abs(lz);
+    if (px < pz) { ox = Math.sign(lx || 1) * (px + r); oz = 0; } else { oz = Math.sign(lz || 1) * (pz + r); ox = 0; }
+  }
+  pos.x += b.c * ox + b.s * oz;
+  pos.z += -b.s * ox + b.c * oz;
+}
+const _carSolid = {}, _shove = new THREE.Vector3(), _body = new THREE.Vector3();
+const RUNNER_BODY_SCALE = 1.3; // the runner model comes out bigger than the 1.8 m it's sized to
+// Driving into an infected this fast runs it over; slower, the car shoves it aside
+const RUN_OVER_SPEED = 3.8, RUN_OVER_REACH = 0.25, RUN_OVER_COOLDOWN_MS = 500;
+function runOver(z, speed) {
+  const now = performance.now();
+  if (now - (z.runOverAt || -1e9) < RUN_OVER_COOLDOWN_MS) return; // a tough one isn't hit every frame it touches
+  z.runOverAt = now;
+  const before = z.health, pos = z.mesh.position.clone();
+  z.takeDamage(40 + speed * 12, false);
+  if (z.alive && z.health === before) return; // couldn't be hurt (a protected one): no splash
+  spawnRunOverSplash(pos, chassisBody.velocity);
+  state.shake = Math.max(state.shake, 0.22);
+  if (!z.alive) pushKillFeed('Run over');
+  else z.mesh.position.add(_shove.subVectors(z.mesh.position, chassisBody.position).setY(0).normalize().multiplyScalar(0.8 + speed * 0.12));
+}
+function resolveZombieSolids() {
+  refreshZombieSolids();
+  const car = chassisBody && !state.skipCar ? solidBox(chassisBody, _solidZero, CAR_HALF_X, CAR_HALF_Z, _carSolid) : null;
+  const speed = car && state.inVehicle ? chassisBody.velocity.length() : 0;
+  for (const z of state.zombies) {
+    if (!z.alive || !(z instanceof Zombie) || z.emerge) continue; // a doorway's own is still inside
+    const r = ZOMBIE_BODY_R * Math.max(1, z.mesh.scale.x) * (z.runs ? RUNNER_BODY_SCALE : 1);
+    // Collide where the body is drawn (its pelvis, last frame's pose), not
+    // the group origin, then move the group by however far the body moved
+    const pos = z.mesh.position;
+    if (z.hipBone) z.hipBone.getWorldPosition(_body).setY(pos.y); else _body.copy(pos);
+    const ox = _body.x - pos.x, oz = _body.z - pos.z;
+    if (car && speed > RUN_OVER_SPEED && z.mesh.visible && touchesBox(_body, car, r + RUN_OVER_REACH)) {
+      runOver(z, speed);
+      if (!z.alive) continue;
+      _body.set(pos.x + ox, pos.y, pos.z + oz); // a tough one was shoved: start from there
+    }
+    for (const b of zombieSolidGrid.query(zombieSolids, _body.x, _body.z)) pushOutOfBox(_body, b, r);
+    if (car) pushOutOfBox(_body, car, r);
+    pos.x = _body.x - ox;
+    pos.z = _body.z - oz;
+  }
+}
+
+/** Pushes a body of radius r at pos out of every solid near it (the same
+    boxes the infected and the player collide with): for other walkers,
+    such as Level 2's escaped zoo animals. */
+/** A solid has moved (Level 2's radar machine): read the boxes afresh. */
+export function solidsMoved() { zombieSolidCount = -1; }
+
+export function pushOutOfSolids(pos, r) {
+  refreshZombieSolids();
+  for (const b of zombieSolidGrid.query(zombieSolids, pos.x, pos.z)) pushOutOfBox(pos, b, r);
+}
+
 export function updateZombies(dt, playerPos) {
   updateZombieLOD();
   const coordinated=state.levelId===3&&!state.isDead&&!state.paused&&!state.narrativeBlocked;
@@ -3393,6 +3680,7 @@ export function updateZombies(dt, playerPos) {
     state.zombies[i].update(dt, playerPos, _zombieNeighborSnapshot);
   }
   if(coordinated)enemyCrowd.separate(playerPos,dt,crowdCanMove,state.shieldActive?(state.shieldRadius||0):0);
+  resolveZombieSolids();
 }
 
 export function spawnDepotGuards() {
@@ -3430,17 +3718,117 @@ export function spawnChargers(points, speed) {
   }
 }
 
+/* WHERE THE INFECTED COME FROM — never out of thin air on an open road.
+   Every spawn is at a place someone could come from: a doorway on the
+   main street (shops, homes, offices, hotels), a side street running off
+   it, a park beside it, or a stretch of sidewalk or road you can't see at
+   that moment. Office workers and residents come out of doorways; joggers,
+   workers and the rest from the side streets, parks and the unseen street.
+   16-42 m off, mostly ahead of you. The places are fixed (every doorway,
+   set points down each side street, along each park and the sidewalks)
+   and used least-used first, nearest ahead first, so a run plays the same
+   way each time. Nowhere to come from right now: no spawn this time (the
+   spawn timer tries again). */
+const SPAWN_STEP = 12;           // m between fixed sidewalk and park points
+const spawnUses = new Map();     // place -> times used this run
+const SPAWN_NEAR = 16, SPAWN_FAR = 42;
+const _spawnFrustum = new THREE.Frustum(), _spawnMatrix = new THREE.Matrix4(), _spawnSphere = new THREE.Sphere(new THREE.Vector3(), 1.2);
+function inView(x, z) {
+  _spawnSphere.center.set(x, 1, z);
+  return _spawnFrustum.intersectsSphere(_spawnSphere);
+}
+function spawnPlaces(around) {
+  _spawnFrustum.setFromProjectionMatrix(_spawnMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+  const places = [];
+  const inReach = (x, z) => {
+    const d = Math.hypot(x - around.x, z - around.z);
+    return d > SPAWN_NEAR && d < SPAWN_FAR && around.z - z > -12;
+  };
+  const add = (x, z, outward, kind, extra) => {
+    if (inReach(x, z)) places.push({ x, z, facing: Math.atan2(outward, 0), kind, key: `${kind}:${x.toFixed(1)}:${z.toFixed(1)}`, ...extra });
+  };
+  // Out of a doorway on the main street's frontage: from just inside it,
+  // walking out through the door into the street
+  for (const d of doorways) {
+    if (Math.abs(d.x) > STREET_HALF_W + SIDEWALK_W + 1) continue;
+    add(d.x - d.side * EMERGE_IN, d.z, d.side, 'door', { emerge: d.side });
+  }
+  const main = layout().main;
+  // In from a side street, a little way down it
+  for (const j of main.junctions || []) {
+    for (const dz of [-0.2, 0.2]) add(j.side * (STREET_HALF_W + SIDEWALK_W + 4), j.z + dz * j.width, -j.side, 'side street');
+  }
+  // Out of a park beside the main street (Harbour Square)
+  for (const o of main.open || []) {
+    for (let z = o.z0 - SPAWN_STEP / 2; z > o.z1; z -= SPAWN_STEP) add(o.side * (STREET_HALF_W + 2.3), z, -o.side, 'park');
+  }
+  // Along a sidewalk, only where you can't see it happen
+  for (let z = main.zN; z > main.zS; z -= SPAWN_STEP) {
+    for (const side of [-1, 1]) {
+      const x = side * (STREET_HALF_W + 1);
+      if (!inView(x, z)) add(x, z, -side, 'unseen');
+    }
+  }
+  return places;
+}
+function pickSpawnPlace(around, template) {
+  const places = spawnPlaces(around);
+  if (!places.length) return null;
+  // Doorway people from doorways if there's one in reach, everyone else
+  // from anywhere else first
+  const wantDoor = template?.from === 'doors';
+  const preferred = places.filter((p) => (p.kind === 'door') === wantDoor);
+  const from = preferred.length ? preferred : places;
+  // The same order every run: least used, then the nearest ahead
+  const uses = (p) => spawnUses.get(p.key) || 0;
+  const ahead = (p) => (p.z <= around.z ? around.z - p.z : 1000 + p.z - around.z); // ahead first, then behind
+  from.sort((a, b) => uses(a) - uses(b) || ahead(a) - ahead(b) || a.x - b.x);
+  spawnUses.set(from[0].key, uses(from[0]) + 1);
+  return from[0];
+}
+
+/* THE OPENING CROWD — infected already out on the pavements either side
+   of the road ahead when a level starts, walking toward you. Fixed spots,
+   from where you start. Waits a few seconds for the citizens to load, so
+   the crowd is the city's people, not only the two original models.
+   Level 3 places its own. */
+const OPENING_SPOTS = [[-11.2, -14], [11.2, -19], [-11.2, -25], [11.2, -31], [-11.2, -37], [11.2, -44], [-11.2, -51], [11.2, -58]];
+const OPENING_WAIT_MS = 5000, OPENING_WAIT_LIGHT_MS = 9000; // a light boot starts citizens late
+let citizensLoading = null;
+function spawnOpeningCrowd() {
+  if (state.levelId === 3) {
+    for (let i = 0, n = Math.round(6 * state.zombieCountMul); i < n; i++) spawnZombie();
+    return;
+  }
+  const start = playerBody.position;
+  for (const [x, dz] of OPENING_SPOTS.slice(0, Math.round(OPENING_SPOTS.length * state.zombieCountMul))) {
+    const z = start.z + dz;
+    const zom = new Zombie(new THREE.Vector3(x, 0, z), { template: pickZombieTemplate() });
+    zom.mesh.rotation.y = Math.atan2(start.x - x, start.z - z);
+    zom.hunting = true; // coming for you from the start, wherever you are
+    state.zombies.push(zom);
+    state.spawnedTotal++;
+  }
+}
+function openingCrowdWhenReady() {
+  // A light boot (Level 2) only starts the citizens once the loading screen
+  // clears: wait for that to begin, then for it to finish
+  const loaded = citizensLoading || (state.lightBoot
+    ? new Promise((resolve) => { const poll = setInterval(() => { if (citizensLoading) { clearInterval(poll); citizensLoading.then(resolve); } }, 200); })
+    : Promise.resolve());
+  const wait = state.lightBoot ? OPENING_WAIT_LIGHT_MS : OPENING_WAIT_MS;
+  Promise.race([loaded, new Promise((r) => setTimeout(r, wait))]).then(spawnOpeningCrowd);
+}
 export function spawnZombie() {
   if (state.zombies.length >= Math.round(ZOMBIE_MAX_ALIVE * state.zombieCountMul) || state.spawnedTotal >= KILL_TARGET + 10) return;
   const around = playerVis.group.position;
-  const ang = Math.random() * Math.PI * 2;
-  const dist = 16 + Math.random() * 24;
-  let x = around.x + Math.sin(ang) * dist;
-  let z = around.z - Math.abs(Math.cos(ang) * dist);
-  x = THREE.MathUtils.clamp(x, -STREET_HALF_W + 0.8, STREET_HALF_W - 0.8);
-  z = THREE.MathUtils.clamp(z, -STREET_LENGTH + 16, 28);
-  if (Math.hypot(x - around.x, z - around.z) < 10) z -= 12;
-  const zom = new Zombie(new THREE.Vector3(x, 0, z));
+  const template = pickZombieTemplate();
+  const place = pickSpawnPlace(around, template);
+  if (!place) return; // nowhere for one to come from right now
+  const z = THREE.MathUtils.clamp(place.z, -STREET_LENGTH + 16, 28);
+  const zom = new Zombie(new THREE.Vector3(place.x, 0, z), { template });
+  zom.mesh.rotation.y = place.facing; // coming out into the street
+  if (place.emerge) zom.emerge = { dir: place.emerge, t: (EMERGE_IN + 1.1) / EMERGE_SPEED };
   state.zombies.push(zom);
   state.spawnedTotal++;
 }
@@ -3479,7 +3867,8 @@ export function resetCharacters() {
 
   // The street's opening pack, as at boot (loadZombieTemplate) — around
   // the spawn, so after the player is back on it
-  if (zombieTemplateResolved) {
-    for (let i = 0, n = Math.round(6 * state.zombieCountMul); i < n; i++) spawnZombie();
-  }
+  spawnUses.clear(); // the same places, in the same order, as the first time
+  if (zombieTemplateResolved) spawnOpeningCrowd();
+  feedingPlaced = false;
+  placeFeedingGroups();
 }

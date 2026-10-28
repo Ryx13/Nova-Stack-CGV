@@ -8,6 +8,7 @@ import { updateLocomotion } from './Movement.js';
 import { RayCandidates } from './RayCandidates.js';
 import { addContactShading } from './ContactShading.js';
 import { updateRenderScale } from './RenderScale.js';
+import { applyCameraShock, restoreCameraShock } from './CameraShock.js';
 import { perfFrameStart, perfRenderStart, perfFrameEnd } from './PerfHUD.js';
 import { placeBloodSplat, spawnBloodSpray, crackGlassAlong, updateImpactFX, clearImpactFX } from './ImpactFX.js';
 import { markStaticSince, mergeStaticScenery } from './mergeStatic.js';
@@ -304,7 +305,7 @@ function zombieCapsuleHit() {
   for (const z of state.zombies) {
     if (!z.alive || z.state === 'downed') continue;
     const sc = Math.max(1, z.mesh.scale.y);
-    const h = ZOMBIE_TARGET_HEIGHT * sc, r = 0.6 * sc;
+    const h = (z.bodyHeight ?? ZOMBIE_TARGET_HEIGHT) * sc, r = 0.6 * sc; // a crawler is hit low
     _capA.copy(z.mesh.position);
     _capB.copy(z.mesh.position).y += h;
     // Closest approach between the ray and the capsule's axis
@@ -349,6 +350,12 @@ export function tryShoot() {
   const cap = zombieCapsuleHit();
   const sameWeakPoint = hits.length && hits[0].object.userData.guardianWeakPoint && cap && hits[0].object.userData.owner === cap.object.userData.owner;
   if (cap && !sameWeakPoint && (!hits.length || cap.distance < hits[0].distance)) hits.unshift(cap);
+  // Anything else a bullet can hit (Level 2's escaped zoo animals): each
+  // { rayHit(ray, far) -> { distance, point, hit(direction) } | null }
+  for (const target of state.extraShotTargets || []) {
+    const h = target.rayHit(raycaster.ray, hits.length ? hits[0].distance : 70);
+    if (h && (!hits.length || h.distance < hits[0].distance)) hits.unshift({ distance: h.distance, point: h.point, object: { userData: { owner: { isExtra: true, hit: h.hit } } } });
+  }
 
   const muzzlePos = new THREE.Vector3();
   activeGunMesh().getWorldPosition(muzzlePos);
@@ -362,8 +369,11 @@ export function tryShoot() {
     if (owner && owner.isBarrel) {
       owner.takeDamage();
       showHitmarker();
+    } else if (owner?.isExtra) {
+      owner.hit(raycaster.ray.direction);
+      showHitmarker();
     } else if (owner) {
-  const headshot = hits[0].point.y > owner.mesh.position.y + 1.42 * Math.max(1, owner.mesh.scale.y);
+  const headshot = hits[0].point.y > owner.mesh.position.y + (owner.headY ?? 1.42) * Math.max(1, owner.mesh.scale.y);
   // The Guardian is armour plate: sparks, not blood
   if (!owner.guardian) spawnBloodSpray(hits[0].point, raycaster.ray.direction, headshot, owner.mesh.position.y);
   owner.takeDamage(headshot ? GUN_DAMAGE * 1.85 : GUN_DAMAGE, headshot, !!hits[0].object.userData.guardianWeakPoint);
@@ -440,6 +450,25 @@ export function startReload() {
 /* ---------------------------------------------------------------------
    PLAYER DAMAGE / DEATH
 --------------------------------------------------------------------- */
+/* EASY'S HELP (Difficulty.js state.assist) — health creeping back once
+   you've gone regenAfterMs without being hit, and the ammo reserve topped
+   up a round at a time below ammoFloor, so a showcase run never stalls. */
+let assistAmmo = 0;
+function updateAssist(dt) {
+  const a = state.assist;
+  if (!a || state.isDead || state.dying) return;
+  if (state.playerHealth > 0 && state.playerHealth < state.playerMaxHealth && performance.now() - (state.lastHurtAt || 0) > a.regenAfterMs) {
+    state.playerHealth = Math.min(state.playerMaxHealth, state.playerHealth + a.regen * dt);
+    dom.healthFill.style.width = (state.playerHealth / state.playerMaxHealth) * 100 + '%';
+    if (dom.bloodVig) dom.bloodVig.style.opacity = String(1 - state.playerHealth / state.playerMaxHealth);
+  }
+  if (state.ammoReserve < a.ammoFloor && (assistAmmo += dt) >= a.ammoEvery) {
+    assistAmmo = 0;
+    state.ammoReserve++;
+    updateAmmoHUD();
+  }
+}
+
 export function damagePlayer(dmg) {
   if (state.narrativeBlocked || state.isDead || state.dying) return;
   if (state.shieldActive) return; // shield blocks all attacks outright
@@ -451,7 +480,9 @@ export function damagePlayer(dmg) {
   // damage per half-second no matter how many are swinging at once.
   if (state.hurtGrace > 0) return;
   state.hurtGrace = 0.5;
-  state.playerHealth = Math.max(0, state.playerHealth - dmg);
+  state.lastHurtAt = performance.now();
+  // The difficulty's scale on every hit, whatever it's from (Difficulty.js)
+  state.playerHealth = Math.max(0, state.playerHealth - dmg * (state.harmMul ?? 1));
   dom.healthFill.style.width = (state.playerHealth / state.playerMaxHealth) * 100 + '%';
   if (dom.bloodVig) dom.bloodVig.style.opacity = String(1 - state.playerHealth / state.playerMaxHealth);
   sfx.hurt();
@@ -1393,7 +1424,7 @@ function startAnimationLoop() {
     updateWeatherFX(dt);
     updateDayCycle(dt);
     streetAtmosphere?.update(dt, state, sfx, camera);
-    // state.cinematic: a level's intro owns the camera (Level2Intro.js)
+    // state.cinematic: a level holds gameplay for its opening (Level2Intro.js)
     if (state.dying && !state.paused && !state.narrativeBlocked) {
       updateDying(dt);
     } else if (!state.isDead && !state.paused && !state.cinematic && !state.narrativeBlocked && dom.hud && !dom.hud.classList.contains('hidden')) {
@@ -1440,6 +1471,7 @@ function startAnimationLoop() {
       updateInfectionMonitor(dt);
       updateExplosions(dt);
       updateShield(dt);
+      updateAssist(dt);
       state.spawnTimer -= dt;
       if (state.spawnTimer <= 0) { state.spawnTimer = ZOMBIE_SPAWN_INTERVAL / state.zombieCountMul; spawnZombie(); }
       updateImpactFX(dt);
@@ -1481,9 +1513,11 @@ function startAnimationLoop() {
     // gameplay code. Each tick guards itself on paused/dead as needed.
     for (const tick of levelTicks) tick(dt);
 
+    applyCameraShock(dt); // an explosion's shock, for this draw only
     perfRenderStart();
     renderer.render(scene, camera);
     renderViewmodels(renderer);
+    restoreCameraShock();
     perfFrameEnd();
     } catch (error) {
       showRenderFailure(error);
