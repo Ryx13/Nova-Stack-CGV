@@ -19,6 +19,13 @@ export function createNarrative({onBlock=()=>{},onRelease=()=>{},onShot=()=>{}}=
     text('div',e.speaker||'DR. JAMES / SECURE CHANNEL',host,'dw-eyebrow');
     if(e.title)text(e.mode==='radio'?'strong':'h2',e.title,host);
     text('p',e.text,host);
+    if(e.entries){
+      for(const entry of e.entries){
+        const details=document.createElement('details');details.className='dw-log-entry';
+        text('summary',entry.title||entry.speaker,details);
+        text('p',entry.text,details);host.append(details);
+      }
+    }
     if(e.mode==='radio'){radio.hidden=false;radioTime=e.duration||8;const meter=document.createElement('div');meter.className='dw-radio-meter';host.append(meter);return;}
     previousFocus=document.activeElement;onBlock(true);document.exitPointerLock?.();onShot(e.shot||null);modal.hidden=false;
     const actions=document.createElement('div');actions.className='dw-actions';host.append(actions);
@@ -27,11 +34,12 @@ export function createNarrative({onBlock=()=>{},onRelease=()=>{},onShot=()=>{}}=
       if(choice.detail)text('small',choice.detail,button);
       button.onclick=()=>finish(choice.id);
     }
-    actions.querySelector('button').focus();
+    if(e.entries)host.insertBefore(actions,host.children[2]);
+    actions.querySelector('button').focus({preventScroll:true});card.scrollTop=0;
   }
   const keydown=e=>{
     if(!active||active.mode==='radio')return;
-    if(e.code==='Tab'){e.preventDefault();const buttons=[...card.querySelectorAll('button')];let i=buttons.indexOf(document.activeElement);buttons[(i+(e.shiftKey?-1:1)+buttons.length)%buttons.length]?.focus();}
+    if(e.code==='Tab'){e.preventDefault();const controls=[...card.querySelectorAll('button,summary')];let i=controls.indexOf(document.activeElement);controls[(i+(e.shiftKey?-1:1)+controls.length)%controls.length]?.focus();}
     if(e.code==='Escape'&&!active.choices){e.preventDefault();finish('continue');}
   };
   document.addEventListener('keydown',keydown);
@@ -41,6 +49,11 @@ export function createNarrative({onBlock=()=>{},onRelease=()=>{},onShot=()=>{}}=
     show(event){
       if(disposed||seen.has(event.id))return Promise.resolve(null);seen.add(event.id);
       return new Promise(resolve=>{const entry={...event,resolve};
+        // A live status supersedes older queued statuses for the same task.
+        if(event.mode==='radio'&&event.channel){
+          for(let i=queue.length-1;i>=0;i--)if(queue[i].mode==='radio'&&queue[i].channel===event.channel)queue.splice(i,1)[0].resolve(null);
+          if(active?.mode==='radio'&&active.channel===event.channel){queue.unshift(entry);finish();return;}
+        }
         // Important story events supersede chatter, which remains in the log.
         if(event.mode!=='radio'){
           queue.unshift(entry);
@@ -51,7 +64,10 @@ export function createNarrative({onBlock=()=>{},onRelease=()=>{},onShot=()=>{}}=
     update(dt){if(active?.mode==='radio'){radioTime-=dt;if(radioTime<=0)finish();}},
     openLog(extra=''){
       if(this.blocking)return;
-      return this.show({id:'log-'+performance.now(),archive:false,mode:'cinematic',speaker:'SURVIVOR FIELD GUIDE',title:'Transmission archive',text:history.map(h=>`${h.speaker}: ${h.text}`).join('\n\n')+(extra?'\n\n'+extra:'')});
+      const sections=extra?extra.split('\n\n'):[];
+      const overview=sections.shift();
+      const guide=sections.map(section=>{const split=section.indexOf('\n');return split<0?{title:'Field guide',text:section}:{title:section.slice(0,split),text:section.slice(split+1)};});
+      return this.show({id:'log-'+performance.now(),archive:false,mode:'cinematic',speaker:'SURVIVOR FIELD GUIDE',title:'Field log',text:overview||'Select a transmission to read it again.',entries:[...guide,...history.slice().reverse()],continueLabel:'Back to mission'});
     },
     dispose(){disposed=true;if(active){active.resolve(null);if(active.mode!=='radio'){onShot(null);onBlock(false);}active=null;}for(const e of queue)e.resolve(null);queue.length=0;document.removeEventListener('keydown',keydown);modal.remove();radio.remove();}
   };

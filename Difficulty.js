@@ -10,7 +10,8 @@
    the threats are turned down: a third of the infected, every hit a
    quarter as hard, health that comes back once you're out of trouble,
    ammo that never runs dry, fewer and frailer lions, a girl you can catch,
-   a weaker Guardian. IMPOSSIBLE is each level as it was built.
+   a weaker Guardian. IMPOSSIBLE keeps the original first two levels;
+   Level 3 adds faster encounters, stronger hits and Guardian armour.
 
    The levers, on state, which the spawners, the infected and the boss read:
      zombieCountMul   how many come: the spawn rate, the alive cap, the
@@ -39,7 +40,7 @@ export const DIFFICULTIES = {
   },
   3: {
     easy:       { ...SHOWCASE, bossHealthMul: 0.45, sub: 'See the whole mission: few infected, weak hits, a weaker Guardian' },
-    impossible: { ...AS_BUILT, bossHealthMul: 1, sub: 'The final mission as it was built' },
+    impossible: { ...AS_BUILT, zombieCountMul: 1.35, harmMul: 1.2, bossHealthMul: 1.15, sub: 'Faster reinforcements, harder hits, an armoured Guardian. Aim for its valve.' },
   },
 };
 

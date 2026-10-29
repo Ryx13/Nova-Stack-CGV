@@ -1,5 +1,42 @@
 # Level 3 — "The Broadcast Tower"
 
+## Current gameplay update — 29 October 2026
+
+- Impossible now uses 35% larger encounters, a ten-enemy active limit,
+  0.65-second reinforcement intervals, 25% faster regular infected, and
+  20% stronger incoming damage. Easy retains its assists and three-enemy limit.
+- The Impossible Guardian has 1,610 HP, moves faster, and spends less time
+  between attacks. Its armour absorbs 35% of damage outside recovery;
+  exposed valve shots still deal 2.5× damage. Warning, recovery and escape
+  windows remain unchanged. Boss support is limited to five nearby infected.
+- Low-health drops on Impossible arrive every third kill; other kills still
+  supply ammunition. Five cure charges remain available on both difficulties.
+- The optional rescue is a glass isolation room beside Cooling. Hold the
+  outside release for four seconds on Easy or five on Impossible. Releasing E
+  resets the hold. The doors slide open before the technician walks out;
+  only reaching safety counts as a completed rescue. Broadcasting waits for
+  a rescue already in progress. The booth stays visible after evacuation.
+- The technician reuses the construction citizen model and shared listen/walk
+  clips. The room batches static fixtures by material and uses a subtle emissive
+  emergency fill at night without adding dynamic lights.
+  A simple articulated person remains available if the model cannot load.
+- Two short opening cards introduce the cure and immediate task. The HUD
+  presents one switch at a time; detailed help and transmissions are collapsed
+  in the Field log. CAM 03 is explained as the lab entrance security camera.
+
+Deterministic checks: `node --test tests/guardian*.test.mjs tests/level3-*.test.mjs`.
+Browser regression (requires Playwright and Edge): run
+`python tests/build-level3-review.py`, serve the repository on port 8766,
+then `node tests/level3-review-browser.cjs`. Set `CHECK_DIFFICULTY=easy`
+and `CHECK_MODE=night` for the alternate check; `CHECK_URL` overrides the
+server address. Generated `smoke-*` fixtures and screenshots are ignored.
+The browser check accelerates combat by resolving regular enemies; final difficulty still benefits from
+human playtesting for feel and pacing.
+
+The design notes below describe the earlier prototype and are historical.
+
+---
+
 Hybrid of both ideas on the table: teammate's gameplay loop (approach 3
 buildings, flip a switch in each, then fight a boss) delivers the
 narrative payoff from the original storyline (the collected concoction

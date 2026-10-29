@@ -1,5 +1,7 @@
 import {createGuardianAwakening} from './GuardianAwakening.js';
-import {CombatRoute,MAX_ROUTE_ENEMIES} from './Level3CombatRoute.js';
+import {CombatRoute} from './Level3CombatRoute.js';
+import {level3Challenge} from './Level3Challenge.js';
+import {createTechnicianRescue} from './Level3Rescue.js';
 import {createLevel3Vendor} from './Level3Vendor.js';
 // Level3.js — LEVEL 3 "THE BROADCAST TOWER"
 //
@@ -73,6 +75,7 @@ const LEVEL_CONFIG = {
 
 export function startLevel(mode) {
   registerLevelPreparation(prepareLevel3Guardian);
+  registerLevelPreparation(() => lv3.story.rescue.ready);
   registerLevelPreparation(prepareHumanRecovery);
   preloadHumanRecovery().catch(error=>console.error('Human recovery preload failed',error));
   preloadGuardian().catch(error => console.error('Guardian preload failed', error));
@@ -99,7 +102,7 @@ export function startLevel(mode) {
     phase: 'switches', // 'switches' -> 'boss' -> 'dispersion' -> 'done'
     bossZombie: null,
     dispersion: null,
-    curedCount: 0, pulseSaved: 0, broadcastCured: 0, guardianSpared:false, guardianDefeated:false, route:new CombatRoute({countMul:state.zombieCountMul}), defendingSwitch:null,
+    curedCount: 0, pulseSaved: 0, broadcastCured: 0, guardianSpared:false, guardianDefeated:false, route:new CombatRoute({countMul:state.zombieCountMul,...level3Challenge(state.difficulty)}), defendingSwitch:null,
     savedInfected: new Set(), activeCures: new Set(),
     hold: 0, defenseTime: 0, waveRemaining: 0, waveTimer: 0, elapsed: 0,
   };
@@ -157,7 +160,7 @@ async function playOpeningConversation(){
     if(answer===null)return;
     if(event.choices)story.intent=answer;
   }
-  story.narrative.show({id:'humanity-field-brief',mode:'radio',speaker:'DR. JAMES / FIELD BRIEF',duration:12,text:'Fight through the road ambushes. Hold E at each switch and clear its attackers to secure it. Shoot or cure regular infected; the projector has five charges and six-metre range. The west-side vending machine sells 24 pistol rounds for 3 coins. The infected containment worker is immune to the cure and must be killed before you can broadcast.'});
+  story.narrative.show({id:'humanity-field-brief',mode:'radio',speaker:'DR. JAMES / FIELD BRIEF',duration:6,text:'Follow the compass. Clear each ambush, then hold E at the marked control. Your Field log keeps the instructions.'});
 }
 
 /* ---------------------------------------------------------------------
@@ -302,7 +305,7 @@ function writeObjective() {
     state.compassOverride={pos:target?.mesh.position||playerVis.group.position,label:'CLEAR HOSTILES'};
   } else if (lv3.phase === 'switches') {
     dom.objective.innerHTML = remaining > 0
-      ? `Objective: <b>Turn on the tower</b> — activate ${remaining} more switch${remaining === 1 ? '' : 'es'} (generator, cooling station, satellite uplink).`
+      ? `Step ${4-remaining}/3 — ${lv3.compound.switches.find(s=>!s.activated).label}. Follow the compass; hold E at its control.`
       : `Objective: <b>All switches active</b> — return to the tower.`;
     const nextSwitch = lv3.compound.switches.find((s) => !s.activated);
     state.compassOverride = nextSwitch
@@ -312,7 +315,7 @@ function writeObjective() {
     dom.objective.innerHTML = `Objective: <b>Kill the Guardian</b> — evade its attacks and shoot the exposed brass chest valve.`;
     state.compassOverride = { pos: lv3.bossZombie?.mesh.position || TOWER_POS, label: 'GUARDIAN' };
   } else if (lv3.phase === 'broadcast-ready') {
-    dom.objective.textContent = 'Array ready — return to the tower console and press E to broadcast. Optional rescue remains available.';
+    dom.objective.textContent = 'Broadcast — return to the tower console and press E.' + (lv3.story.rescueAvailable&&!lv3.story.rescued?' Optional: rescue the technician by Cooling.':'');
     state.compassOverride = {pos: lv3.story.consolePos, label:'BROADCAST'};
   } else {
     dom.objective.innerHTML = `Objective: <b>Disperse the cure.</b>`;
@@ -356,6 +359,7 @@ function updateSwitchInteraction(pos, t, dt) {
     sw.marker.ring.scale.setScalar(1 + Math.sin(t * 6) * 0.08);
     lv3.details.progress.hidden = lv3.hold === 0;
     lv3.details.progress.max = 3;
+    lv3.details.progress.setAttribute('aria-label','Switch activation');
     lv3.details.progress.value = lv3.hold;
     if (lv3.hold >= 3) activateNearbySwitch();
   } else {
@@ -823,7 +827,8 @@ function updateLevel3Mission(dt) {
   if (state.isDead || !playerVis) return;
   const pos = playerVis.group.position;
   const first=lv3.firstEncounter;
-  lv3.story.encounterPanel.hidden=!first?.alive||pos.distanceTo(first.mesh.position)>13||lv3.phase!=='switches';
+  lv3.story.encounterHintTime=(lv3.story.encounterHintTime||0)+(first?.alive&&pos.distanceTo(first.mesh.position)<=13?dt:0);
+  lv3.story.encounterPanel.hidden=!first?.alive||pos.distanceTo(first.mesh.position)>13||lv3.phase!=='switches'||lv3.story.encounterHintTime>9;
   lv3.elapsed += dt;
   updateCompoundGameplay(dt, pos);
   if (lv3.phase === 'switches') updateSwitchInteraction(pos, lv3.elapsed, dt);
@@ -861,10 +866,10 @@ function readTerminal() {
   if (i < 0) return;
   lv3.story.narrative.show({id:'research-'+i,mode:'radio',speaker:'DR. JAMES / RESEARCH '+(i+1),text:NOTES[i],duration:12});
 }
-// The most regular infected out at once: the route's eight, fewer on Easy (Difficulty.js)
-function routeCap(){return Math.max(2,Math.round(MAX_ROUTE_ENEMIES*state.zombieCountMul));}
+// Keep the encounter scheduler and spawner on the same bounded crowd budget.
+function routeCap(){return level3Challenge(state.difficulty).activeCap;}
 function spawnReinforcement(pos) {
-  if (lv3.phase === 'boss' && state.zombies.filter(z => z.alive && !z.isBoss && z.state !== 'downed' && z.mesh.position.distanceTo(pos) < 24).length >= 4) return false;
+  if (lv3.phase === 'boss' && state.zombies.filter(z => z.alive && !z.isBoss && z.state !== 'downed' && z.mesh.position.distanceTo(pos) < 24).length >= level3Challenge(state.difficulty).bossMinions) return false;
   if (state.zombies.length >= 64 || state.zombies.filter(z => z.alive && !z.isBoss && z.state !== 'cured').length >= routeCap()) return false;
   // Retry clear street positions; never place an ambush on the player or inside cover.
   for(let attempt=0;attempt<16;attempt++){
@@ -885,6 +890,7 @@ function stabilizeInfected() {
     if (z.isBoss || z.stabilizationReady) continue;
     z.stabilizationReady = true;
     z.health = z.maxHealth = 52;
+    z.speed *= level3Challenge(state.difficulty).speedMul;
     z.takeDamage = function(damage = 26, headshot = false) {
       if (!this.alive) return;
       this.health = Math.max(0, this.health - (Number.isFinite(damage) ? Math.max(0, damage) : 26));
@@ -892,7 +898,8 @@ function stabilizeInfected() {
       if (this.health > 0) { pushKillFeed('Hit — attack again to defeat this zombie'); return; }
       const dropPosition = this.mesh.position.clone();
       this.confirmedKill(headshot);
-      spawnPickup(dropPosition, state.playerHealth < state.playerMaxHealth * .6 ? 'health' : 'ammo');
+      const healthDrop=state.playerHealth < state.playerMaxHealth*.6 && (state.difficulty!=='impossible'||state.kills%3===0);
+      spawnPickup(dropPosition, healthDrop ? 'health' : 'ammo');
       dom.killcount.textContent = state.kills;
     };
   }
@@ -903,7 +910,7 @@ function updateCompoundGameplay(dt, pos) {
   lv3.waveTimer -= dt;
   if (lv3.phase!=='switches' && lv3.waveRemaining > 0 && lv3.waveTimer <= 0) {
     if (spawnReinforcement(pos)) lv3.waveRemaining--;
-    lv3.waveTimer = 1.7;
+    lv3.waveTimer = level3Challenge(state.difficulty).bossSpawnInterval;
   }
   if(lv3.phase==='switches'){
     lv3.route.advance(pos);
@@ -944,12 +951,18 @@ function initLevel3Story() {
     onShot:value=>{if(value){story.savedCamera={position:camera.position.clone(),quaternion:camera.quaternion.clone()};story.shot=value;}else{if(story.savedCamera){camera.position.copy(story.savedCamera.position);camera.quaternion.copy(story.savedCamera.quaternion);}story.shot=null;story.savedCamera=null;}}
   });
   story.logButton=document.createElement('button');story.logButton.className='dw-button quiet dw-log-button';story.logButton.textContent='Field log';document.body.append(story.logButton);
-  story.logButton.onclick=()=>{if(!state.isDead&&!state.paused)story.narrative.openLog('Tower controls: hold E. G: research. Q: cycle weapons. 1: pistol / 2: knife / 3 or X: equip cure projector. Left-click: fire equipped weapon. Cure gun: five charges, 6 m, aim at regular infected. Road ambushes and switch defences must be cleared. Kill the Guardian to unlock the broadcast. The west-side vending machine sells 24 rounds for 3 coins. Optional rescue: hold E at the shelter. V changes view; Tab pauses.');};
-  story.rescueMarker=buildInteractionProp(story.rescuePos,'shelter',0xe0a83c);
+  story.logButton.onclick=()=>{if(!state.isDead&&!state.paused)story.narrative.openLog('MISSION\nRestore Generator → Cooling → Uplink. Clear each defence, defeat the Guardian, then broadcast at the tower.\n\nCONTROLS\nHold E: use controls · Q: switch weapon · 3 / X: cure projector · Left-click: fire · R: reload.\n\nSUPPLIES\nCure: five charges, 6 m range. West-side machine: 24 pistol rounds for 3 coins.\n\nOPTIONAL\nRescue the technician from the isolation room beside Cooling. G at a control: research.\n\nSTORY SO FAR\nCAM 03 means security camera 3 at the lab entrance. It showed the girl taking the stabilizer. The stabilizer and sample now make a cure.');};
+  story.rescue=createTechnicianRescue({scene,position:story.rescuePos,night:state.timeOfDay==='night',addCollider:(...args)=>{
+    const body=addStaticBox(...args),obstacle=state.obstacles.at(-1);
+    return ()=>{world.removeBody(body);const index=state.obstacles.indexOf(obstacle);if(index>=0)state.obstacles.splice(index,1);};
+  }});
+  story.rescuePos=story.rescue.control;
+  story.rescueMarker=story.rescue.booth;
+  story.rescue.booth.traverse(object=>{if(object.isMesh)state.occluders.push(object);});
   story.cache=buildInteractionProp(story.cachePos,'supplies',0xe0a83c);
   story.console=buildInteractionProp(story.consolePos,'broadcast',0x8fe0ff);
-  scene.add(story.rescueMarker,story.cache,story.console);
-  story.technician=new THREE.Mesh(new THREE.CapsuleGeometry(.23,.85,4,8),new THREE.MeshStandardMaterial({color:0xc8b28f}));story.technician.position.copy(story.rescuePos).add(new THREE.Vector3(-.6,.85,0));scene.add(story.technician);
+  scene.add(story.cache,story.console);
+  story.technician=story.rescue.worker;
 }
 function updateStoryCamera(dt){
  const s=lv3.story;if(!s.shot)return;
@@ -984,27 +997,32 @@ async function finishDefense(key){
    s.powerChoosing=false;if(!powerRoute(choice))return;applyPowerRoute(choice);
  }
  if(key==='cooling'){
-   s.rescueAvailable=true;s.rescueMarker.userData.indicator.material.color.setHex(0x8fe0ff);
-   s.narrative.show({id:'rescue-signal',mode:'radio',speaker:'UNKNOWN / LOCAL SIGNAL',text:'Is anyone there? I am trapped by the cooling station. The shelter release is outside. Please — do not leave me here.'});
+   s.rescueAvailable=true;
+   s.narrative.show({id:'rescue-signal',mode:'radio',channel:'rescue',speaker:'UNKNOWN / LOCAL SIGNAL',text:'I am the technician in the glass isolation room beside Cooling. Hold E at the outside release to let me out. This rescue is optional.'});
  }
  if(!lv3.route.pending&&lv3.phase==='switches'&&lv3.compound.switches.every(sw=>sw.activated)){
    startBossPhase();
-   await s.narrative.show({id:'guardian-reveal',mode:'cinematic',speaker:'DR. JAMES / SIGNAL LOST',title:'Something heard us.',text:'The quarantine facility\'s containment worker is infected, and ruptured gas tanks are strapped across its back. Leave the marked circle when it braces; at range it sprays gas toward your position, so move before the burst lands. Shoot the glowing brass chest valve while it recovers. Below half health, it closes in faster.',shot:'guardian',continueLabel:'Fight the Guardian'});
+   await s.narrative.show({id:'guardian-reveal',mode:'cinematic',speaker:'DR. JAMES / SIGNAL LOST',title:'The Guardian blocks the tower.',text:'The Guardian is an infected containment worker. The handheld cure cannot treat it.\n\nLeave the marked attack area. Shoot its glowing chest valve when it stops to recover. Below half health, expect faster attacks.',shot:'guardian',continueLabel:'Fight the Guardian'});
    lv3.awakening=createGuardianAwakening({camera,state,scene,boss:lv3.bossZombie,sfx,lights:lv3.details.lights});
  }else writeObjective();
 }
 function updateStoryInteractions(dt,pos){
  const s=lv3.story;
- if(s.rescued){s.technician.position.x=THREE.MathUtils.lerp(s.technician.position.x,-11,Math.min(1,dt));s.technician.position.z=THREE.MathUtils.lerp(s.technician.position.z,-158,Math.min(1,dt));}
+ s.rescue.update(dt);
+ if(s.rescue.safe&&!s.rescued){s.rescued=true;sfx.pickup();s.narrative.show({id:'rescue-complete',mode:'radio',channel:'rescue',speaker:'TECHNICIAN / SAFE',text:'I am out. Thank you. I will help the survivors here. Get that cure broadcast.'});}
+ const rescueSeconds=level3Challenge(state.difficulty).rescueSeconds;
  let prompt='';
+ if(!s.rescueAvailable&&pos.distanceTo(s.rescuePos)<2.5)prompt='Release offline — restore Cooling and clear its defence first.';
+ if(s.rescued&&pos.distanceTo(s.rescuePos)<2.5)prompt='Isolation room open — technician evacuated.';
  if(s.power==='supplies'&&!s.cacheClaimed&&pos.distanceTo(s.cachePos)<2.5){prompt='Press E — emergency ammunition / +36 rounds';if(state.keys.KeyE){s.cacheClaimed=true;s.cache.visible=false;state.ammoReserve+=powerRoute(s.power).ammo;updateAmmoHUD();sfx.pickup();s.narrative.show({id:'cache-open',mode:'radio',text:'Emergency ammunition recovered. Make it count.'});}}
- if(s.rescueAvailable&&!s.rescued&&pos.distanceTo(s.rescuePos)<2.5){
-   prompt=`Hold E — release shelter / ${Math.round(s.rescueHold/4*100)}%`;
-   if(state.keys.KeyE){if(!s.rescueStarted){s.rescueStarted=true;if(lv3.phase==='switches')lv3.route.enqueue({id:'shelter-response',label:'Shelter defence',count:4});else lv3.waveRemaining=Math.min(6,lv3.waveRemaining+4);s.narrative.show({id:'rescue-start',mode:'radio',speaker:'SHELTER / RELEASE JAMMED',text:'The release is jammed. Keep holding it — the noise is drawing infected.'});}s.rescueHold=Math.min(4,s.rescueHold+dt);}else s.rescueHold=0;
-   lv3.details.progress.max=4;lv3.details.progress.value=s.rescueHold;lv3.details.progress.hidden=s.rescueHold===0;
-   if(s.rescueHold>=4){s.rescued=true;s.rescueMarker.visible=false;lv3.details.progress.hidden=true;s.narrative.show({id:'rescue-complete',mode:'radio',speaker:'TECHNICIAN / SAFE',text:'I am clear. Thank you. I will guide anyone who comes back toward the shelter. Get that broadcast running.'});}
+ if(s.rescueAvailable&&!s.rescue.released&&pos.distanceTo(s.rescuePos)<2.5){
+   prompt=`Hold E — unlock isolation room · ${Math.round(s.rescueHold/rescueSeconds*100)}%`;
+   if(state.keys.KeyE){if(!s.rescueStarted){s.rescueStarted=true;if(lv3.phase==='switches')lv3.route.enqueue({id:'shelter-response',label:'Shelter defence',count:4});else lv3.waveRemaining=Math.min(6,lv3.waveRemaining+4);s.narrative.show({id:'rescue-start',mode:'radio',channel:'rescue',speaker:'ISOLATION ROOM / RELEASE JAMMED',text:'Hold E until the lock releases. Let go to fight if you need to; the release will reset.'});}s.rescueHold=Math.min(rescueSeconds,s.rescueHold+dt);}else s.rescueHold=0;
+   lv3.details.progress.setAttribute('aria-label','Isolation room release');lv3.details.progress.max=rescueSeconds;lv3.details.progress.value=s.rescueHold;lv3.details.progress.hidden=s.rescueHold===0;
+   if(s.rescueHold>=rescueSeconds){s.rescue.release();sfx.burst('triangle',440,.2,.08);state.keys.KeyE=false;lv3.details.progress.hidden=true;s.narrative.show({id:'rescue-opening',mode:'radio',channel:'rescue',speaker:'TECHNICIAN',text:'The lock is open. Give me a moment to get out.'});}
  }else{if(s.rescueHold>0)lv3.details.progress.hidden=true;s.rescueHold=0;}
- if(lv3.phase==='broadcast-ready'&&pos.distanceTo(s.consolePos)<3){prompt='Press E — broadcast the cure / completes this mission';if(state.keys.KeyE)startDispersion();}
+ if(s.rescue.released&&!s.rescued)prompt=s.rescue.phase==='opening'?'Isolation door opening…':'Technician moving to safety…';
+ if(lv3.phase==='broadcast-ready'&&pos.distanceTo(s.consolePos)<3&&(!s.rescue.released||s.rescued)){prompt='Press E — broadcast the cure / completes this mission';if(state.keys.KeyE)startDispersion();}
  if(prompt){dom.prompt.classList.remove('hidden');dom.promptText.textContent=prompt;}
  else if(lv3.phase==='broadcast-ready')dom.prompt.classList.add('hidden');
 }
