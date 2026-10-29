@@ -541,7 +541,39 @@ function buildSandDrifts(rnd, L) {
    from glass stair towers on each sidewalk, against the buildings either
    side. Warm light along its ridge, a cyan line under its deck, its name
    on both faces. Its own group, kept out of the static merge, so it can
-   come down mid-level later: FEATURE_SPOTS.bridge. */
+   come down mid-level later: FEATURE_SPOTS.bridge.
+   The middle of the deck is built in three loose pieces for Level 2's
+   aftershock (Level2Quake.js): a span either side, each on a hinge at its
+   outer end (where it will sag and hang), and the centre between them,
+   the one that falls. Cracks along the breaks, under the deck and down
+   its sides, hidden until the quake opens them. */
+// Dark hairline cracks, jagged and branching, on a clear ground
+function crackMaterial() {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 128;
+  const g = c.getContext('2d');
+  let seed = 7;
+  const r = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  g.strokeStyle = 'rgba(18,16,14,0.95)'; g.lineCap = 'round';
+  const crack = (x, y, a, len, w) => {
+    g.lineWidth = w; g.beginPath(); g.moveTo(x, y);
+    for (let k = 0; k < len; k++) {
+      a += (r() - 0.5) * 0.9; x += Math.cos(a) * 9; y += Math.sin(a) * 9;
+      g.lineTo(x, y);
+      if (w > 1.2 && r() < 0.18) {
+        g.stroke(); // a branch off it, thinner and shorter
+        crack(x, y, a + (r() < 0.5 ? 1 : -1) * (0.6 + r()), len / 2.5, w * 0.6);
+        g.lineWidth = w; g.beginPath(); g.moveTo(x, y);
+      }
+    }
+    g.stroke();
+  };
+  for (let i = 0; i < 9; i++) crack(r() * 512, r() * 128, (r() - 0.5) * Math.PI * 2, 14 + r() * 22, 2.4 + r() * 2.2);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  return new THREE.MeshStandardMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+}
 function signMaterial(text, night) {
   const c = document.createElement('canvas');
   c.width = 512; c.height = 64;
@@ -579,28 +611,66 @@ function buildBridge(B) {
   const warm = flat(0xfff0c8, { emissive: 0xffe0a0, emissiveIntensity: night ? 1.8 : 0.3 });
   const towerW = 3, half = rowX - towerW, r = B.width / 2, N = 16;
   const y = (x) => B.deckY + B.rise * (1 - (x / half) ** 2);
+  // The loose pieces: segments [i0, i1) of the N, and where each turns
+  const segX = (i) => -half + (i / N) * 2 * half;
+  const LOOSE = [
+    { id: 'west', i0: 5, i1: 7, hinge: segX(5) },
+    { id: 'centre', i0: 7, i1: 9, hinge: 0 },
+    { id: 'east', i0: 9, i1: 11, hinge: segX(11) },
+  ].map((l) => ({ ...l, batch: new Batch() }));
+  const batchAt = (i) => LOOSE.find((l) => i >= l.i0 && i < l.i1)?.batch || parts;
+  const cracks = crackMaterial();
   for (let i = 0; i < N; i++) {
-    const xa = -half + (i / N) * 2 * half, xb = -half + ((i + 1) / N) * 2 * half;
+    const xa = segX(i), xb = segX(i + 1);
     const ya = y(xa), yb = y(xb), len = Math.hypot(xb - xa, yb - ya) + 0.02, ang = Math.atan2(yb - ya, xb - xa);
     const seg = (geo) => geo.rotateZ(ang).translate((xa + xb) / 2, (ya + yb) / 2, B.z);
-    parts.add(deck, seg(new THREE.BoxGeometry(len, 0.35, B.width)));
-    parts.add(glow, seg(new THREE.BoxGeometry(len, 0.06, 0.25).translate(0, -0.2, 0)));
-    parts.add(glass, seg(new THREE.CylinderGeometry(r, r, len, 14, 1, true, 0, Math.PI).rotateZ(Math.PI / 2).translate(0, 0.18, 0)));
-    parts.add(warm, seg(new THREE.BoxGeometry(len, 0.05, 0.2).translate(0, 0.18 + r - 0.08, 0)));
-    for (const e of [-1, 1]) parts.add(steel, seg(new THREE.BoxGeometry(len, 0.05, 0.05).translate(0, 1.1, e * (r - 0.25))));
+    const to = batchAt(i);
+    to.add(deck, seg(new THREE.BoxGeometry(len, 0.35, B.width)));
+    to.add(glow, seg(new THREE.BoxGeometry(len, 0.06, 0.25).translate(0, -0.2, 0)));
+    to.add(glass, seg(new THREE.CylinderGeometry(r, r, len, 14, 1, true, 0, Math.PI).rotateZ(Math.PI / 2).translate(0, 0.18, 0)));
+    to.add(warm, seg(new THREE.BoxGeometry(len, 0.05, 0.2).translate(0, 0.18 + r - 0.08, 0)));
+    for (const e of [-1, 1]) to.add(steel, seg(new THREE.BoxGeometry(len, 0.05, 0.05).translate(0, 1.1, e * (r - 0.25))));
+    // Cracks round the loose pieces: under the deck and down both its sides,
+    // each segment a different stretch of the crack texture
+    if (i >= 3 && i < 13) {
+      const shift = (geo) => {
+        const uv = geo.attributes.uv;
+        for (let k = 0; k < uv.count; k++) uv.setX(k, uv.getX(k) * 0.45 + ((i * 0.37) % 1));
+        return geo;
+      };
+      to.add(cracks, seg(shift(new THREE.PlaneGeometry(len, B.width)).rotateX(Math.PI / 2).translate(0, -0.245, 0)));
+      for (const e of [-1, 1]) to.add(cracks, seg(shift(new THREE.PlaneGeometry(len, 0.35)).rotateY(e > 0 ? 0 : Math.PI).translate(0, 0, e * (B.width / 2 + 0.01))));
+    }
   }
   for (let i = 0; i <= N; i++) { // the ribs, square to the deck's slope
-    const x = -half + (i / N) * 2 * half, slope = Math.atan(-2 * B.rise * x / (half * half));
-    parts.add(steel, new THREE.TorusGeometry(r + 0.02, 0.07, 5, 14, Math.PI).rotateY(Math.PI / 2).rotateZ(slope).translate(x, y(x) + 0.18, B.z));
+    const x = segX(i), slope = Math.atan(-2 * B.rise * x / (half * half));
+    (i === N ? parts : batchAt(i)).add(steel, new THREE.TorusGeometry(r + 0.02, 0.07, 5, 14, Math.PI).rotateY(Math.PI / 2).rotateZ(slope).translate(x, y(x) + 0.18, B.z));
   }
-  // The name on both faces, on a fascia hung under the middle of the deck
-  parts.add(steel, new THREE.BoxGeometry(10, 0.9, B.width + 0.1).translate(0, y(0) - 0.62, B.z));
+  // The name on both faces, on a fascia hung under the middle of the deck:
+  // its middle on the centre piece (it goes down with it), its ends on the
+  // spans either side
+  const centre = LOOSE[1], fasciaW = segX(centre.i1) - segX(centre.i0);
+  centre.batch.add(steel, new THREE.BoxGeometry(fasciaW, 0.9, B.width + 0.1).translate(0, y(0) - 0.62, B.z));
+  for (const l of [LOOSE[0], LOOSE[2]]) {
+    const inner = l === LOOSE[0] ? segX(l.i1) : segX(l.i0), endW = 5 - fasciaW / 2;
+    l.batch.add(steel, new THREE.BoxGeometry(endW, 0.9, B.width + 0.1).translate(inner + Math.sign(inner) * endW / 2, y(inner) - 0.62, B.z));
+  }
   const sign = signMaterial(B.name, night);
-  for (const e of [-1, 1]) {
-    const face = new THREE.Mesh(new THREE.PlaneGeometry(9.6, 0.8), sign);
-    face.position.set(0, y(0) - 0.62, B.z + e * (B.width / 2 + 0.06));
+  // In three, a part to each piece of the fascia (signParts, below)
+  const SIGN_W = 9.6, signCuts = [-SIGN_W / 2, -fasciaW / 2, fasciaW / 2, SIGN_W / 2];
+  const signParts = [];
+  for (const e of [-1, 1]) for (let k = 0; k < 3; k++) {
+    const x0 = signCuts[k], x1 = signCuts[k + 1], geo = new THREE.PlaneGeometry(x1 - x0, 0.8);
+    const uv = geo.attributes.uv; // its own stretch of the name (mirrored on the back face)
+    for (let v = 0; v < uv.count; v++) {
+      const u = (x0 + uv.getX(v) * (x1 - x0) + SIGN_W / 2) / SIGN_W;
+      uv.setX(v, u);
+    }
+    const face = new THREE.Mesh(geo, sign);
+    face.position.set(e * (x0 + x1) / 2, y(0) - 0.62, B.z + e * (B.width / 2 + 0.06));
     face.rotation.y = e > 0 ? 0 : Math.PI;
     group.add(face);
+    signParts.push({ face, piece: ['west', 'centre', 'east'][e > 0 ? k : 2 - k] });
   }
   // Glass stair towers on each sidewalk, against the buildings
   const th = B.deckY + 3.4;
@@ -616,13 +686,27 @@ function buildBridge(B) {
     addStaticBox(towerW / 2, th / 2, towerW / 2, tx, th / 2, B.z);
   }
   parts.finish(true, group);
+  // Each loose piece in its own pivot, at its hinge on the deck (the
+  // centre's in its middle), so turning the pivot swings the piece
+  const loose = {};
+  for (const l of LOOSE) {
+    const pivot = new THREE.Group();
+    pivot.position.set(l.hinge, y(l.hinge), B.z);
+    l.batch.finish(true, pivot);
+    for (const m of pivot.children) m.position.set(-l.hinge, -y(l.hinge), -B.z);
+    group.add(pivot);
+    loose[l.id] = { pivot, home: pivot.position.clone(), inner: l.id === 'west' ? segX(l.i1) : segX(l.i0) };
+  }
+  // Each part of the sign goes with its piece
+  group.updateMatrixWorld(true);
+  for (const { face, piece } of signParts) loose[piece].pivot.attach(face);
   // Light on the street below, at night (a clear day adds no lights)
   const under = new THREE.PointLight(0xbfe8ff, night ? 7 : 0, 28, 2);
   under.position.set(0, B.deckY - 1, B.z);
   addLight(group, under);
   group.userData.dynamic = true; // kept out of the static merge, so it can fall
   scene.add(group);
-  FEATURE_SPOTS.bridge = { group, z: B.z, deckY: B.deckY, span: 2 * half };
+  FEATURE_SPOTS.bridge = { group, z: B.z, deckY: B.deckY, span: 2 * half, loose, cracks };
 }
 
 /* --- Road closed -------------------------------------------------------------

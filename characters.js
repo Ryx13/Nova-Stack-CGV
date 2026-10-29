@@ -2322,6 +2322,7 @@ export function loadMainCharacter() {
       pushKillFeed('WARNING: no player foot bone found — ground clamp disabled, model may float');
     } else {
       playerVis.ankleToSole = measureAnkleToSole(obj, playerVis.footBoneL, playerVis.footBoneR);
+      playerVis.feet = measurePlayerFeet(obj, playerVis.ankleToSole);
     }
     const handBone = boneByName(obj, 'RightHand');
     if (handBone) {
@@ -2859,6 +2860,43 @@ export function groundClampRig(rigObj, boneL, boneR, dt, rate = 10, ankleToSole 
   rigObj.position.y = THREE.MathUtils.lerp(rigObj.position.y, idealY, Math.min(1, dt * rate));
 }
 
+/* THE PLAYER'S FEET ON THE GROUND — the ankles alone (groundClampRig) let
+   the toes dip through the road on toe-off, and the lerp left a foot under
+   the surface for a few frames each time the planted foot changed. The
+   player's clamp reads the toes too, each by its own height above the sole
+   (measured in the bind pose, feet flat), comes straight up whenever any
+   of a foot is under the surface (easing only on the way down), and
+   stands on what you walk on: the pavement slabs (0.03) and the hideouts'
+   floors (0.04) sit just over the physics ground. */
+const FOOT_SURFACE = 0.04;
+function measurePlayerFeet(rigObj, ankleToSole) {
+  rigObj.updateWorldMatrix(true, true);
+  const ankles = ['LeftFoot', 'RightFoot'].map((n) => boneByName(rigObj, n)).filter(Boolean);
+  if (!ankles.length) return [];
+  let soleY = Infinity;
+  for (const b of ankles) soleY = Math.min(soleY, b.getWorldPosition(_groundClampTmp).y - ankleToSole);
+  const feet = ankles.map((bone) => ({ bone, lift: ankleToSole }));
+  for (const n of ['LeftToeBase', 'RightToeBase', 'LeftToe_End', 'RightToe_End']) {
+    const bone = boneByName(rigObj, n);
+    if (bone) feet.push({ bone, lift: THREE.MathUtils.clamp(bone.getWorldPosition(_groundClampTmp).y - soleY, 0.005, 0.2) });
+  }
+  return feet;
+}
+function groundClampPlayer(dt, groundY = 0) {
+  const rig = playerVis.rigObj, feet = playerVis.feet;
+  if (!rig || !feet?.length) return;
+  let soleY = Infinity;
+  for (const f of feet) soleY = Math.min(soleY, f.bone.getWorldPosition(_groundClampTmp).y - f.lift);
+  const idealY = rig.position.y + groundY + FOOT_SURFACE - soleY;
+  rig.position.y = idealY > rig.position.y ? idealY : THREE.MathUtils.lerp(rig.position.y, idealY, Math.min(1, dt * 10));
+}
+/** The player's ground clamp (Actions.js): ankles and toes, see above;
+    the ankles alone if the model has no toe bones. */
+export function clampPlayerFeet(dt, groundY = 0) {
+  if (playerVis.feet?.length) groundClampPlayer(dt, groundY);
+  else groundClampRig(playerVis.rigObj, playerVis.footBoneL, playerVis.footBoneR, dt, 10, playerVis.ankleToSole, groundY);
+}
+
 // Measures the TRUE ankle-bone-to-sole distance for a specific rig
 // instance, in its own bind pose, instead of assuming every model shares
 // the same proportions. Call once, right after the rig is built and
@@ -3077,6 +3115,23 @@ export function loadDeferredAssets() {
 
 const HITBOX_GEOMETRY = new THREE.CapsuleGeometry(0.35, 1.0, 4, 8);
 const HITBOX_MATERIAL = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+// Zombie.makeTough: hits to put one down, its tint, its glow, and on a hit
+// it shrugs off, how long it staggers and how fast it's knocked back (m/s)
+const TOUGH_HITS = 3, TOUGH_TINT = new THREE.Color(0x5fa83a), TOUGH_GLOW = 0.12, TOUGH_FLASH = 0.9;
+const STAGGER_S = 0.35, STAGGER_PUSH = 2.2;
+/* THE AMMO CARRIER — one in a pack (spawnPack) has a yellow ammo bag on its
+   back, the ammo pickup's yellow, and drops CARRIER_AMMO rounds where it
+   falls instead of a coin. The bag rides the spine bone (placeAmmoBag), so
+   it moves with the walk. */
+const CARRIER_AMMO = 10, BAG_BACK = 0.2; // rounds; m behind the spine
+const BAG_PARTS = [
+  [new THREE.BoxGeometry(0.34, 0.38, 0.16), new THREE.MeshStandardMaterial({ color: 0xc99a1e, emissive: 0xe0b030, emissiveIntensity: 0.25, roughness: 0.8 }), [0, 0, 0]],
+  [new THREE.BoxGeometry(0.3, 0.12, 0.06), new THREE.MeshStandardMaterial({ color: 0x8a6a14, roughness: 0.7 }), [0, 0.06, -0.1]], // the pouch flap
+  [new THREE.BoxGeometry(0.05, 0.5, 0.05), new THREE.MeshStandardMaterial({ color: 0x3a3226, roughness: 0.9 }), [-0.12, 0.08, 0.1]], // straps over the shoulders
+  [new THREE.BoxGeometry(0.05, 0.5, 0.05), null, [0.12, 0.08, 0.1]],
+];
+BAG_PARTS[3][1] = BAG_PARTS[2][1];
+const _bagAt = new THREE.Vector3();
 export class Zombie {
   // opts.template: a specific loaded template (see zombieTemplateFor)
   constructor(pos, opts = {}) {
@@ -3245,8 +3300,59 @@ export class Zombie {
     if (this.loiter && this.clips.idle) return ['idle', k];
     return [g === 'run' ? 'walk' : g, (g === 'drag' ? 0.5 : 0.7) * k]; // wandering
   }
+  // A back-street pack member on Level 2's Impossible (spawnPack): green-tinged,
+  // and it takes TOUGH_HITS hits of anything to put down. Its own copies of
+  // the materials, so the tint doesn't spread to everyone sharing the model.
+  makeTough() {
+    this.hitsLeft = TOUGH_HITS;
+    this.hitFlash = this.stagger = 0;
+    this.staggerDir = new THREE.Vector3();
+    this.ownMaterials = [];
+    this.mesh.traverse((o) => {
+      if (!o.isMesh || o === this.hitbox) return;
+      const tint = (m) => {
+        if (!m) return m;
+        const c = m.clone();
+        c.color?.lerp(TOUGH_TINT, 0.45);
+        if (c.emissive) { c.emissive.copy(TOUGH_TINT); c.emissiveIntensity = TOUGH_GLOW; }
+        this.ownMaterials.push(c);
+        return c;
+      };
+      o.material = Array.isArray(o.material) ? o.material.map(tint) : tint(o.material);
+    });
+  }
+  // Its ammo bag (THE AMMO CARRIER)
+  makeCarrier() {
+    this.ammoCarrier = true;
+    const bag = new THREE.Group();
+    for (const [g, m, [x, y, z]] of BAG_PARTS) { const part = new THREE.Mesh(g, m); part.position.set(x, y, z); part.castShadow = true; bag.add(part); }
+    this.ammoBag = bag;
+    this.spineBone = this.rigObj && (findBoneLike(this.rigObj, 'Spine2') || findBoneLike(this.rigObj, 'Spine1') || findBoneLike(this.rigObj, 'Spine'));
+    bag.position.set(0, 1.25, -BAG_BACK);
+    this.mesh.add(bag);
+  }
+  placeAmmoBag() {
+    if (!this.spineBone) return;
+    this.mesh.worldToLocal(this.spineBone.getWorldPosition(_bagAt));
+    this.ammoBag.position.set(_bagAt.x, _bagAt.y, _bagAt.z - BAG_BACK);
+  }
   takeDamage(dmg, headshot) {
     if (!this.alive) return;
+    if (this.pack) this.pack.woken = true; // hurt one, and its pack comes
+    if (this.hitsLeft > 1) {
+      // Hurt, not down: it flares green, staggers back a step, and comes
+      // for you
+      this.hitsLeft--;
+      this.health = Math.round(this.maxHealth * this.hitsLeft / TOUGH_HITS);
+      this.hunting = true;
+      this.hitFlash = 1;
+      this.stagger = STAGGER_S;
+      this.staggerDir.subVectors(this.mesh.position, playerVis.group.position).setY(0).normalize();
+      spawnHitSpark(this.mesh.position.clone().add(new THREE.Vector3(0, headshot ? 1.55 : 1.15, 0)));
+      spawnBlood(this.mesh.position);
+      sfx.hit();
+      return;
+    }
     this.health = 0;
     spawnHitSpark(this.mesh.position.clone().add(new THREE.Vector3(0, headshot ? 1.55 : 1.15, 0)));
     spawnBlood(this.mesh.position);
@@ -3275,6 +3381,7 @@ export class Zombie {
   confirmedKill(headshot) {
     if (!this.alive) return;
     if (this.feedGroup) this.feedGroup.woken = true; // the rest of its group looks up
+    if (this.pack) this.pack.woken = true;
     this.alive = false;
     this.state = 'dead';
     if (!this.countedKill) {
@@ -3286,7 +3393,8 @@ export class Zombie {
     // Blown apart into sparkles instead of leaving a corpse behind — the
     // coin (spawned right after) is the only thing left on the ground.
     spawnDeathSparkles(this.mesh.position);
-    spawnCoin(this.mesh.position);
+    if (this.ammoCarrier) { spawnPickup(this.mesh.position, 'ammo', CARRIER_AMMO); pushKillFeed('It was carrying ammo'); }
+    else spawnCoin(this.mesh.position);
     registerKillstreak(this.mesh.position);
     scene.remove(this.mesh);
     // Deferred to a macrotask so a kill that happens *during* the
@@ -3308,6 +3416,19 @@ export class Zombie {
       return;
     }
     if (this.standingUp > 0) { this.standingUp -= dt; this.playWalk(dt, 1, 1); return; } // getting back up
+    if (this.ammoBag) this.placeAmmoBag();
+    if (this.hitFlash > 0) {
+      this.hitFlash = Math.max(0, this.hitFlash - dt * 3);
+      for (const m of this.ownMaterials) m.emissiveIntensity = TOUGH_GLOW + (TOUGH_FLASH - TOUGH_GLOW) * this.hitFlash;
+    }
+    if (this.stagger > 0) {
+      // Knocked back by a hit it shrugged off (makeTough)
+      this.stagger -= dt;
+      this.mesh.position.addScaledVector(this.staggerDir, STAGGER_PUSH * dt);
+      this.mesh.position.x = clampZombieX(this.mesh.position.x, this.mesh.position.z);
+      this.playWalk(dt, 1, 1);
+      return;
+    }
     if (this.emerge) {
       // Walking out of the building through its door, into the street
       this.emerge.t -= dt;
@@ -3340,7 +3461,11 @@ export class Zombie {
     // since it can't physically get close enough to swing.
     // Citizens close right in before they go for you
     const attackRange = state.shieldActive ? Math.max(1.55, (state.shieldRadius || 0) + 0.4) : (this.citizen ? CITIZEN_REACH : 1.55);
-    if (dist < 26 || this.hunting) {
+    // A pack moves as one: once any of it has you, all of it does. A guard
+    // holds its ground until you're within its reach (spawnPack)
+    if (this.pack?.woken) this.hunting = true;
+    if (dist < (this.guard || 26) || this.hunting) {
+      if (this.pack) this.pack.woken = true;
       this.state = (dist < attackRange && !state.shieldActive && (!this.crowd || this.crowd.mayAttack)) ? 'attack' : 'chase';
     } else if (this.state !== 'idle') {
       this.state = 'idle';
@@ -3502,6 +3627,7 @@ export class Zombie {
       this.mixer = null;
       this.hasAnim = false;
     }
+    if (this.ownMaterials) { for (const m of this.ownMaterials) m.dispose(); this.ownMaterials = null; }
     const idx = state.zombies.indexOf(this);
     if (idx >= 0) state.zombies.splice(idx, 1);
   }
@@ -3940,8 +4066,44 @@ let citizensLoading = null;
    RESIDENT_EVERY m down each side of each back street and halfway along
    each cross street, as many as the difficulty allows (zombieCountMul).
    Residents of their streets: they don't count against the spawner's cap
-   or the kill target's pacing. */
+   or the kill target's pacing.
+   On Level 2's Impossible they go about in packs instead, alternately of 5 and 3,
+   and every one of them is tough (Zombie.makeTough). */
 const RESIDENT_EVERY = 30, RESIDENTS_MAX = 12;
+const PACKS_MAX = 6, PACK_SIZES = [5, 3], PACK_SPREAD = 1.6;
+// n spots in a loose knot round x, z (the first on it)
+export function packAround(x, z, n, spread = PACK_SPREAD) {
+  const spots = [];
+  for (let k = 0; k < n; k++) {
+    const a = k * 2.4, r = k ? spread * (0.6 + 0.4 * (k % 2)) * Math.sqrt(k / 2 + 0.5) : 0;
+    const px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+    spots.push(inPlay(px, pz, 0.8) ? [px, pz] : [x, z]);
+  }
+  return spots;
+}
+/** A pack of tough infected (Zombie.makeTough) at spots [[x, z], ...], one
+    alert between them: when any of them has you, or is hurt, they all come.
+    guard: how near you must come before they stir (else the usual 26 m).
+    carriers: how many of them carry ammo (makeCarrier), never a crawler.
+    Residents, like the back streets' own. Returns the pack. */
+export function spawnPack(spots, { guard = 0, carriers = 1 } = {}) {
+  const pack = { woken: false, members: [] };
+  spots.forEach(([x, z], k) => {
+    const zom = new Zombie(new THREE.Vector3(x, 0, z), { template: pickZombieTemplate() });
+    zom.resident = true;
+    zom.pack = pack;
+    if (guard) zom.guard = guard;
+    zom.makeTough();
+    zom.mesh.rotation.y = (k * 2.4) % (Math.PI * 2);
+    state.zombies.push(zom);
+    pack.members.push(zom);
+  });
+  for (const zom of pack.members) {
+    if (carriers <= 0) break;
+    if (!zom.crawler) { zom.makeCarrier(); carriers--; }
+  }
+  return pack;
+}
 function spawnResidents() {
   if (!navActive()) return;
   const L = layout(), spots = [];
@@ -3952,6 +4114,14 @@ function spawnResidents() {
   }
   for (const c of L.crossStreets) if (!c.main) spots.push([(c.x0 + c.x1) / 2, c.z + 1]);
   for (let i = spots.length - 1; i >= 0; i--) if (!inPlay(spots[i][0], spots[i][1], 1)) spots.splice(i, 1); // past the edge
+  if (state.levelId === 2 && state.difficulty === 'impossible') {
+    const packs = Math.min(spots.length, PACKS_MAX);
+    for (let i = 0; i < packs; i++) {
+      const [x, z] = spots[Math.floor(i * spots.length / packs)];
+      spawnPack(packAround(x, z, PACK_SIZES[i % PACK_SIZES.length]));
+    }
+    return;
+  }
   const n = Math.min(spots.length, Math.round(RESIDENTS_MAX * state.zombieCountMul));
   for (let i = 0; i < n; i++) {
     const [x, z] = spots[Math.floor(i * spots.length / n)]; // spread down every street

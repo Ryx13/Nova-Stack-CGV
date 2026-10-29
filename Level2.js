@@ -17,7 +17,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { scene, camera, addStaticBox, pushKillFeed, dom, sfx, KILL_TARGET, STREET_HALF_W, rowX, addLight, sunlightOnly } from './Scene.js';
 import { state } from './state.js';
-import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis, playerBody, spawnZombie, loadDeferredAssets, updateBlinkingLamps, updateFireLights, syncHandGun, spawnChargers, solidsMoved, pushOutOfSolids, setPlayerAction } from './characters.js';
+import { makeWreck, makeBarrier, concreteTex, rustTex, dirtTex, playerVis, playerBody, spawnZombie, loadDeferredAssets, updateBlinkingLamps, updateFireLights, syncHandGun, spawnChargers, spawnPack, packAround, solidsMoved, pushOutOfSolids, setPlayerAction } from './characters.js';
 import { spawnCoin } from './PowerUps.js';
 import { bootLevel, registerLevelTick, registerLevelReset, levelKeyHooks } from './Actions.js';
 import { VendingMachine, makeIcon } from './VendingMachine.js';
@@ -997,7 +997,7 @@ let girl = null; // { group, mixer, wpIndex, mats, glint }
    ground inside one of the walk-in buildings in the far parts of the town
    (Hideouts.js; HIDE_SPOTS only if they're missing), picked each run, still
    and listening, and she can't be caught there. Only once
-   you have the radar (which shows where she is) and come within SCENT_M of
+   you have the radar (which shows where she is) and come within SCENT_M (SCENT_IN_M in a building) of
    her does your scent reach her (scentTrail): she turns, frozen with fear
    for a moment, then bolts out along her spot's way out (out) onto her
    route at waypoint `join`, and the chase is on. Easy keeps the open chase. */
@@ -1016,6 +1016,28 @@ const HIDE_SPOTS = [
   { at: [12.6, 12], face: Math.PI / 2, out: [[2, 8]], join: 1 },
 ];
 const SCENT_M = 20, SCENT_TRAVEL_S = 1.0, FEAR_S = 0.9;
+/* HER PACK — a building she's hiding in is guarded: a big pack of the tough
+   ones (characters.js spawnPack) out in the street it fronts, and a few more
+   inside, holding their ground either side of the partition until you're on
+   them. In there she only smells you once you're through to her (SCENT_IN_M,
+   from deep in the back room), so the fight on the way in doesn't give you
+   away; once she has your scent she's out of the side door, with whatever's
+   left of the pack on your heels. Nothing gives her away before the radar
+   does: the pack only comes once you have it, and only somewhere you can't
+   see it arrive (out of view, or GUARDS_UNSEEN_M off). */
+const SCENT_IN_M = 9, GUARDS_UNSEEN_M = 45;
+const _guardFrustum = new THREE.Frustum(), _guardMatrix = new THREE.Matrix4(), _guardSphere = new THREE.Sphere(new THREE.Vector3(), 3);
+function guardsUnseen(spot, d) {
+  if (d > GUARDS_UNSEEN_M) return true;
+  _guardFrustum.setFromProjectionMatrix(_guardMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+  return !spot.guards.street.some(([x, z]) => _guardFrustum.intersectsSphere(_guardSphere.set(_guardSphere.center.set(x, 1, z), 3)));
+}
+const STREET_PACK = [3, 3, 2], INSIDE_GUARD_M = 6;
+function guardHideout(spot) {
+  const gd = spot.guards;
+  spawnPack(gd.street.flatMap(([x, z], i) => packAround(x, z, STREET_PACK[i] || 0, 1.4)), { carriers: 2 });
+  spawnPack(gd.inside, { guard: INSIDE_GUARD_M });
+}
 // Impossible: inside one of the walk-in buildings, a different one each
 // run, deep in its back room; her way out is its side door
 let hideoutIndex = -1;
@@ -1026,7 +1048,7 @@ function pickHideSpot() {
   if (i === hideoutIndex && hideouts.length > 1) i = (i + 1) % hideouts.length; // somewhere new
   hideoutIndex = i;
   const h = hideouts[i];
-  return { at: [h.girl.x, h.girl.z], face: h.girl.face, out: h.out, join: h.join, building: h.name };
+  return { at: [h.girl.x, h.girl.z], face: h.girl.face, out: h.out, join: h.join, building: h.name, guards: h.guards };
 }
 function hideGirl() {
   if (!girl) return;
@@ -1045,8 +1067,10 @@ function hideGirl() {
 function updateHiding(dt) {
   const h = girl.hiding, g = girl.group, p = playerVis?.group.position;
   if (!p) return;
+  const d = p.distanceTo(g.position);
+  if (h.spot.guards && !h.guarded && state.hasRadarUpgrade && guardsUnseen(h.spot, d)) { h.guarded = true; guardHideout(h.spot); }
   if (!h.sensed) {
-    if (state.hasRadarUpgrade && p.distanceTo(g.position) < SCENT_M) {
+    if (state.hasRadarUpgrade && d < (h.spot.building ? SCENT_IN_M : SCENT_M)) {
       h.sensed = true;
       scentTrail(p, g.position);
       pushKillFeed('She has caught your scent…');
@@ -1207,7 +1231,7 @@ function tickIntro(dt) {
       portPos: lv2EscapePoint,
       playerPos: playerVis.group.position.clone(),
       machines: lv2Scene.machines,
-      prices: { radar: RADAR_PRICE, adrenaline: ADRENALINE_PRICE },
+      prices: { radar: RADAR_PRICE, adrenaline: ADRENALINE_PRICE, adrenalineSeconds: ADRENALINE_DURATION, adrenalineStock: ADRENALINE_START_STOCK },
       onDone: spawnStartAmbush,
     });
     return;
@@ -1229,7 +1253,7 @@ function updateGirl(dt) {
   if (state.cinematic) { if (girl.mixer) girl.mixer.update(dt); return; } // idling through the intro
   if (!girlAnnounced) {
     girlAnnounced = true;
-    if (girl.hiding) pushKillFeed("She's gone to ground near here. The radar will find her.");
+    if (girl.hiding) pushKillFeed("She's gone to ground somewhere in town. The radar will find her.");
     else {
       // Off the intro's idle and away
       if (girl.idle && girl.run) { girl.run.reset().play(); girl.idle.crossFadeTo(girl.run, 0.3, false); }
