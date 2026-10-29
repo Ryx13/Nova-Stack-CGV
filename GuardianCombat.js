@@ -11,14 +11,14 @@ export class GuardianShockwave {
  clear(){this.active=false;this.hit=false;this.radius=0;}
 }
 export class GuardianCombat {
-  constructor(){this.phase='entrance';this.stage=1;this.valveCharge=0;this.ruptured=false;this.time=0;this.direction={x:0,z:1};this.ventTarget=null;this.hit=false;this.attacks=0;this.vented=false;}
+  constructor({impossible=false}={}){this.impossible=impossible;this.phase='entrance';this.stage=1;this.valveCharge=0;this.ruptured=false;this.time=0;this.direction={x:0,z:1};this.ventTarget=null;this.hit=false;this.attacks=0;this.vented=false;}
   setHealth(health,maxHealth){
     if(Number.isFinite(health)&&Number.isFinite(maxHealth)&&maxHealth>0&&health/maxHealth<=.5)this.stage=2;
   }
   // Pressure increases between attacks. Warning and weak-point windows stay fair.
-  get duration(){if(this.phase==='slam_warning'&&this.stage===2)return 2;return this.phase==='chase'&&this.stage===2?3.5:GUARDIAN_TIMING[this.phase];}
+  get duration(){if(this.phase==='slam_warning'&&this.stage===2)return 2;if(this.phase==='chase'&&this.impossible)return this.stage===2?2.4:3.5;return this.phase==='chase'&&this.stage===2?3.5:GUARDIAN_TIMING[this.phase];}
   get progress(){return Math.min(1,this.time/(this.duration||1));}
-  get speed(){return this.stage===2?.85:.65;}
+  get speed(){return this.impossible?(this.stage===2?1.8:1.35):(this.stage===2?.85:.65);}
   enter(phase){this.phase=phase;this.time=0;this.hit=false;this.vented=false;}
   update(dt,boss,target){
     if(this.phase==='defeated')return;
@@ -45,7 +45,7 @@ export class GuardianCombat {
       this.valveCharge=Math.min(this.stage===2?GUARDIAN_RUPTURE_DAMAGE:GUARDIAN_RUPTURE_DAMAGE-1,this.valveCharge+raw);
       if(this.stage===2&&this.valveCharge>=GUARDIAN_RUPTURE_DAMAGE){this.ruptured=true;this.enter('rupture');}
     }
-    return raw*(exposed&&weakPoint?2.5:1);
+    return raw*(exposed&&weakPoint?2.5:this.impossible&&!exposed?.65:1);
   }
 }
 // Fixed capacity: vents leave world-space hazards, never homing clouds.

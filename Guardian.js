@@ -22,7 +22,7 @@ export async function warmGuardian(renderer,scene,camera){
 
 
 export function presentGuardian(boss,{scene,state,sfx,damagePlayer,clampX,obstacles,onDefeated}){
-  const combat=new GuardianCombat(),gas=new GuardianGas(),shockwave=new GuardianShockwave();
+  const combat=new GuardianCombat({impossible:state.difficulty==='impossible'}),gas=new GuardianGas(),shockwave=new GuardianShockwave();
   const originalKill=boss.confirmedKill.bind(boss);
   boss.mixer?.stopAllAction();if(boss.rigObj)boss.mixer?.uncacheRoot(boss.rigObj);
   // Remove the randomly chosen zombie and its invisible capsule. Hits use the new skin.

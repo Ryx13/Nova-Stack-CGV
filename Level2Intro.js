@@ -21,12 +21,12 @@ export function playIntro({ prices, onDone }) {
   const hunt = state.difficulty === 'impossible';
   void playBriefing([
     hunt ? {
-      id: 'lv2-girl', speaker: 'BRIEFING / THE TARGET', title: 'The girl from CAM 03',
-      text: "She has your stabilizer. She's half-turned and using it to stay human, so the infected leave her alone. She's hiding inside one of the buildings out in the far parts of town, and she won't come out for you.\n\nGet the radar first: until you have it she stays hidden, even if you walk right past her. Then go in after her, and expect a fight on the way. Get close and she'll smell you and run for her boat: catch her before she reaches it, right next to her, E.",
+      id: 'lv2-girl', speaker: 'BRIEFING / THE TARGET', title: 'Find the girl with your case',
+      text: "The entrance camera showed her taking your case. She has your stabilizer. She's half-turned and using it to stay human, so the infected leave her alone. She's hiding inside one of the buildings out in the far parts of town, and she won't come out for you.\n\nGet the radar first: until you have it she stays hidden, even if you walk right past her. Then go in after her, and expect a fight on the way. Get close and she'll smell you and run for her boat: catch her before she reaches it, right next to her, E.",
       keys: [['E', 'Catch her']],
     } : {
-      id: 'lv2-girl', speaker: 'BRIEFING / THE TARGET', title: 'The girl from CAM 03',
-      text: "She has your stabilizer. She's half-turned and using it to stay human, so the infected leave her alone. Catch her before her boat leaves: get right next to her and press E.",
+      id: 'lv2-girl', speaker: 'BRIEFING / THE TARGET', title: 'Find the girl with your case',
+      text: "The entrance camera showed her taking your case. She has your stabilizer. She's half-turned and using it to stay human, so the infected leave her alone. Catch her before her boat leaves: get right next to her and press E.",
       keys: [['E', 'Catch her']],
     },
     {

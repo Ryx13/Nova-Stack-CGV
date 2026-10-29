@@ -11,4 +11,5 @@
 @media(prefers-reduced-motion:reduce){.dw-radio-meter{animation:none}*,*:before,*:after{scroll-behavior:auto!important}.dw-button{transition:none}}
 
 .dw-modal p{white-space:pre-line}.dw-modal .dw-card{overscroll-behavior:contain}
+.dw-log-entry summary{cursor:pointer;font:600 17px/1.5 'Rajdhani',sans-serif;color:var(--dw-cure);padding:4px 0}.dw-log-entry summary:focus-visible{outline:2px solid var(--dw-cure);outline-offset:3px}.dw-log-entry p{font-size:18px}
 #opening-story .dw-button.primary{background:linear-gradient(115deg,#a32621,#40191a);border-color:#dc6553}
