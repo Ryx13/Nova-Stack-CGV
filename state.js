@@ -222,6 +222,7 @@ const runDefaults = Object.fromEntries(RUN_KEYS.map((k) => [k, state[k]]));
 
 export function resetRunState() {
   Object.assign(state, runDefaults);
+  if (state.magSize) state.ammoMag = state.magSize; // a level's own magazine (Level2Config.js)
   state.keys = {};
   state.firePressed = false;
   state.deathInfection = undefined;

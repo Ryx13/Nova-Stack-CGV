@@ -90,4 +90,9 @@ state.bigFires = true;
 // The runner zombies (model-rigged.glb) are three times as fast here:
 // ~13-19 m/s, beyond a sprint (8.4) and even adrenaline (12.2)
 state.runnerSpeedMul = 3;
+// The gun holds 8 here, loaded a round at a time (Actions.js A LEVEL'S OWN
+// MAGAZINE): the tough packs off the main street mean reloading mid-fight
+state.magSize = 8;
+state.reloadByRound = true;
+state.ammoMag = state.magSize;
 state.burningCarModel = { url: 'assets/old_rusty_car_2.glb', length: 4.4, strip: ['Plane001', 'Object002'] };

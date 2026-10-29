@@ -51,11 +51,11 @@ export function cameraQuake(seconds, strength = 1) {
 function applyQuake(dt) {
   quakeT += dt;
   if (quakeT >= quakeLen) { quakeT = -1; return; }
-  const k = quakeAmp * THREE.MathUtils.smoothstep(quakeT, 0, 0.3) * (1 - THREE.MathUtils.smoothstep(quakeT, quakeLen * 0.55, quakeLen));
-  camera.position.x += k * 0.09 * (Math.sin(quakeT * 17) + 0.7 * Math.sin(quakeT * 29 + 1.2));
-  camera.position.y += k * 0.07 * (Math.sin(quakeT * 21 + 0.5) + 0.6 * Math.sin(quakeT * 33));
-  camera.rotateOnAxis(_z, k * 0.025 * Math.sin(quakeT * 13));
-  camera.rotateOnAxis(_x, k * 0.015 * Math.sin(quakeT * 19 + 0.8));
+  const k = quakeAmp * THREE.MathUtils.smoothstep(quakeT, 0, 0.3) * (1 - THREE.MathUtils.smoothstep(quakeT, quakeLen * 0.7, quakeLen));
+  camera.position.x += k * 0.14 * (Math.sin(quakeT * 17) + 0.7 * Math.sin(quakeT * 29 + 1.2));
+  camera.position.y += k * 0.1 * (Math.sin(quakeT * 21 + 0.5) + 0.6 * Math.sin(quakeT * 33));
+  camera.rotateOnAxis(_z, k * 0.035 * Math.sin(quakeT * 13));
+  camera.rotateOnAxis(_x, k * 0.022 * Math.sin(quakeT * 19 + 0.8));
 }
 
 /** Just before the frame is drawn. */

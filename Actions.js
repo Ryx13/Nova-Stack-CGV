@@ -38,7 +38,7 @@ import {
   carVis, chassisBody, vehicle, carSpawn, CAR_MAX_FUEL,
   FRONT_WHEELS, REAR_WHEELS, MAX_STEER, MAX_ENGINE_FORCE, MAX_BRAKE_FORCE, HANDBRAKE_FORCE,
   viewmodelGun, knifeThirdPerson, knifeViewModel,
-  syncHandGun, setPlayerAction, playPlayerGesture, groundClampRig, lerpAngle, checkVehicleRollover,
+  syncHandGun, setPlayerAction, playPlayerGesture, groundClampRig, clampPlayerFeet, lerpAngle, checkVehicleRollover,
   ZOMBIE_TARGET_HEIGHT,
   loadMainCharacter, loadZombies, loadCars, loadBuildings, loadTrashCans, loadObstacles,
   loadStreetSurface, spawnDepotGuards, spawnZombie, updateZombies,
@@ -81,6 +81,15 @@ export const levelKeyHooks = {};
    COMBAT — weapon tuning, hit VFX, gun/melee/knife logic
 --------------------------------------------------------------------- */
 export const MAG_SIZE = 30; // was 12 — read as an underpowered pistol, not a combat weapon
+const RELOAD_S = 1.55;
+/* A LEVEL'S OWN MAGAZINE — a level can set state.magSize (rounds) and
+   state.reloadByRound (Level 2: 8, loaded a round at a time, ROUND_LOAD_S
+   each with the reload gesture once per round, so a pack fight means
+   reloading in it). Loading by the round can be cut short: fire with
+   anything loaded and it stops there (tryShoot), the rounds already in
+   staying in. Everywhere else: MAG_SIZE, reloaded in one go. */
+const ROUND_LOAD_S = 0.45;
+const magSize = () => state.magSize || MAG_SIZE;
 const FIRE_RATE = 0.11; // was 0.19 (~5.3rps) — now ~9rps, an actual automatic weapon
 const GUN_DAMAGE = 26;
 const MELEE_DAMAGE = 42;
@@ -324,7 +333,11 @@ export function tryShoot() {
   const extra=levelWeapon(state.currentWeapon);
   if(extra){if(!state.inVehicle&&extra.fire())triggerShootAnimSafe();return;}
   if (state.currentWeapon !== 'gun') { tryKnife(); return; }
-  if (state.inVehicle || state.isDead || state.reloading || state.fireCooldown > 0) return;
+  if (state.inVehicle || state.isDead || state.fireCooldown > 0) return;
+  if (state.reloading) {
+    if (!state.reloadByRound || state.ammoMag <= 0) return; // nothing in yet
+    stopReload();
+  }
   if (state.ammoMag <= 0) { startReload(); return; }
   state.fireCooldown = FIRE_RATE;
   state.ammoMag--;
@@ -439,13 +452,36 @@ export function tryKnife() {
 }
 export function startReload() {
   if (state.narrativeBlocked || state.currentWeapon !== 'gun' || state.isDead || state.paused) return;
-  if (state.reloading || state.ammoMag === MAG_SIZE || state.ammoReserve <= 0 || state.inVehicle) {
+  if (state.reloading || state.ammoMag >= magSize() || state.ammoReserve <= 0 || state.inVehicle) {
     enforceAmmoWeaponRule();
     return;
   }
-  state.reloading = true; state.reloadTimer = 1.55;
+  state.reloading = true; state.reloadTimer = state.reloadByRound ? ROUND_LOAD_S : RELOAD_S;
   playPlayerGesture('reload', state.reloadTimer);
   dom.reloadText.classList.remove('hidden');
+}
+function stopReload() {
+  state.reloading = false; state.reloadTimer = 0;
+  state.playerActionLock = 0; // out of the reload gesture, into the shot
+  dom.reloadText.classList.add('hidden');
+}
+// The whole magazine at the end of RELOAD_S, or (reloadByRound) a round
+// each ROUND_LOAD_S until it's full or the reserve is out
+function updateReload(dt) {
+  state.reloadTimer -= dt;
+  if (state.reloadTimer > 0) return;
+  if (!state.reloadByRound) {
+    const take = Math.min(magSize() - state.ammoMag, state.ammoReserve);
+    state.ammoMag += take; state.ammoReserve -= take;
+    state.reloading = false;
+    dom.reloadText.classList.add('hidden');
+    updateAmmoHUD();
+    return;
+  }
+  if (state.ammoReserve > 0 && state.ammoMag < magSize()) { state.ammoMag++; state.ammoReserve--; updateAmmoHUD(); }
+  if (state.ammoMag >= magSize() || state.ammoReserve <= 0) { stopReload(); return; }
+  state.reloadTimer += ROUND_LOAD_S;
+  playPlayerGesture('reload', ROUND_LOAD_S);
 }
 
 /* ---------------------------------------------------------------------
@@ -1041,7 +1077,7 @@ export function updatePlayerMovement(dt) {
     playerVis.mixer.update(dt);
     if (!jumping) {
       // Correct relative to the physics feet, including raised platforms.
-      groundClampRig(playerVis.rigObj, playerVis.footBoneL, playerVis.footBoneR, dt, 10, playerVis.ankleToSole, playerVis.group.position.y);
+      clampPlayerFeet(dt, playerVis.group.position.y);
       playerVis.groundOffset = playerVis.rigObj.position.y;
     } else {
       // Preserve the last grounded offset so the mesh rises with its body.
@@ -1473,17 +1509,7 @@ function startAnimationLoop() {
       if (!state.skipCar) checkVehicleRollover(dt);
       if (state.fireCooldown > 0) state.fireCooldown -= dt;
       if (state.firePressed && !state.inVehicle && state.currentWeapon === 'gun') tryShoot();
-      if (state.reloading) {
-        state.reloadTimer -= dt;
-        if (state.reloadTimer <= 0) {
-          const need = MAG_SIZE - state.ammoMag;
-          const take = Math.min(need, state.ammoReserve);
-          state.ammoMag += take; state.ammoReserve -= take;
-          state.reloading = false;
-          dom.reloadText.classList.add('hidden');
-          updateAmmoHUD();
-        }
-      }
+      if (state.reloading) updateReload(dt);
       if (state.inVehicle) {
         updateVehicleControls(dt);
         updateCameraInCar();

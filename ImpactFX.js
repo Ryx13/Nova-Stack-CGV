@@ -209,9 +209,9 @@ const scorchTex = canvasTexture(128, (ctx, S) => {
 });
 const scorches = new DecalPool('blast-scorches', new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2),
   new THREE.MeshStandardMaterial({ map: scorchTex, transparent: true, depthWrite: false, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), 8);
-// Concrete coming down with a structure (collapseFX)
+// Concrete coming down with a structure (collapseFX, crumble)
 const rubble = new ParticlePool('collapse-rubble', new THREE.DodecahedronGeometry(1, 0),
-  new THREE.MeshStandardMaterial({ color: 0x8a8680, roughness: 0.95 }), 28);
+  new THREE.MeshStandardMaterial({ color: 0x8a8680, roughness: 0.95 }), 64);
 const pools = [bloodDrops, bloodSplats, glassShards, glassCracks, smashedPanes, smashedRims, blastDebris, blastEmbers, scorches, rubble];
 
 // Brown air: big soft dark-brown patches a running pack leaves hanging
@@ -489,6 +489,16 @@ function updateWave(dt) {
     sp.material.rotation += sp.userData.turn * dt;
     sp.scale.setScalar(sp.userData.size * (1 + t * 2.2));
     sp.material.opacity = WAVE_OPACITY * Math.min(1, t * 8) * (1 - t) ** 1.4;
+  }
+}
+
+/** Bits of concrete breaking off at x, y, z (spread m either way along x,
+    and across the width w): n small chunks dropping to the street. */
+export function crumble(x, y, z, spread, w, n) {
+  for (let i = 0; i < n; i++) {
+    _blastAt.set(x + (Math.random() * 2 - 1) * spread, y, z + (Math.random() - 0.5) * w);
+    _blastVel.set((Math.random() - 0.5) * 0.8, -Math.random() * 0.6, (Math.random() - 0.5) * 0.8);
+    rubble.emit(_blastAt, _blastVel, 2.4 + Math.random(), 0.05 + Math.random() * 0.1, 0.06);
   }
 }
 

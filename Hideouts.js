@@ -250,6 +250,12 @@ function buildHideout(h) {
     out: [[X(doorA), Z(sideSign * (hl - 1))], [X(doorA), Z(sideSign * (hl + 1.4))], ...h.escape],
     join: h.escape && h.join,
     door: { x: X(-1), z: Z(0) },
+    // Where her pack waits on Impossible (Level2.js): out in the street the
+    // building fronts, and inside, either side of the partition's doorway
+    guards: {
+      street: [[X(-4.5), Z(-1)], [X(-7.5), Z(3)], [X(-5), Z(-5.5)]],
+      inside: [[X(PART * 0.45), Z(partDoorS + 1.8)], [X(PART - 1.2), Z(partDoorS - 1.4)], [X(PART + 1.4), Z(partDoorS)]],
+    },
   };
 }
 

@@ -322,7 +322,8 @@ function powerupMaterialPair(color) {
 const coinGeometry = new THREE.CylinderGeometry(0.16, 0.16, 0.035, 18);
 const coinMaterial = new THREE.MeshStandardMaterial({ color: 0xffd94a, emissive: 0x996600, emissiveIntensity: 0.6, metalness: 0.75, roughness: 0.3 });
 
-export function spawnPickup(pos, type) {
+// amount: ammo rounds it holds (default 18; an ammo carrier's bag, characters.js)
+export function spawnPickup(pos, type, amount = 0) {
   const color = type === 'health' ? 0x44dd66 : 0xe0b030;
   const mesh = new THREE.Mesh(
     pickupGeometry,
@@ -330,7 +331,7 @@ export function spawnPickup(pos, type) {
   );
   mesh.position.set(pos.x, 0.45, pos.z);
   scene.add(mesh);
-  state.pickups.push({ mesh, type, life: 22 });
+  state.pickups.push({ mesh, type, amount, life: 22 });
 }
 
 export function updatePickups(dt, pos) {
@@ -342,8 +343,9 @@ export function updatePickups(dt, pos) {
     if (p.life <= 0) { scene.remove(p.mesh); state.pickups.splice(i, 1); continue; }
     if (p.mesh.position.distanceTo(pos) < 1.4) {
       if (p.type === 'ammo') {
-        state.ammoReserve += 18;
-        pushKillFeed('+18 ammo');
+        const n = p.amount || 18;
+        state.ammoReserve += n;
+        pushKillFeed(`+${n} ammo`);
       } else {
         state.playerHealth = Math.min(state.playerMaxHealth, state.playerHealth + 28);
         dom.healthFill.style.width = (state.playerHealth / state.playerMaxHealth) * 100 + '%';
