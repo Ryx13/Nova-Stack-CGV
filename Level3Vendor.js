@@ -15,5 +15,5 @@ export function createLevel3Vendor({scene,state,addStaticBox,updateAmmoHUD,updat
     if(product.stock===0)machine.takeCard('support');else machine.setSelection(2,0);
     feed('Bought 24 pistol rounds');return true;
   }
-  return {machine,product,buy,nearby,prompt:`E — buy 24 pistol rounds / 3 coins`,update(dt){machine.update(dt);},dispose(){machine.dispose();}};
+  return {machine,product,buy,nearby,reset(){product.stock=8;machine.restock();machine.setSelection(2,0);},prompt:`E — buy 24 pistol rounds / 3 coins`,update(dt){machine.update(dt);},dispose(){machine.dispose();}};
 }

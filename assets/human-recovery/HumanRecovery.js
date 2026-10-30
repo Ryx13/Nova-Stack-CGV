@@ -185,13 +185,15 @@ export function recognizeSurvivor(zombie,amount){const item=survivors.get(zombie
 
 // Explicit scene teardown for level disposal. Setup warmup cleanup must not
 // call this: the game invokes that cleanup immediately after shader warmup.
-export function disposeHumanRecovery() {
+export function disposeHumanRecovery({keepScene=false}={}) {
   for (const item of active) {
     item.source.visible = true;
+    item.mixer.stopAllAction();item.mixer.uncacheRoot(item.model);
+    const skeletons=new Set();item.model.traverse(o=>{if(o.isSkinnedMesh)skeletons.add(o.skeleton);});skeletons.forEach(s=>s.dispose());
     item.face?.dispose();item.clone.removeFromParent();
   }
   active.clear();
   if (recoveryScene) for (const root of warmupRoots) root.removeFromParent();
   warmupRoots.clear();
-  recoveryScene = null;recoveryCamera=null;
+  if(!keepScene){recoveryScene = null;recoveryCamera=null;}
 }
