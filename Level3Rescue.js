@@ -44,7 +44,8 @@ export function createTechnicianRescue({scene,position,addCollider,night=false})
     box(panel,-side*.5,1.2,.08,.06,.3,.08,amber);
     return panel;
   });
-  const removeDoor=addCollider(1.42,1.35,.07,position.x,1.35,position.z);
+  let removeDoor=addCollider(1.42,1.35,.07,position.x,1.35,position.z);
+  let doorPresent=true;
   for(const x of [-1.55,1.55])box(booth,x,1.4,.06,.12,2.8,.16,steel);
   box(booth,0,2.68,.13,2.8,.06,.06,status);
   // Road-side handle stays outside both the wall and the sliding panel travel.
@@ -113,6 +114,13 @@ export function createTechnicianRescue({scene,position,addCollider,night=false})
   }
   return {
     booth,worker,control,ready,
+    reset(){
+      if(!doorPresent){removeDoor=addCollider(1.42,1.35,.07,position.x,1.35,position.z);doorPresent=true;}
+      phase='locked';time=walkTime=waypoint=0;
+      doors.forEach((door,i)=>door.position.x=(i?1:-1)*.71);
+      worker.position.copy(position).add(new THREE.Vector3(0,0,-1.9));worker.rotation.set(0,0,0);fallback.rotation.set(0,0,0);
+      status.color.setHex(0xe2ac44);mixer?.stopAllAction();current=null;play('idle');mixer?.update(0);
+    },
     get phase(){return phase;},
     get safe(){return phase==='safe';},
     get released(){return phase!=='locked';},
@@ -122,7 +130,7 @@ export function createTechnicianRescue({scene,position,addCollider,night=false})
       if(phase==='opening'){
         const t=Math.min(1,time/1.6),ease=t*t*(3-2*t);
         doors.forEach((door,i)=>door.position.x=(i?1:-1)*(.71+1.4*ease));
-        if(t===1){removeDoor();phase='evacuating';time=0;play('walk');}
+        if(t===1){removeDoor();doorPresent=false;phase='evacuating';time=0;play('walk');}
       }
       if(phase==='evacuating'){
         const goal=path[waypoint];direction.subVectors(goal,worker.position);const distance=direction.length(),step=Math.min(distance,dt*1.15);

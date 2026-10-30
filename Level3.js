@@ -36,7 +36,7 @@ import { mergeStaticScenery } from './mergeStatic.js';
 import * as THREE from 'three';
 import {
   scene, world, camera, dom, sfx, pushKillFeed, updateAmmoHUD, updateCoinHUD, addStaticBox,
-  acquireEffectLight, releaseEffectLight,
+  acquireEffectLight, releaseEffectLight, showRenderFailure,
 } from './Scene.js';
 import { state } from './state.js';
 import {
@@ -44,7 +44,7 @@ import {
   updateBlinkingLamps,
 } from './characters.js';
 import { updateSignFlicker } from './CityKit.js';
-import { spawnHitSpark, spawnBlood, bootLevel, registerLevelTick, registerLevelPreTick, registerLevelPreparation, levelKeyHooks, damagePlayer, switchWeapon } from './Actions.js';
+import { spawnHitSpark, spawnBlood, bootLevel, registerLevelTick, registerLevelPreTick, registerLevelPreparation, registerLevelReset, levelKeyHooks, damagePlayer, switchWeapon } from './Actions.js';
 import { buildCompoundDetails } from './Level3Environment.js';
 import {buildInteractionProp} from './Level3InteractionProps.js';
 import {buildSwitchProp} from './Level3SwitchProps.js';
@@ -61,16 +61,14 @@ import {OPENING_CONVERSATION,endingReflection} from './Level3HumanityDialogue.js
 import {getGirlOutcome} from './StoryProgress.js';
 import {buildArrivalBay} from './Level3Arrival.js';
 import {buildIndustrialDistrict} from './Level3Industry.js';
-import {registerDayProgress} from './DayCycle.js';
-import {preloadHumanRecovery,prepareHumanRecovery,beginHumanRecovery,updateHumanRecovery,survivorFrame,recognizeSurvivor} from './assets/human-recovery/HumanRecovery.js';
+import {registerDayProgress,resetDayCycle} from './DayCycle.js';
+import {preloadHumanRecovery,prepareHumanRecovery,beginHumanRecovery,updateHumanRecovery,survivorFrame,recognizeSurvivor,disposeHumanRecovery} from './assets/human-recovery/HumanRecovery.js';
 
 const LEVEL_CONFIG = {
   id: 3,
   name: 'Level 3 — The Broadcast Tower',
   skip: { car: true, depot: true },
-  // The Guardian, cure projector, stealth and quarantine systems have no
-  // reset yet, so Retry reloads the page for this level.
-  restartInPlace: false,
+  restartInPlace: true,
 };
 
 export function startLevel(mode) {
@@ -98,7 +96,7 @@ export function startLevel(mode) {
   const merged=mergeStaticScenery(scene);
   if(document.body.classList.contains('debug'))console.info('[compound scenery]',merged); // debug mode only (?debug)
   lv3 = {
-    compound,
+    compound, run:0,
     phase: 'switches', // 'switches' -> 'boss' -> 'dispersion' -> 'done'
     bossZombie: null,
     dispersion: null,
@@ -131,6 +129,12 @@ export function startLevel(mode) {
     if(state.currentWeapon==='cure')switchWeapon(lv3.pulse.previousWeapon||'gun');
     else {lv3.pulse.previousWeapon=state.currentWeapon;switchWeapon('cure');}
   };
+  lv3.restoreVisuals=captureResetVisuals([
+    compound.consoleLight,...compound.switches.flatMap(s=>[s.marker.beam,s.marker.ring,s.marker.control,s.marker.light]),
+    ...lv3.details.lights,...lv3.details.floodFixtures,...lv3.details.hazards.map(h=>h.mesh),...lv3.details.crates,
+    lv3.story.cache,lv3.story.console,
+  ]);
+  registerLevelReset(()=>{void resetLevel3().catch(showRenderFailure);});
   // No camera fly-through (it lagged): the level opens on Dr. James's story cards (playOpeningConversation)
   registerLevelTick(updateLevel3Mission);
   registerLevelTick((dt) => { updateBlinkingLamps(dt); updateSignFlicker(dt); }); // the faulty lamps, the works' flickering signs
@@ -945,11 +949,7 @@ function initLevel3Story() {
   story.consolePos=new THREE.Vector3(0,0,-187);
   story.rescuePos=new THREE.Vector3(-8.5,0,-164);
   story.cachePos=new THREE.Vector3(8,0,-151);
-  story.narrative=createNarrative({
-    onBlock:value=>{state.narrativeBlocked=value;state.keys={};state.firePressed=false;state.isSprinting=false;},
-    onRelease:()=>{if(!state.isDead&&!state.paused)dom.canvas.requestPointerLock()?.catch(()=>{});},
-    onShot:value=>{if(value){story.savedCamera={position:camera.position.clone(),quaternion:camera.quaternion.clone()};story.shot=value;}else{if(story.savedCamera){camera.position.copy(story.savedCamera.position);camera.quaternion.copy(story.savedCamera.quaternion);}story.shot=null;story.savedCamera=null;}}
-  });
+  story.narrative=createStoryNarrative(story);
   story.logButton=document.createElement('button');story.logButton.className='dw-button quiet dw-log-button';story.logButton.textContent='Field log';document.body.append(story.logButton);
   story.logButton.onclick=()=>{if(!state.isDead&&!state.paused)story.narrative.openLog('MISSION\nRestore Generator → Cooling → Uplink. Clear each defence, defeat the Guardian, then broadcast at the tower.\n\nCONTROLS\nHold E: use controls · Q: switch weapon · 3 / X: cure projector · Left-click: fire · R: reload.\n\nSUPPLIES\nCure: five charges, 6 m range. West-side machine: 24 pistol rounds for 3 coins.\n\nOPTIONAL\nRescue the technician from the isolation room beside Cooling. G at a control: research.\n\nSTORY SO FAR\nCAM 03 means security camera 3 at the lab entrance. It showed the girl taking the stabilizer. The stabilizer and sample now make a cure.');};
   story.rescue=createTechnicianRescue({scene,position:story.rescuePos,night:state.timeOfDay==='night',addCollider:(...args)=>{
@@ -963,6 +963,13 @@ function initLevel3Story() {
   story.console=buildInteractionProp(story.consolePos,'broadcast',0x8fe0ff);
   scene.add(story.cache,story.console);
   story.technician=story.rescue.worker;
+}
+function createStoryNarrative(story){
+  return createNarrative({
+    onBlock:value=>{state.narrativeBlocked=value;state.keys={};state.firePressed=false;state.isSprinting=false;},
+    onRelease:()=>{if(!state.isDead&&!state.paused)dom.canvas.requestPointerLock()?.catch(()=>{});},
+    onShot:value=>{if(value){story.savedCamera={position:camera.position.clone(),quaternion:camera.quaternion.clone()};story.shot=value;}else{if(story.savedCamera){camera.position.copy(story.savedCamera.position);camera.quaternion.copy(story.savedCamera.quaternion);}story.shot=null;story.savedCamera=null;}}
+  });
 }
 function updateStoryCamera(dt){
  const s=lv3.story;if(!s.shot)return;
@@ -989,11 +996,12 @@ function applyPowerRoute(id){
 }
 
 async function finishDefense(key){
- const s=lv3.story;
+ const s=lv3.story,run=lv3.run;
  if(s.powerChoosing)return;
  if(key==='generator'&&!s.power&&!s.powerChoosing){
    s.powerChoosing=true;
    const choice=await s.narrative.show({id:'power-routing',mode:'choice',speaker:'DR. JAMES / AUXILIARY POWER',title:'One circuit to spare.',text:'The tower has its power. Route the last spare circuit to one system. Floodlights improve visibility but attract stronger waves. Steam stays dangerous unless you choose safety.',choices:[{id:'floodlights',label:'Power the floodlights',detail:POWER_ROUTES.floodlights.summary},{id:'safety',label:'Restore safety systems',detail:POWER_ROUTES.safety.summary},{id:'supplies',label:'Open the supply route',detail:POWER_ROUTES.supplies.summary}]});
+   if(run!==lv3.run)return;
    s.powerChoosing=false;if(!powerRoute(choice))return;applyPowerRoute(choice);
  }
  if(key==='cooling'){
@@ -1003,6 +1011,7 @@ async function finishDefense(key){
  if(!lv3.route.pending&&lv3.phase==='switches'&&lv3.compound.switches.every(sw=>sw.activated)){
    startBossPhase();
    await s.narrative.show({id:'guardian-reveal',mode:'cinematic',speaker:'DR. JAMES / SIGNAL LOST',title:'The Guardian blocks the tower.',text:'The Guardian is an infected containment worker. The handheld cure cannot treat it.\n\nLeave the marked attack area. Shoot its glowing chest valve when it stops to recover. Below half health, expect faster attacks.',shot:'guardian',continueLabel:'Fight the Guardian'});
+   if(run!==lv3.run)return;
    lv3.awakening=createGuardianAwakening({camera,state,scene,boss:lv3.bossZombie,sfx,lights:lv3.details.lights});
  }else writeObjective();
 }
@@ -1025,4 +1034,50 @@ function updateStoryInteractions(dt,pos){
  if(lv3.phase==='broadcast-ready'&&pos.distanceTo(s.consolePos)<3&&(!s.rescue.released||s.rescued)){prompt='Press E — broadcast the cure / completes this mission';if(state.keys.KeyE)startDispersion();}
  if(prompt){dom.prompt.classList.remove('hidden');dom.promptText.textContent=prompt;}
  else if(lv3.phase==='broadcast-ready')dom.prompt.classList.add('hidden');
+}
+
+
+// Capture only mission-owned controls, lights and props; the world is reused.
+function captureResetVisuals(roots){
+ const objects=new Set();for(const root of roots)root.traverse(o=>objects.add(o));
+ const records=[...objects].map(o=>({o,visible:o.visible,position:o.position.clone(),quaternion:o.quaternion.clone(),scale:o.scale.clone(),
+  intensity:o.intensity,distance:o.distance,color:o.color?.clone(),materials:(Array.isArray(o.material)?o.material:[o.material]).filter(Boolean).map(m=>({m,color:m.color?.clone(),emissive:m.emissive?.clone(),opacity:m.opacity,emissiveIntensity:m.emissiveIntensity}))}));
+ return ()=>{for(const r of records){const o=r.o;o.visible=r.visible;o.position.copy(r.position);o.quaternion.copy(r.quaternion);o.scale.copy(r.scale);
+  if(r.intensity!==undefined)o.intensity=r.intensity;if(r.distance!==undefined)o.distance=r.distance;if(r.color)o.color.copy(r.color);
+  for(const v of r.materials){if(v.color)v.m.color.copy(v.color);if(v.emissive)v.m.emissive.copy(v.emissive);v.m.opacity=v.opacity;if(v.emissiveIntensity!==undefined)v.m.emissiveIntensity=v.emissiveIntensity;}
+ }};
+}
+async function resetLevel3(){
+ const run=++lv3.run,s=lv3.story;
+ lv3.awakening?.destroy();lv3.awakening=null;
+ s.narrative.dispose();
+ for(const boss of new Set([lv3.bossZombie,lv3.preparedBoss]))if(boss){
+  const skeletons=new Set();boss.rigObj?.traverse(o=>{if(o.isSkinnedMesh)skeletons.add(o.skeleton);});
+  boss.guardian?.dispose();boss.remove();skeletons.forEach(s=>s.dispose());
+ }
+ if(lv3.dispersion){const d=lv3.dispersion;camera.fov=d.originalFov;camera.updateProjectionMatrix();d.wave.removeFromParent();d.wave.geometry.dispose();d.wave.material.dispose();releaseEffectLight(d.flashLight);d.finale.remove();}
+ disposeHumanRecovery({keepScene:true});
+ for(const z of lv3.savedInfected){disposeCureParticles(z);z.remove();}
+ lv3.savedInfected.clear();lv3.activeCures.clear();
+ Object.assign(lv3,{phase:'switches',bossZombie:null,preparedBoss:null,dispersion:null,curedCount:0,pulseSaved:0,broadcastCured:0,guardianSpared:false,guardianDefeated:false,
+  route:new CombatRoute({countMul:state.zombieCountMul,...level3Challenge(state.difficulty)}),defendingSwitch:null,hold:0,holdKey:null,defenseTime:0,waveRemaining:0,waveTimer:0,elapsed:0,lastSwitch:null,noteTime:0,fallenTime:0,firstEncounter:null,objectiveRefresh:0,hudReady:false});
+ Object.assign(s,{intent:'force',arrived:true,power:null,powerChoosing:false,rescueAvailable:false,rescued:false,rescueStarted:false,rescueHold:0,cacheClaimed:false,shot:null,savedCamera:null,firstRecovery:false,encounterHintTime:0});
+ s.narrative=createStoryNarrative(s);s.rescue.reset();s.logButton.hidden=false;s.encounterPanel.hidden=true;
+ lv3.restoreVisuals();
+ for(const sw of lv3.compound.switches){sw.activated=false;sw.marker.control.userData.setProgress(0);}
+ for(const crate of lv3.details.crates)crate.open=false;
+ lv3.details.progress.value=0;lv3.details.progress.hidden=true;lv3.details.note.hidden=true;
+ lv3.vendor.reset();
+ const p=lv3.pulse;Object.assign(p,{device:new CureDevice(),active:null,feedback:'',feedbackTime:0,kick:0});p.effect.visible=false;p.third.visible=false;p.viewmodel.visible=false;
+ state.ammoReserve=60;state.narrativeBlocked=true;state.cinematic=false;
+ for(const el of [dom.coinLabel,dom.weaponLabel,dom.shieldLabel,dom.bloodVig,dom.criticalPulse])if(el)el.style.removeProperty('display');
+ if(dom.shieldLabel)dom.shieldLabel.style.display='none';
+ scene.traverse(o=>{if(o.userData.level3Label)o.visible=true;});
+ document.getElementById('lv3-finale')?.remove();lv3Win?.classList.add('hidden');
+ resetDayCycle();writeObjective();updateAmmoHUD();updateCoinHUD();
+ const boss=createBossActor();boss.guardian.dormant=true;boss.guardian.panel.hidden=true;boss.mesh.visible=false;lv3.preparedBoss=boss;
+ await boss.guardian.prepared;
+ if(run!==lv3.run)return;
+ if(!boss.guardian.ready)throw boss.guardian.loadError||new Error('Guardian reset failed');
+ state.narrativeBlocked=false;updateCureDevice(0);writeObjective();
 }

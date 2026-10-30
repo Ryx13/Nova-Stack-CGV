@@ -424,3 +424,6 @@ export function reflectNightSky(material) {
   material.envMap = nightEnv;
   material.needsUpdate = true;
 }
+
+// Retry rewinds this level's progress without rebuilding sky resources.
+export function resetDayCycle(){latched=shown=0;envTimer=nightEnvTimer=0;gradeKey='';updateDayCycle(0);}

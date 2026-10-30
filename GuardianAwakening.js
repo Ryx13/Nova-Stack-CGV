@@ -20,10 +20,12 @@ export function createGuardianAwakening({camera,state,scene,boss,sfx,lights=[]})
  window.addEventListener('keydown',skip,true);window.addEventListener('pointerdown',skip,true);
  setCinematicDuck(.3);sfx.burst('sawtooth',38,2,.035);
  function skip(e){if(!active||state.paused||e.ctrlKey||e.metaKey||e.altKey)return;e.preventDefault();e.stopImmediatePropagation();finish();}
- function finish(){
+ function finish(startFight=true){
   if(!active)return;active=false;
-  guardian.endCinematicPreview();boss.mesh.position.z=-180;
-  guardian.combat.enter('entrance');guardian.activate();
+  if(startFight){
+   guardian.endCinematicPreview();boss.mesh.position.z=-180;
+   guardian.combat.enter('entrance');guardian.activate();
+  }
   lamps.forEach(({o,color,intensity})=>{o.color.copy(color);o.intensity=intensity;});
   camera.position.copy(home);camera.quaternion.copy(rotation);camera.updateMatrixWorld(true);
   overlay.remove();document.body.classList.remove('lv3-intro');window.removeEventListener('keydown',skip,true);window.removeEventListener('pointerdown',skip,true);
@@ -41,5 +43,5 @@ export function createGuardianAwakening({camera,state,scene,boss,sfx,lights=[]})
   if(!reduced&&time>=3&&time<8)camera.position.x+=Math.sin(time*71)*.025;
   camera.updateMatrixWorld(true);if(time>=14)finish();
  }
- return {get active(){return active;},update,skip:finish,destroy:finish};
+ return {get active(){return active;},update,skip:finish,destroy:()=>finish(false)};
 }

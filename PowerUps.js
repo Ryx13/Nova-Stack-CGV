@@ -155,6 +155,7 @@ export class Barrel {
     });
     scene.add(this.mesh);
     this.collisionBody = addStaticBox(0.36, 0.44, 0.36, pos.x, 0.44, pos.z);
+    if(state.levelId===3)level3BarrelObstacles.add(state.obstacles.at(-1));
     state.explosiveBarrels.push(this);
   }
   takeDamage() {
@@ -271,7 +272,11 @@ export function loadBarrels() {
 /* RESTART — clears every drop, coin, blast and spark the run left lying
    around, puts every barrel back (blown or not, so none is doubled up)
    and drops the shield. Called by Actions.js restartLevel(). */
+// Level 3 retries must remove the old barrel avoidance records as well as bodies.
+const level3BarrelObstacles=new Set();
 export function resetPowerUps() {
+  for(const obstacle of level3BarrelObstacles){const i=state.obstacles.indexOf(obstacle);if(i>=0)state.obstacles.splice(i,1);}
+  level3BarrelObstacles.clear();
   for (const list of [state.pickups, state.powerups, state.coinPickups]) {
     list.forEach((p) => scene.remove(p.mesh));
     list.length = 0;
